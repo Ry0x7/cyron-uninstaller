@@ -1,13 +1,15 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
-import { api } from "../../lib/api";
+import { api, errorMessage } from "../../lib/api";
 import { formatBytes, formatCount, formatDate, truncateMiddle } from "../../lib/format";
 import { useAsync } from "../../lib/hooks";
-import type { InstalledApp } from "../../lib/types";
+import type { BatchUninstallReport, InstalledApp } from "../../lib/types";
 import {
   Badge,
   Banner,
   Button,
+  Drawer,
   EmptyState,
+  Eyebrow,
   Panel,
   SearchField,
   Segmented,
@@ -15,7 +17,7 @@ import {
   Skeleton,
   ViewHeader,
 } from "../../components/ui";
-import { IconApps, IconLock, IconRefresh, IconShield } from "../../components/Icons";
+import { IconApps, IconLock, IconPlay, IconRefresh, IconShield, IconTrash } from "../../components/Icons";
 import { AppDrawer } from "./AppDrawer";
 import "./uninstaller.css";
 
@@ -45,7 +47,7 @@ function compareNullableNumber(a: number | null, b: number | null): number {
 
 function installDateSortValue(value: string | null): number | null {
   if (!value) return null;
-  const normalized = /^\\d{8}$/.test(value)
+  const normalized = /^\d{8}$/.test(value)
     ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
     : value;
   const timestamp = Date.parse(normalized);
@@ -53,7 +55,7 @@ function installDateSortValue(value: string | null): number | null {
 }
 
 function normalizeSearch(value: string): string {
-  return value.trim().normalize("NFD").replace(/[\\u0300-\\u036f]/g, "").toLocaleLowerCase();
+  return value.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
 }
 
 export function Uninstaller() {
@@ -62,6 +64,15 @@ export function Uninstaller() {
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [sort, setSort] = useState<SortKey>("name");
   const [selected, setSelected] = useState<InstalledApp | null>(null);
+
+  // Batch selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchQuiet, setBatchQuiet] = useState(true);
+  const [batchConfirm, setBatchConfirm] = useState(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchReport, setBatchReport] = useState<BatchUninstallReport | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
 
   const apps = inventory.data?.apps ?? [];
   const warnings = [...new Set(inventory.data?.warnings ?? [])];
@@ -114,6 +125,25 @@ export function Uninstaller() {
 
   const loading = inventory.status === "loading" && apps.length === 0;
 
+  const toggleSelectRow = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const selectable = visible.filter((a) => !a.isProtected);
+    if (selectedIds.size === selectable.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectable.map((a) => a.id)));
+    }
+  };
+
   const openRow = (app: InstalledApp) => setSelected(app);
   const onRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, app: InstalledApp) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -122,14 +152,34 @@ export function Uninstaller() {
     }
   };
 
+  const selectedApps = useMemo(() => {
+    return apps.filter((a) => selectedIds.has(a.id));
+  }, [apps, selectedIds]);
+
+  const runBatchUninstall = async () => {
+    if (selectedApps.length === 0 || !batchConfirm || batchRunning) return;
+    setBatchRunning(true);
+    setBatchError(null);
+    setBatchReport(null);
+    try {
+      const report = await api.executeBatchUninstall(Array.from(selectedIds), batchQuiet);
+      setBatchReport(report);
+      inventory.reload();
+    } catch (err) {
+      setBatchError(errorMessage(err));
+    } finally {
+      setBatchRunning(false);
+    }
+  };
+
   return (
     <>
       <ViewHeader
         title="Uninstaller"
-        description="Everything Windows reports as installed, read from the machine and user uninstall registry keys."
+        description="Application discovery, process termination, standard/MSI uninstaller execution, and review-first leftover scanning."
         actions={
           <>
-            <Badge tone="safe">Read-only</Badge>
+            <Badge tone="safe">Phase 4 Engine</Badge>
             <Button
               icon={<IconRefresh size={15} />}
               loading={inventory.status === "loading"}
@@ -143,8 +193,8 @@ export function Uninstaller() {
 
       <div className="view-body">
         <Banner tone="accent">
-          <strong>Inventory only.</strong> Standard, force and batch uninstalling plus
-          leftover scanning arrive in Phase 4. Nothing on this screen removes software.
+          <strong>Review-First Uninstaller.</strong> Select an application to view live processes,
+          launch its registered uninstaller, or scan and safely quarantine leftover files and registry keys.
         </Banner>
 
         {warnings.length > 0 && (
@@ -227,9 +277,9 @@ export function Uninstaller() {
               }
               description={
                 inventory.status === "error" && apps.length === 0
-                  ? "The registry could not be read, so this is not an empty inventory. Retry, or check the message above if the problem continues."
+                  ? "The registry could not be read. Retry, or check the message above if the problem continues."
                   : apps.length === 0
-                    ? "Cyron could not read any uninstall entries from the registry. This can happen on a locked-down machine."
+                    ? "Cyron could not read any uninstall entries from the registry."
                     : "Try a different search term or switch the scope filter back to All."
               }
               action={
@@ -251,8 +301,9 @@ export function Uninstaller() {
             <div className="table-wrap un-table">
               <table className="table un-grid">
                 <colgroup>
-                  <col style={{ width: "33%" }} />
-                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "36px" }} />
+                  <col style={{ width: "31%" }} />
+                  <col style={{ width: "19%" }} />
                   <col style={{ width: "10%" }} />
                   <col style={{ width: "12%" }} />
                   <col style={{ width: "11%" }} />
@@ -260,6 +311,17 @@ export function Uninstaller() {
                 </colgroup>
                 <thead>
                   <tr>
+                    <th scope="col" style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all visible non-protected applications"
+                        checked={
+                          selectedIds.size > 0 &&
+                          selectedIds.size === visible.filter((a) => !a.isProtected).length
+                        }
+                        onChange={toggleSelectAll}
+                      />
+                    </th>
                     <th scope="col">Application</th>
                     <th scope="col">Publisher</th>
                     <th scope="col">Version</th>
@@ -282,6 +344,15 @@ export function Uninstaller() {
                       onClick={() => openRow(app)}
                       onKeyDown={(event) => onRowKeyDown(event, app)}
                     >
+                      <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          disabled={app.isProtected}
+                          checked={selectedIds.has(app.id)}
+                          onChange={() => {}}
+                          onClick={(e) => toggleSelectRow(app.id, e)}
+                        />
+                      </td>
                       <td>
                         <div className="cell-name">
                           <span className="cell-name__title un-name" title={app.name}>
@@ -326,16 +397,145 @@ export function Uninstaller() {
           )}
         </Panel>
 
-        {visible.length > 0 && (
-          <p className="un-footnote">
-            <IconShield size={13} /> Sizes are installer estimates from the registry, not scanned
-            folder sizes. Open an application to measure its install folder for real.
-          </p>
+        {/* Selection Bar for Batch Actions */}
+        {selectedIds.size > 0 && (
+          <div className="un-selection-bar">
+            <span className="un-selection-bar__count">
+              {formatCount(selectedIds.size)} application{selectedIds.size === 1 ? "" : "s"} selected
+            </span>
+            <div className="row" style={{ gap: 8 }}>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                icon={<IconTrash size={14} />}
+                onClick={() => setBatchOpen(true)}
+              >
+                Batch Uninstall…
+              </Button>
+            </div>
+          </div>
         )}
 
+        {visible.length > 0 && (
+          <p className="un-footnote">
+            <IconShield size={13} /> Sizes are installer estimates from the registry. Open an
+            application to measure its install folder for real and manage processes or leftovers.
+          </p>
+        )}
       </div>
 
-      <AppDrawer app={selected} onClose={() => setSelected(null)} />
+      {/* Detail Drawer */}
+      <AppDrawer
+        app={selected}
+        onClose={() => setSelected(null)}
+        onUninstallSuccess={() => inventory.reload()}
+      />
+
+      {/* Batch Uninstall Drawer */}
+      {batchOpen && (
+        <Drawer
+          open
+          title="Batch Uninstall"
+          subtitle={`Sequential execution for ${selectedApps.length} applications`}
+          onClose={() => setBatchOpen(false)}
+          footer={
+            <>
+              <Button
+                variant="danger"
+                icon={<IconPlay size={14} />}
+                loading={batchRunning}
+                disabled={!batchConfirm || batchRunning}
+                onClick={runBatchUninstall}
+              >
+                {batchRunning ? "Executing queue…" : `Start Batch Uninstall (${selectedApps.length})`}
+              </Button>
+              <Button variant="ghost" disabled={batchRunning} onClick={() => setBatchOpen(false)}>
+                Close
+              </Button>
+            </>
+          }
+        >
+          <div className="stack" style={{ gap: 12 }}>
+            <Banner tone="info">
+              Applications are uninstalled sequentially. Uninstaller exit codes and failures are
+              isolated so one failure does not halt the queue.
+            </Banner>
+
+            <Eyebrow>Queued applications ({selectedApps.length})</Eyebrow>
+            <div className="un-batch-queue">
+              {selectedApps.map((a) => {
+                const itemRes = batchReport?.results.find((r) => r.appId === a.id);
+                return (
+                  <div key={a.id} className="un-batch-item">
+                    <div>
+                      <strong>{a.name}</strong>
+                      {a.version && <span className="mono"> v{a.version}</span>}
+                    </div>
+                    <div>
+                      {itemRes ? (
+                        <Badge
+                          tone={
+                            itemRes.status === "completed"
+                              ? "safe"
+                              : itemRes.status === "restart_required"
+                              ? "caution"
+                              : "danger"
+                          }
+                        >
+                          {itemRes.status.toUpperCase()}
+                        </Badge>
+                      ) : (
+                        <Badge tone="neutral">Queued</Badge>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <label className="un-confirm-box">
+              <input
+                type="checkbox"
+                checked={batchQuiet}
+                onChange={(e) => setBatchQuiet(e.target.checked)}
+              />
+              <span>Use silent / quiet uninstallation switch where vendor uninstaller supports it</span>
+            </label>
+
+            <label className="un-confirm-box">
+              <input
+                type="checkbox"
+                checked={batchConfirm}
+                onChange={(e) => setBatchConfirm(e.target.checked)}
+              />
+              <span>
+                I confirm sequentially uninstalling these {selectedApps.length} applications. Leftover
+                scanning will remain review-first and must be run separately.
+              </span>
+            </label>
+
+            {batchReport && (
+              <Banner
+                tone={
+                  batchReport.failed === 0
+                    ? "safe"
+                    : batchReport.completed > 0
+                    ? "caution"
+                    : "danger"
+                }
+              >
+                <strong>Batch complete:</strong> {batchReport.completed} completed,{" "}
+                {batchReport.restartRequired} restart required, {batchReport.failed} failed.
+              </Banner>
+            )}
+
+            {batchError && <p className="un-inline-error">{batchError}</p>}
+          </div>
+        </Drawer>
+      )}
     </>
   );
 }

@@ -4,14 +4,13 @@
 
 Cyron is a Tauri v2 desktop application for Windows. Scanning is read-only: the backend enumerates
 applications, measures folders, scans a disk tree, verifies duplicate files and reports storage
-categories and volumes. Cleaning is a separate, deliberately narrow path: the backend can move
-**catalog cache files only** into a recoverable quarantine after a preview and an explicit plan
-confirmation. It does not uninstall software, terminate processes or write registry values.
-`clear_history` removes only Cyron's own `history.json`, and history replacement can remove only a
-Cyron-created temporary file.
+categories and volumes. Cleaning is a separate, review-first path: the backend can move
+catalog cache files into a recoverable quarantine after a preview and an explicit plan confirmation.
+Phase 4 adds standard application uninstallation, critical-process-guarded process management,
+leftover detection, automated registry backups, and sequential batch uninstallation.
 
 The product target is a Revo Uninstaller + BleachBit + WinDirStat replacement with better risk
-communication for non-technical users. Phase 4 adds the uninstall engine.
+communication for non-technical users.
 
 ## Runtime stack
 
@@ -20,9 +19,9 @@ communication for non-technical users. Phase 4 adds the uninstall engine.
 | Window/shell | Tauri v2, one native window (`main`), 1320×860, minimum 1000×680 |
 | Frontend | React 19 + TypeScript, Vite 7, no router |
 | Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
-| Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json` and `quarantine/` in the Tauri app-data dir |
-| Frontend tests | Vitest, 70 tests in 7 files |
-| Backend tests | `cargo test`: 84 passed (73 unit, 5 read-only, 1 real-system, 5 stress), 3 ignored |
+| Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json`, `recovery_journal.jsonl` and `quarantine/` in the Tauri app-data dir |
+| Frontend tests | Vitest, 71 tests in 7 files |
+| Backend tests | `cargo test`: 148 passed (116 unit, 21 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress), 3 ignored |
 
 Native APIs used by the backend:
 
@@ -30,7 +29,9 @@ Native APIs used by the backend:
 - Raw volume reads (`\\.\X:`) plus `DeviceIoControl`/`FSCTL_GET_NTFS_VOLUME_DATA`-style metadata for
   MFT scanning.
 - `GetLogicalDrives`, `GetDriveTypeW`, `GetVolumeInformationW`, `GetDiskFreeSpaceExW` for volumes.
-- Win32 registry access through `winreg` for installed applications.
+- Win32 registry access through `winreg` for installed applications and leftover cleaning.
+- `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` for atomic no-overwrite restoration.
+- `CreateToolhelp32Snapshot`, `Process32FirstW`, `Process32NextW`, `QueryFullProcessImageNameW`, `OpenProcess`, `TerminateProcess`, `EnumWindows`, `PostMessageW(WM_CLOSE)` for process management.
 - `GetTokenInformation` for an elevation check (the app never requests elevation).
 
 ## Repository layout
@@ -65,10 +66,13 @@ src-tauri/
   src/duplicates.rs           size buckets, partial + full hashing
   src/storage.rs              categories, age buckets, insights
   src/caches.rs               cache catalog, env expansion, measurement
-  src/cleanup.rs              cleanup guard, preview, quarantine, restore, purge, log
+  src/cleanup.rs              cleanup guard, preview, quarantine, recovery journal, restore, purge, log
+  src/process.rs              process discovery, critical-process protection, controlled termination
+  src/uninstall.rs            safe command parsing, uninstaller execution, exit code tracking
+  src/leftovers.rs            leftover scanning, registry backup, residual quarantine
   src/volumes.rs              local volume capacity
   src/history.rs              app-data history persistence
-  src/commands.rs             validated Tauri command layer, scan and plan registries
+  src/commands.rs             validated Tauri command layer (26 commands)
   src/lib.rs                  state, dialog plugin, command registration
   tests/real_system.rs        live registry/cache/scan integration test
   tests/security.rs           permission boundaries, protected paths, links, fixtures

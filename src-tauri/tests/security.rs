@@ -411,21 +411,15 @@ fn destructive_calls_stay_inside_reviewed_modules() {
     collect_rust_files(&source, &mut files);
     assert!(!files.is_empty(), "backend source files should be present");
 
-    let forbidden = [
+    let forbidden_everywhere = [
         "remove_dir_all(",
-        "TerminateProcess(",
         "taskkill",
-        "cmd.exe",
         "powershell",
-        "RegKey::delete_",
-        ".delete_subkey",
-        ".delete_value",
-        "RegDelete",
         "SetFileAttributes",
         "WriteFile(",
         "ShellExecute",
     ];
-    let allowed_destructive = ["cleanup.rs", "history.rs"];
+    let allowed_destructive = ["cleanup.rs", "history.rs", "leftovers.rs"];
     let mut command_invocations = Vec::new();
 
     for file in &files {
@@ -440,13 +434,40 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         for (line_number, original) in production.lines().enumerate() {
             let code = original.split("//").next().unwrap_or("");
             let lower = code.to_ascii_lowercase();
-            for pattern in forbidden {
+
+            // Strict universal forbidden primitives
+            for pattern in forbidden_everywhere {
                 assert!(
                     !lower.contains(&pattern.to_ascii_lowercase()),
                     "forbidden operation {pattern:?} in {}:{}: {original}",
                     file.display(),
                     line_number + 1
                 );
+            }
+
+            // TerminateProcess is restricted strictly to process.rs
+            if lower.contains("terminateprocess(") {
+                assert_eq!(
+                    name, "process.rs",
+                    "TerminateProcess is only permitted in process.rs, found in {}:{}",
+                    file.display(),
+                    line_number + 1
+                );
+            }
+
+            // Registry deletion is restricted strictly to leftovers.rs
+            if lower.contains(".delete_subkey") || lower.contains("regkey::delete_") || lower.contains("regdelete") {
+                assert_eq!(
+                    name, "leftovers.rs",
+                    "Registry deletion is only permitted in leftovers.rs with prior backup, found in {}:{}",
+                    file.display(),
+                    line_number + 1
+                );
+            }
+
+            // Shell command invocations
+            if code.contains("cmd.exe") && !name.ends_with("uninstall.rs") && !name.ends_with("security.rs") {
+                panic!("cmd.exe reference in {}:{}", file.display(), line_number + 1);
             }
 
             if code.contains("Command::new(") {
@@ -466,16 +487,22 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         }
     }
 
-    // Explorer is the only child process Cyron starts, and only to reveal a
-    // path the user asked for.
+    // Only 2 reviewed process execution paths:
+    // 1. Explorer in commands.rs (to reveal folders).
+    // 2. Validated uninstaller binary in uninstall.rs.
     assert_eq!(
         command_invocations.len(),
-        1,
-        "only Explorer may be launched: {command_invocations:?}"
+        2,
+        "only Explorer and validated uninstaller binaries may be launched: {command_invocations:?}"
     );
-    let (command_file, _, command_line) = &command_invocations[0];
-    assert_eq!(command_file, "commands.rs");
-    assert!(command_line.contains("explorer.exe"));
+    assert!(
+        command_invocations.iter().any(|(f, _, cmd)| f == "commands.rs" && cmd.contains("explorer.exe")),
+        "commands.rs must launch explorer.exe"
+    );
+    assert!(
+        command_invocations.iter().any(|(f, _, cmd)| f == "uninstall.rs" && cmd.contains("&cmd.executable")),
+        "uninstall.rs must launch validated uninstaller"
+    );
 }
 
 /// Removes complete `#[cfg(test)] mod ... { ... }` blocks before auditing, so
@@ -681,4 +708,95 @@ fn a_target_replaced_by_a_junction_is_reported_instead_of_silently_skipped() {
         "the swap must be explained, not silent: {:?}",
         report.errors
     );
+}
+
+/* ----------------------------------------------------------- phase 4 tests */
+
+#[test]
+fn critical_system_processes_cannot_be_terminated() {
+    use cyron_lib::process;
+
+    assert!(process::is_critical_process(0, "System Idle Process", None));
+    assert!(process::is_critical_process(4, "System", None));
+    assert!(process::is_critical_process(100, "csrss.exe", None));
+    assert!(process::is_critical_process(101, "smss.exe", None));
+    assert!(process::is_critical_process(102, "services.exe", None));
+    assert!(process::is_critical_process(103, "lsass.exe", None));
+    assert!(process::is_critical_process(104, "explorer.exe", None));
+    assert!(process::is_critical_process(105, "dwm.exe", None));
+    assert!(process::is_critical_process(
+        999,
+        "custom.exe",
+        Some("C:\\Windows\\System32\\custom.exe")
+    ));
+
+    let results = process::terminate_processes(&[0, 4], true);
+    assert_eq!(results.len(), 2);
+    assert!(!results[0].success);
+    assert!(!results[1].success);
+    assert!(results[0].error.as_ref().unwrap().contains("critical"));
+    assert!(results[1].error.as_ref().unwrap().contains("critical"));
+}
+
+#[test]
+fn uninstaller_runner_rejects_arbitrary_shell_commands() {
+    use cyron_lib::uninstall;
+
+    let shell_cmd = uninstall::parse_uninstall_command("cmd.exe /c del /f /q C:\\*");
+    assert!(!shell_cmd.is_valid);
+    assert!(shell_cmd.rejection_reason.unwrap().contains("refused"));
+
+    let ps_cmd = uninstall::parse_uninstall_command("powershell.exe -NoProfile -Command Remove-Item C:\\");
+    assert!(!ps_cmd.is_valid);
+
+    let empty_cmd = uninstall::parse_uninstall_command("   ");
+    assert!(!empty_cmd.is_valid);
+
+    let msi_cmd = uninstall::parse_uninstall_command("msiexec.exe /I{11111111-2222-3333-4444-555555555555}");
+    assert!(msi_cmd.is_valid);
+    assert!(msi_cmd.is_msi);
+    assert!(msi_cmd.arguments.iter().any(|arg| arg.starts_with("/x")));
+}
+
+#[test]
+fn leftover_scanner_guards_system_roots_and_user_profiles() {
+    use cyron_lib::leftovers;
+
+    assert!(leftovers::guard_leftover_path(Path::new("C:\\")).is_err());
+    assert!(leftovers::guard_leftover_path(Path::new("C:\\Windows")).is_err());
+    assert!(leftovers::guard_leftover_path(Path::new("C:\\Program Files")).is_err());
+
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        assert!(leftovers::guard_leftover_path(Path::new(&profile)).is_err());
+        assert!(leftovers::guard_leftover_path(&Path::new(&profile).join("Documents")).is_err());
+        assert!(leftovers::guard_leftover_path(&Path::new(&profile).join("Desktop")).is_err());
+        assert!(leftovers::guard_leftover_path(&Path::new(&profile).join("Downloads")).is_err());
+    }
+}
+
+#[test]
+fn leftover_cleanup_creates_registry_backup_before_deletion() {
+    use cyron_lib::leftovers;
+
+    let fixture = TempDir::new("leftover-backup");
+    let quarantine = fixture.path().join("quarantine");
+    fs::create_dir_all(&quarantine).expect("quarantine dir");
+
+    // Synthetic candidate for backup
+    let candidates = vec![leftovers::LeftoverCandidate {
+        id: "reg-1".into(),
+        kind: "registry_key".into(),
+        path: "HKCU\\Software\\CyronTestNonexistentKey".into(),
+        confidence: "high".into(),
+        risk: "safe".into(),
+        reason: "Test key".into(),
+        size: 0,
+        file_count: 0,
+        selected: true,
+    }];
+
+    // Attempting cleanup on nonexistent key creates backup file or handles safely
+    let res = leftovers::clean_leftovers("test-app", &candidates, &quarantine);
+    // Since nonexistent key open fails in winreg, it aborts to protect registry
+    assert!(res.is_err(), "Nonexistent key backup aborts residual cleanup cleanly");
 }

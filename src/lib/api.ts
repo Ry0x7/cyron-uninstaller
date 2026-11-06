@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppInventory,
+  AppProcess,
+  BatchUninstallReport,
   CacheInventory,
   CleanupLogEntry,
   CleanupPreview,
@@ -8,12 +10,18 @@ import type {
   DuplicateOptions,
   DuplicateReport,
   HistoryEntry,
+  LeftoverCandidate,
+  LeftoverCleanReport,
+  LeftoverScanReport,
   Measured,
+  ParsedUninstallCommand,
+  ProcessTerminateResult,
   PurgeReport,
   QuarantineBatch,
   RestoreReport,
   ScanOptions,
   ScanResult,
+  UninstallExecutionResult,
   VolumeInfo,
 } from "./types";
 
@@ -83,6 +91,20 @@ export const api = {
     call<RestoreReport>("restore_quarantine", { runId }),
   purgeQuarantine: (runId: string) => call<PurgeReport>("purge_quarantine", { runId }),
   getCleanupLog: () => call<CleanupLogEntry[]>("get_cleanup_log"),
+  discoverAppProcesses: (installLocation: string | null) =>
+    call<AppProcess[]>("discover_app_processes", { installLocation }),
+  terminateAppProcesses: (pids: number[], force: boolean) =>
+    call<ProcessTerminateResult[]>("terminate_app_processes", { pids, force }),
+  parseUninstallCommand: (rawCommand: string) =>
+    call<ParsedUninstallCommand>("parse_uninstall_command", { rawCommand }),
+  executeUninstall: (appId: string, command: ParsedUninstallCommand, timeoutSecs?: number) =>
+    call<UninstallExecutionResult>("execute_uninstall", { appId, command, timeoutSecs }),
+  scanAppLeftovers: (appId: string, appName: string, publisher?: string | null, installLocation?: string | null) =>
+    call<LeftoverScanReport>("scan_app_leftovers", { appId, appName, publisher, installLocation }),
+  cleanAppLeftovers: (appId: string, candidates: LeftoverCandidate[]) =>
+    call<LeftoverCleanReport>("clean_app_leftovers", { appId, candidates }),
+  executeBatchUninstall: (appIds: string[], quiet = false) =>
+    call<BatchUninstallReport>("execute_batch_uninstall", { appIds, quiet }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

@@ -1,27 +1,26 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-06 (Phase 3 complete)
+Updated: 2026-11-06 (Phase 4 complete & Priority 0 hardening)
 
 ## Current status
 
-Phases 1–3 are implemented across the Rust backend and React interface. Cyron discovers installed
+Phases 1–4 are implemented across the Rust backend and React interface. Cyron discovers installed
 Windows applications, scans folders with an NTFS MFT reader or a streaming directory walk, renders a
 treemap with a persistent synchronized folder tree, verifies duplicates, categorizes storage,
-measures 48 developer/AI/Windows cache locations, and **cleans 36 of them safely**: preview, explicit
-confirmation, move into a recoverable quarantine, per-item results, restore or purge, and a local
-operation log.
+measures 48 developer/AI/Windows cache locations, cleans caches safely via recoverable quarantine,
+**uninstalls applications with exit-code tracking and reboot alerts, terminates associated processes safely,
+scans leftovers with risk ratings, exports registry backups, cleans residuals into quarantine, and executes
+sequential batch uninstall queues with failure isolation.**
 
-There is still **no uninstall, process termination or registry-write path**. Cleaning accepts target
-*ids* from the fixed catalog only, never arbitrary paths, and protected data is refused by the
-backend rather than hidden by the UI.
+Priority 0 cleanup recovery risks have been hardened: durable crash-consistent write-ahead recovery
+journal (`recovery_journal.jsonl`), atomic Win32 `MoveFileExW` no-overwrite restore, approved preview snapshot
+binding, purge preservation for safe retry on locked files, and quarantine storage & low-space limits.
 
-Latest measured checks: typecheck clean; **70 frontend tests in 7 files pass**; **133 Rust tests
-pass** (105 unit, 17 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress) with 3 ignored;
-`CLEANUP_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`. No real user cache was
-cleaned during verification — the engine was exercised against isolated `%TEMP%` fixtures only.
-Release MSI/NSIS packaging and signing remain unverified. The Phase 3 Cleaner was captured
-visually in both themes (G13), which found and fixed two defects: preview was blocked by read-only
-mode, and Overview joined its cache warnings into one run-on sentence.
+Latest measured checks: typecheck clean; **71 frontend tests in 7 files pass**; **148 Rust tests
+pass** (116 unit, 21 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress) with 3 ignored;
+`CLEANUP_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`. No real user application was
+uninstalled during automated verification — engines were exercised against isolated fixtures only.
+Release MSI/NSIS packaging and signing remain unverified.
 
 ## Implemented
 
@@ -84,37 +83,63 @@ mode, and Overview joined its cache warnings into one run-on sentence.
 - **Catalog adjustment**: the Windows Update download cache moved to `protected` so Cyron never
   manipulates servicing state; final split is 27 safe / 9 caution / 12 protected.
 
+### Phase 4 & Priority 0 Hardening
+
+- **Process manager** (`src-tauri/src/process.rs`, new): discovers active processes executing from the
+  application installation directory. Enforces critical system process protection (`csrss.exe`,
+  `services.exe`, `explorer.exe`, etc.) and denies termination of system directory binaries. Sends
+  graceful `WM_CLOSE` to top-level windows before falling back to `TerminateProcess`.
+- **Standard uninstaller** (`src-tauri/src/uninstall.rs`, new): safely tokenizes registry uninstall
+  commands, normalizes MSI uninstallers (`msiexec.exe /x`), rejects shell wrappers (`cmd.exe`,
+  `powershell.exe`, `.bat`, `.cmd`, `.ps1`), verifies executable presence, runs uninstaller without
+  arbitrary shell interpolation, tracks exit codes, and surfaces reboot requirements (code 3010).
+- **Leftover scanner & recovery** (`src-tauri/src/leftovers.rs`, new): scans likely leftover directories
+  and registry subkeys for uninstalled apps with confidence (`high`/`medium`/`low`) and risk
+  (`safe`/`caution`/`protected`) classification. Protects shared vendor folders and system roots.
+  Automatically exports registry backup (`.reg`) into the quarantine run batch prior to deleting any
+  registry subkey. Quarantines file/directory leftovers using the crash-consistent recovery engine.
+- **Batch uninstaller**: sequential execution queue with isolated per-item results and exit codes.
+  Prevents automatic follow-up cleanup approval, requiring separate user review before residual deletion.
+- **Priority 0 cleanup recovery hardening**:
+  - Durable crash-consistent write-ahead recovery journal (`recovery_journal.jsonl`) written and
+    flushed before any file move. Corrupted or missing manifests reconstruct automatically.
+  - Atomic no-overwrite restoration using Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`,
+    preventing destination overwrite races.
+  - Snapshot binding: files created after preview approval are detected and skipped with warnings.
+  - Safe purge retry: locked files leave remaining manifest and journal items intact.
+  - Quarantine storage caps (`MAX_QUARANTINE_TOTAL_BYTES` = 20 GiB) and minimum free disk space check
+    (`MIN_FREE_SPACE_BYTES` = 512 MiB via Win32 `GetDiskFreeSpaceExW`).
+- **UI Integration**: `AppDrawer.tsx` extended with Segmented tabs (Overview, Processes, Uninstall, Leftovers),
+  live process management, uninstaller execution launcher, and leftover scanner with candidate selection.
+  `Uninstaller.tsx` updated with multi-select checkboxes and a bottom batch uninstall drawer.
+
 ## Key files
 
-- `src-tauri/src/cleanup.rs`: cleanup engine, guard, quarantine, log.
-- `src-tauri/src/commands.rs`: 19 validated commands, plan registry, read-only switch.
-- `src-tauri/tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`: Phase 3
-  safety evidence.
-- `src/features/cleaner/Cleaner.tsx`, `src/lib/cleanup.ts`, `src/lib/risk.ts`: Cleaner UI and
-  selection rules.
-- `src-tauri/src/mft.rs`, `scan.rs`, `fs.rs`, `duplicates.rs`, `storage.rs`: scanners and Phase 2
-  analysis.
-- `src-tauri/src/apps.rs`, `caches.rs`, `volumes.rs`, `history.rs`, `lib.rs`: Windows inventory,
-  catalog, persistence and app state.
-- `src/features/analyzer/*`, `src/App.tsx`, `src/lib/settings.tsx`: shell, analyzer and settings.
-- `GATES.md`: Phase 3 acceptance ledger with recorded evidence.
-- `docs/BENCHMARKS.md`: measured scanner results.
+- `src-tauri/src/process.rs`: process discovery, critical process deny list, termination.
+- `src-tauri/src/uninstall.rs`: safe uninstaller tokenization, execution, exit code handling.
+- `src-tauri/src/leftovers.rs`: leftover detection, .reg backup, residual cleanup.
+- `src-tauri/src/cleanup.rs`: cleanup engine, recovery journal, quarantine, guard, log.
+- `src-tauri/src/commands.rs`: 26 validated commands, process/uninstall/leftover IPC.
+- `src-tauri/tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`: security & stress evidence.
+- `src/features/uninstaller/AppDrawer.tsx`, `Uninstaller.tsx`: uninstaller UI, drawer tabs, batch queue.
+- `src/lib/api.ts`, `src/lib/types.ts`: IPC contracts.
+- `GATES.md`: Phase 4 acceptance ledger with recorded evidence.
 
 ## Verification
 
 | Check | Command | Last result |
 | --- | --- | --- |
 | TypeScript | `npm run typecheck` | Pass |
-| Frontend tests | `npm test` | 70/70 pass, 7 files |
-| Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` |
-| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 133 pass, 3 ignored |
-| Permission boundaries | `... --test security -- --nocapture` | 17/17 pass |
+| Frontend tests | `npm test` | 71/71 pass, 7 files |
+| Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` (448.7 KiB) |
+| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 148 pass, 3 ignored |
+| Permission boundaries | `... --test security -- --nocapture` | 21/21 pass |
 | Cleanup stress | `... --test cleanup_stress -- --nocapture` | 5/5 pass |
 | Cleanup fixture | `node scripts/verify-cleanup.mjs` | `CLEANUP_FIXTURE_OK` |
 | Real system | `... --test real_system -- --nocapture` | Pass |
 | Scanner stress | `... --test stress_scan -- --nocapture` | 5/5 pass (1 ignored 20k-file test) |
-| Desktop binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` |
-| Launch | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` |
+| Desktop binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` (15.73 MiB) |
+| Launch | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` ("Cyron") |
 | Cleaner UI pass | Native window, both themes, `scripts/capture-window.ps1` | Pass — 28/48 locations exist, 24.8 GB detected; two defects fixed |
 | Windows CI | GitHub Actions | Workflow extended; remote run not observed |
 

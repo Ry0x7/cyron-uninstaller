@@ -5,9 +5,12 @@ pub mod commands;
 pub mod duplicates;
 pub mod fs;
 pub mod history;
+pub mod leftovers;
 pub mod mft;
+pub mod process;
 pub mod scan;
 pub mod storage;
+pub mod uninstall;
 pub mod volumes;
 
 use std::collections::HashMap;
@@ -61,6 +64,13 @@ pub fn run() {
             commands::restore_quarantine,
             commands::purge_quarantine,
             commands::get_cleanup_log,
+            commands::discover_app_processes,
+            commands::terminate_app_processes,
+            commands::parse_uninstall_command,
+            commands::execute_uninstall,
+            commands::scan_app_leftovers,
+            commands::clean_app_leftovers,
+            commands::execute_batch_uninstall,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");

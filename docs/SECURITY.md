@@ -2,19 +2,25 @@
 
 ## Scope and assets
 
-Cyron (Phases 1–3) is a local Windows desktop scanner and cache cleaner. It reads
-installed-application metadata, enumerates filesystem metadata with either an NTFS MFT reader or a
-directory walk, verifies duplicate file content by hashing, classifies storage, measures a fixed
-catalog of 48 cache locations, and can move 36 of them into a per-user quarantine with restore.
+Cyron (Phases 1–4) is a local Windows desktop scanner, cache cleaner and application uninstaller.
+It reads installed-application metadata, enumerates filesystem metadata with either an NTFS MFT reader
+or a directory walk, verifies duplicate file content by hashing, classifies storage, measures a fixed
+catalog of 48 cache locations, moves caches and leftovers into a per-user recoverable quarantine with
+atomic restore, safely executes standard application uninstallers, and controls associated application
+processes with strict critical-process safeguards.
 
 Protected assets: repositories and source code, credentials, SSH keys and tokens, application
 settings, AI conversation histories and memories, AI model weights, Docker images/volumes/containers,
 WSL distributions, browser profiles/history/cookies/passwords, the registry, Windows servicing state,
-and the integrity of the scan and cleanup results.
+critical Windows system processes, and the integrity of the scan, quarantine, and recovery journals.
 
-Cyron does not uninstall applications, terminate processes, write registry values, stop services or
-invoke a shell. The only launched child process is `explorer.exe`, used to reveal a validated
-existing path on explicit user action. `clear_history` removes only Cyron's own `history.json`.
+Child processes are strictly controlled:
+1. `explorer.exe` is launched solely to reveal a validated existing path on explicit user action.
+2. Registered application uninstallers are launched only after tokenization, rejection of shell wrappers
+   (`cmd.exe`, `powershell.exe`, batch scripts), and explicit operator confirmation.
+3. Processes can only be terminated if their executable resides strictly within the target application's
+   install directory, and critical system processes are unconditionally protected.
+4. Registry key deletion for leftovers is strictly guarded and preceded by an automated `.reg` backup.
 
 ## Trust boundaries
 
@@ -91,32 +97,32 @@ existing path on explicit user action. `clear_history` removes only Cyron's own 
 There is no application network or telemetry code. Scanned paths, duplicate hashes, quarantine
 manifests and the cleanup log remain local. Cyron contains no network feature.
 
-## Gates before further destructive capabilities
+## Gates satisfied across Phases 3 and 4
 
-Phase 3 implements items 1–8 below for **file cleanup over a fixed catalog**. Phase 4 (uninstall,
-process handling, leftover registry removal) must satisfy them again for each new capability, and
-must not reuse the file-cleanup plan as a shortcut:
+Phases 3 and 4 satisfy all safety requirements for file cleanup, process termination, uninstaller
+execution, and residual leftover management:
 
 1. A narrowly scoped provider that derives eligible targets from a reviewed catalog or verified
-   application metadata, never from a user-controlled arbitrary path or name alone. *(Phase 3:
-   satisfied — ids only.)*
+   application metadata, never from a user-controlled arbitrary path or name alone. *(Phase 3 & 4:
+   satisfied — catalog ids and verified application install roots only.)*
 2. A dry-run preview showing exact paths/registry values/processes, expected impact, risk and
-   reasons, with protected locations excluded by backend enforcement. *(Phase 3: satisfied for
-   files.)*
+   reasons, with protected locations excluded by backend enforcement. *(Satisfied for files, processes,
+   and registry leftovers.)*
 3. Explicit, contextual confirmation immediately before execution, with revalidation of identity and
-   scope to defeat time-of-check/time-of-use changes. *(Phase 3: satisfied — plan TTL, selection
-   re-check, per-file metadata and parent revalidation.)*
+   scope to defeat time-of-check/time-of-use changes. *(Satisfied — plan TTL, selection re-check,
+   snapshot binding, per-file metadata and parent revalidation.)*
 4. Path canonicalization, boundary checks, reparse-point checks, and safeguards against root, profile,
-   repository, credential, model, Docker/WSL and shared-dependency removal. *(Phase 3: satisfied for
-   the catalog; shared dependencies are Phase 4.)*
+   repository, credential, model, Docker/WSL and shared-dependency removal. *(Satisfied for catalog
+   caches and leftover paths; system roots and top-level profile folders refused.)*
 5. Registry export/backup before registry modifications, plus rollback/recovery for supported file
-   operations and clear reporting when rollback is impossible. *(Phase 3: quarantine satisfies the
-   file half; no registry path exists.)*
+   operations and clear reporting when rollback is impossible. *(Satisfied — automatic `.reg` backup
+   to quarantine batch folder before subkey deletion; durable write-ahead recovery journal for files.)*
 6. Process identity checks and critical-process protection before termination; never use shell
-   interpolation for process control or uninstall execution. *(Phase 4 — not implemented.)*
+   interpolation for process control or uninstall execution. *(Satisfied — executable path must be
+   inside application root; critical system processes protected; Win32 APIs used without shells.)*
 7. An append-only or otherwise tamper-aware operation record with outcome, timing and recovery
-   details, never logging secrets or file contents. *(Phase 3: `cleanup-log.json` plus Activity
-   entries; it is a local capped file, not tamper-proof.)*
+   details, never logging secrets or file contents. *(Satisfied — write-ahead recovery journal,
+   manifest, `cleanup-log.json`, and Activity entries.)*
 8. Tests against temporary fixtures and faulted conditions, including permissions, races, locked
    files, reparse points and rollback failure, plus a security review before release. *(Phase 3:
    `tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`; review pending a

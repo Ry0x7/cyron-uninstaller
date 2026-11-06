@@ -33,10 +33,49 @@ if (!binary) fail(`no desktop binary found. Looked in:\n  ${candidates.join("\n 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function mainWindowTitle(pid) {
-  const script = [
-    `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
-    "if ($p) { $p.MainWindowTitle }",
-  ].join("; ");
+  const script = `
+$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue
+if ($p -and $p.MainWindowTitle) {
+  Write-Output $p.MainWindowTitle
+  exit
+}
+try {
+  $def = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class WinSmokeHelper {
+    public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    public static string FindTitle(uint targetPid) {
+        string found = "";
+        EnumWindows((hWnd, lParam) => {
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (pid == targetPid && IsWindowVisible(hWnd)) {
+                StringBuilder sb = new StringBuilder(256);
+                GetWindowText(hWnd, sb, 256);
+                string t = sb.ToString();
+                if (!string.IsNullOrEmpty(t)) {
+                    found = t;
+                    if (t.IndexOf("cyron", StringComparison.OrdinalIgnoreCase) >= 0) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+'@
+  Add-Type -TypeDefinition $def -ErrorAction SilentlyContinue
+  [WinSmokeHelper]::FindTitle(${pid})
+} catch {}
+`;
   const result = spawnSync(
     "powershell",
     ["-NoProfile", "-NonInteractive", "-Command", script],

@@ -1,5 +1,6 @@
 use crate::scan::{self, ScanProgress, ScanResult};
-use crate::{apps, caches, cleanup, duplicates, history, mft, volumes, AppState};
+use crate::{apps, caches, cleanup, duplicates, history, leftovers, mft, process, uninstall, volumes, AppState};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -655,6 +656,201 @@ pub fn get_cleanup_log(app: tauri::AppHandle) -> Vec<cleanup::CleanupLogEntry> {
         .unwrap_or_default()
 }
 
+/* ----------------------------------------------------------------- phase 4 */
+
+#[tauri::command]
+pub async fn discover_app_processes(install_location: Option<String>) -> Result<Vec<process::AppProcess>, String> {
+    run_blocking("Process discovery", move || {
+        process::discover_app_processes(install_location.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn terminate_app_processes(pids: Vec<u32>, force: bool) -> Result<Vec<process::ProcessTerminateResult>, String> {
+    if pids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if pids.len() > 64 {
+        return Err("Cannot terminate more than 64 processes at once.".into());
+    }
+    run_blocking("Process termination", move || {
+        process::terminate_processes(&pids, force)
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn parse_uninstall_command(raw_command: String) -> uninstall::ParsedUninstallCommand {
+    uninstall::parse_uninstall_command(&raw_command)
+}
+
+#[tauri::command]
+pub async fn execute_uninstall(
+    app_id: String,
+    command: uninstall::ParsedUninstallCommand,
+    timeout_secs: Option<u64>,
+) -> Result<uninstall::UninstallExecutionResult, String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let timeout = timeout_secs.unwrap_or(600);
+    run_blocking("Standard uninstall", move || {
+        uninstall::execute_uninstaller(&app_id, &command, &cancel, timeout)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn scan_app_leftovers(
+    app_id: String,
+    app_name: String,
+    publisher: Option<String>,
+    install_location: Option<String>,
+) -> Result<leftovers::LeftoverScanReport, String> {
+    run_blocking("Leftover scan", move || {
+        leftovers::scan_app_leftovers(&app_id, &app_name, publisher.as_deref(), install_location.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn clean_app_leftovers(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    app_id: String,
+    candidates: Vec<leftovers::LeftoverCandidate>,
+) -> Result<leftovers::LeftoverCleanReport, String> {
+    ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
+    let quarantine_root = cleanup_quarantine_root(&app)?;
+    run_blocking("Leftover cleanup", move || {
+        leftovers::clean_leftovers(&app_id, &candidates, &quarantine_root)
+    })
+    .await?
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUninstallItemResult {
+    pub app_id: String,
+    pub name: String,
+    pub status: String,
+    pub exit_code: Option<i32>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUninstallReport {
+    pub total: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub restart_required: usize,
+    pub results: Vec<BatchUninstallItemResult>,
+}
+
+#[tauri::command]
+pub async fn execute_batch_uninstall(
+    app_ids: Vec<String>,
+    quiet: bool,
+) -> Result<BatchUninstallReport, String> {
+    if app_ids.is_empty() {
+        return Err("Select at least one application to uninstall.".into());
+    }
+    if app_ids.len() > 32 {
+        return Err("Select at most 32 applications for batch uninstall.".into());
+    }
+    run_blocking("Batch uninstallation", move || {
+        let inventory = apps::discover_apps();
+        let mut results = Vec::new();
+        let mut completed = 0;
+        let mut failed = 0;
+        let mut restart_required = 0;
+
+        for id in app_ids {
+            let app = inventory.apps.iter().find(|a| a.id == id);
+            let Some(app) = app else {
+                results.push(BatchUninstallItemResult {
+                    app_id: id,
+                    name: "Unknown application".into(),
+                    status: "failed".into(),
+                    exit_code: None,
+                    message: "Application is no longer registered in uninstall inventory.".into(),
+                });
+                failed += 1;
+                continue;
+            };
+
+            let raw_cmd = if quiet && app.quiet_uninstall_string.is_some() {
+                app.quiet_uninstall_string.as_ref().unwrap()
+            } else if app.uninstall_string.is_some() {
+                app.uninstall_string.as_ref().unwrap()
+            } else {
+                results.push(BatchUninstallItemResult {
+                    app_id: id,
+                    name: app.name.clone(),
+                    status: "failed".into(),
+                    exit_code: None,
+                    message: "No registered uninstaller command found.".into(),
+                });
+                failed += 1;
+                continue;
+            };
+
+            let parsed = uninstall::parse_uninstall_command(raw_cmd);
+            if !parsed.is_valid {
+                results.push(BatchUninstallItemResult {
+                    app_id: id,
+                    name: app.name.clone(),
+                    status: "failed".into(),
+                    exit_code: None,
+                    message: parsed.rejection_reason.unwrap_or_else(|| "Invalid uninstaller command".into()),
+                });
+                failed += 1;
+                continue;
+            }
+
+            let cancel = Arc::new(AtomicBool::new(false));
+            match uninstall::execute_uninstaller(&id, &parsed, &cancel, 600) {
+                Ok(res) => {
+                    if res.status == "completed" {
+                        completed += 1;
+                    } else if res.status == "restart_required" {
+                        restart_required += 1;
+                    } else {
+                        failed += 1;
+                    }
+                    results.push(BatchUninstallItemResult {
+                        app_id: id,
+                        name: app.name.clone(),
+                        status: res.status,
+                        exit_code: res.exit_code,
+                        message: res.message,
+                    });
+                }
+                Err(err) => {
+                    failed += 1;
+                    results.push(BatchUninstallItemResult {
+                        app_id: id,
+                        name: app.name.clone(),
+                        status: "failed".into(),
+                        exit_code: None,
+                        message: err,
+                    });
+                }
+            }
+        }
+
+        let total = results.len();
+        BatchUninstallReport {
+            total,
+            completed,
+            failed,
+            restart_required,
+            results,
+        }
+    })
+    .await
+}
+
 /* ----------------------------------------------------------------- helpers */
 
 /// Adapts an MFT outcome to the same contract the directory walk returns, so
@@ -873,6 +1069,7 @@ mod tests {
             expires_at,
             read_only: false,
             exclusions: Vec::new(),
+            snapshot_paths: HashMap::new(),
         }
     }
 
@@ -881,6 +1078,8 @@ mod tests {
             run_id: "cleanup-1".into(),
             plan_id: "plan-1".into(),
             bytes: 2048,
+            space_moved: 2048,
+            space_freed: 0,
             files: 2,
             dirs_removed: 1,
             quarantined: 2,

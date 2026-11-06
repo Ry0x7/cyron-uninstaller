@@ -101,16 +101,23 @@ Deferred to Phase 4: registry cleaning and therefore registry backup, process te
 locked-file forcing, uninstall commands, and duplicate management. Quarantine has no automatic
 size cap or expiry sweep; batches stay until purged.
 
-## Phase 4 — Uninstall engine
+## Phase 4 — Uninstall engine (implemented)
 
-- [ ] Standard uninstall using registered uninstall commands.
-- [ ] Process discovery and controlled termination for programs holding locks, with critical-process
-      protection.
-- [ ] Leftover file, directory and registry detection with preview.
-- [ ] Shared-dependency and system-component protection.
-- [ ] Advanced and force uninstall with staged safeguards.
-- [ ] Batch uninstall queue with progress and failure handling.
-- [ ] Uninstall history and recovery guidance.
+- [x] Standard uninstall using registered uninstall commands with safe tokenization, MSI uninstaller
+      support (`msiexec.exe /x`), shell-wrapper rejection (`cmd.exe`, `powershell.exe`), and exit code /
+      reboot-required tracking (code 3010).
+- [x] Process discovery and controlled termination for programs executing from the application directory,
+      with critical-process protection (system processes, `explorer.exe`, Windows root binaries) and
+      graceful `WM_CLOSE` preceding `TerminateProcess`.
+- [x] Leftover file, directory and registry detection with reviewable confidence and risk ratings.
+- [x] Shared-dependency, system-component and common vendor protection to prevent orphaned shared runtimes.
+- [x] Advanced and force uninstall with staged safeguards, durable write-ahead recovery journal, and
+      automated registry `.reg` backup before any registry subkey deletion.
+- [x] Batch uninstall queue with progress, sequential execution, failure isolation, and separate manual
+      review required before leftover cleaning.
+- [x] Priority 0 cleanup recovery hardening: crash-consistent write-ahead recovery journal
+      (`recovery_journal.jsonl`), atomic Win32 `MoveFileExW` no-overwrite restore, approved preview snapshot
+      binding, safe purge retry with manifest preservation on locked files, and quarantine storage & low-disk-space caps.
 
 ## Phase 5 — Optimization and release
 

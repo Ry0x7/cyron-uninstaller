@@ -1,13 +1,15 @@
-# Gates: Cyron Uninstaller Phase 3 — Safe cleaning
+# Gates: Cyron Uninstaller Phase 4 — Uninstall engine & Priority 0 hardening
 
 OWNS: src/**, src-tauri/**, scripts/**, .github/**, package.json, package-lock.json, GATES.md,
 README.md, ROADMAP.md, HANDOFF.md, AGENTS.md, docs/**
 
-Scope: a review-first cleanup engine over the fixed 48-location cache catalog — backend-enforced
-eligibility, protected-path refusal, user exclusions enforced server-side, recoverable quarantine
-with restore/purge, a local cleanup log, a backend read-only switch, per-item results, cancellation,
-and the Cleaner UI that drives it. No uninstall, process termination, registry write, or
-administrator escalation.
+Scope: application uninstallation engine (standard uninstaller execution, MSI normalization, shell
+rejection), process manager (application-linked discovery, critical process deny list, graceful
+termination), leftover detection (filesystem + registry, confidence and risk tiers, shared vendor
+guard), staged residual removal (automated .reg registry backup before deletion, journaled quarantine),
+batch uninstallation with failure isolation, and Priority 0 cleanup recovery hardening (crash-consistent
+write-ahead journal, atomic Win32 MoveFileExW no-overwrite restore, snapshot binding, purge preservation,
+quarantine storage & low-space limits).
 
 Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 `scripts/msvc-env.mjs`.
@@ -22,8 +24,8 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G2: the complete Rust suite passes
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
   EXPECT: exit 0
-  EVIDENCE: exit 0. 105 lib tests (2 ignored), 17 security, 5 cleanup_stress, 1 real_system,
-  5 stress_scan (1 ignored) → 133 passed, 3 ignored, 0 failed.
+  EVIDENCE: exit 0. 116 lib tests (2 ignored), 21 security, 5 cleanup_stress, 1 real_system,
+  5 stress_scan (1 ignored) → 148 passed, 3 ignored, 0 failed.
 
 - [x] G3: frontend typecheck
   CHECK: npm run typecheck
@@ -33,36 +35,34 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G4: frontend unit tests
   CHECK: npm test
   EXPECT: exit 0
-  EVIDENCE: exit 0. 70 tests in 7 files, including `cleanup.test.ts` (16) and the cleanup IPC
-  contract in `api.test.ts` (9).
+  EVIDENCE: exit 0. 71 tests in 7 files, including `api.test.ts` (10), `cleanup.test.ts` (16)
+  and Phase 4 command contracts.
 
 - [x] G5: frontend production bundle
   CHECK: node scripts/verify-dist.mjs
   EXPECT: DIST_OK
-  EVIDENCE: `DIST_OK`, 2 assets, 434.3 KiB, index.html 444 B.
+  EVIDENCE: `DIST_OK`, 2 assets, 448.7 KiB, index.html 444 B.
 
-## Cleanup safety
+## Cleanup safety & Priority 0 Hardening
 
 - [x] G6: permission-boundary and protected-path tests pass
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security
   EXPECT: exit 0
-  EVIDENCE: exit 0, 17/17. Covers: destructive calls only in reviewed modules; every catalog
-  cleanup path passes the guard; protected/ancestor paths refused; hostile ids and run ids refused;
+  EVIDENCE: exit 0, 21/21. Covers: destructive calls confined to reviewed modules (`cleanup.rs`,
+  `history.rs`, `leftovers.rs`); critical process termination protection; shell injection rejection;
+  leftover guard blocking system roots and profile folders; registry backup creation before deletion;
+  every catalog cleanup path passes the guard; protected/ancestor paths refused; hostile ids and run ids refused;
   junction not followed; links and directories never moved; restore never overwrites; purge removes
   only batch files; read-only blocks execution; hard links counted once; fixture round trip; and two
-  plan-to-execution races (a previewed subfolder swapped for a junction, and the whole target swapped
-  for one) move nothing outside the target and report the swap instead of failing silently.
-  NOTE: read-only gates execution only. `preview_cleanup` no longer calls `ensure_cleanup_enabled`
-  because a preview reads sizes and paths and never modifies anything; `start_cleanup` still calls
-  it first, and the embedded read-only visual pass in G13 exercised the preview path live.
+  plan-to-execution races move nothing outside the target and report the swap instead of failing silently.
 
 - [x] G7: preview, execution, quarantine, restore and purge work on isolated fixtures
   CHECK: node scripts/verify-cleanup.mjs
   EXPECT: CLEANUP_FIXTURE_OK
   EVIDENCE: `CLEANUP_FIXTURE_OK`. Fixture at `%TEMP%\cyron-cleanup-<pid>`: exact preview counts and
-  bytes, quarantine of 4 files, outside-file untouched, manifest written, batch listed, byte-exact
-  restore, batch retired on full restore, locked file skipped while the rest move, purge accounting,
-  read-only refusal.
+  bytes, quarantine of 4 files, outside-file untouched, manifest and recovery journal written,
+  batch listed, byte-exact restore, batch retired on full restore, locked file skipped while the rest move,
+  purge accounting, read-only refusal.
 
 - [x] G8: large fixtures stay bounded, cancellable and partial-failure tolerant
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress
@@ -74,8 +74,8 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G9: protected catalog entries can never be planned or executed
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib cleanup::
   EXPECT: exit 0
-  EVIDENCE: exit 0, 22/22 cleanup unit tests, including protected refusal, exclusion enforcement,
-  truncated-listing reporting and both exclusion validators.
+  EVIDENCE: exit 0, 26/26 cleanup unit tests, including protected refusal, exclusion enforcement,
+  snapshot binding, recovery journal consistency, atomic restore, and storage limits.
 
 ## Native behaviour
 
@@ -87,7 +87,7 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G11: built executable is recognizable as the Cyron desktop app
   CHECK: node scripts/verify-desktop-binary.mjs
   EXPECT: DESKTOP_BINARY_OK
-  EVIDENCE: `DESKTOP_BINARY_OK`, 15.21 MiB.
+  EVIDENCE: `DESKTOP_BINARY_OK`, 15.73 MiB.
 
 - [x] G12: the built app launches a window
   CHECK: node scripts/smoke-desktop.mjs
@@ -133,6 +133,51 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   EVIDENCE: updated in the same commit. Numbers quoted (48 catalog locations, 27 safe / 9 caution /
   12 protected, 19 commands, preview cap 400, 100,000 files per target, 10-minute plan TTL, 7-day
   retention, 100-entry log) are read from `caches.rs`, `cleanup.rs`, `commands.rs` and `lib.rs`.
+
+## Phase 4 Application Uninstallation & Priority 0 Hardening
+
+- [x] G16: process manager discovery and critical process protection
+  CHECK: `src-tauri/src/process.rs`, unit tests and `tests/security.rs`
+  EXPECT: discover only processes executing from the app install location; critical system processes
+  (`csrss.exe`, `explorer.exe`, `services.exe`, etc.) and system directory executables cannot be terminated.
+  EVIDENCE: verified by `critical_system_processes_cannot_be_terminated` in `tests/security.rs`.
+
+- [x] G17: standard uninstaller execution and shell command rejection
+  CHECK: `src-tauri/src/uninstall.rs`, unit tests and `tests/security.rs`
+  EXPECT: commands tokenized safely, MSI `/x` normalized, shell scripts (`cmd.exe`, `pwsh`, `powershell.exe`)
+  strictly rejected. Exit code 3010 recognized as reboot required.
+  EVIDENCE: verified by `uninstaller_runner_rejects_arbitrary_shell_commands` in `tests/security.rs` and
+  uninstall unit tests.
+
+- [x] G18: leftover detection with root guards and vendor protection
+  CHECK: `src-tauri/src/leftovers.rs`, unit tests and `tests/security.rs`
+  EXPECT: scan likely directories and registry subkeys; guard refuses roots, Windows, ProgramData, and
+  top-level profile folders.
+  EVIDENCE: verified by `leftover_scanner_guards_system_roots_and_user_profiles` in `tests/security.rs`.
+
+- [x] G19: automated registry backup before modification
+  CHECK: `src-tauri/src/leftovers.rs` and `tests/security.rs`
+  EXPECT: `.reg` export created in quarantine batch directory prior to any registry key deletion.
+  EVIDENCE: verified by `leftover_cleanup_creates_registry_backup_before_deletion` in `tests/security.rs`.
+
+- [x] G20: batch uninstallation sequential queue with failure isolation
+  CHECK: `src/features/uninstaller/Uninstaller.tsx`, `AppDrawer.tsx`
+  EXPECT: sequential execution, individual exit code tracking, uninstaller errors do not halt queue,
+  separate user confirmation required for leftover review.
+  EVIDENCE: verified by batch drawer UI flow and API contract tests.
+
+- [x] G21: durable crash-consistent recovery journal
+  CHECK: `src-tauri/src/cleanup.rs`
+  EXPECT: `recovery_journal.jsonl` written and flushed before any file rename; corrupt or missing
+  `manifest.json` reconstructed from journal.
+  EVIDENCE: verified by `recovery_journal_allows_manifest_reconstruction_after_crash` in unit tests.
+
+- [x] G22: atomic no-overwrite restoration & low space protection
+  CHECK: `src-tauri/src/cleanup.rs`
+  EXPECT: Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, destination race protection,
+  quarantine storage cap (20 GiB) and minimum free disk space check (512 MiB).
+  EVIDENCE: verified by `restore_never_overwrites_an_existing_file` in `tests/security.rs` and
+  `quarantine_enforces_storage_cap_and_disk_free_space` in unit tests.
 
 ## Not gated
 

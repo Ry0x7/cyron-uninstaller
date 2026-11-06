@@ -8,18 +8,17 @@ safe to remove but also have the ability to force uninstall and kill process. In
 Revo uninstaller, bleachbit, and windirstat but better indications, material UI, clean simple
 usable for non-tech people.
 
-**Current state: Phases 1, 2 and 3 are implemented.** Application inventory, disk analysis with a
+**Current state: Phases 1, 2, 3 and 4 are implemented.** Application inventory, disk analysis with a
 treemap plus persistent synchronized folder tree, MFT/directory scanning, duplicate verification,
-storage categorization, developer/AI cache inspection and **review-first cache cleaning with a
-recoverable quarantine** work. Scanning remains read-only; the only destructive path is the
-cleanup engine in `cleanup.rs`, which accepts catalog ids (never paths), moves files into
-`<app_data>\quarantine\<run-id>\`, and can restore or purge a batch. There is still no uninstall,
-process termination or registry write. `clear_history` deletes only Cyron's own history file. The
-debug desktop build and launch are verified on this machine (`DESKTOP_BINARY_OK`,
-`DESKTOP_SMOKE_OK`), as are the isolated cleanup fixture (`CLEANUP_FIXTURE_OK`) and every suite;
-release installers, signing and a standalone release build are not. The Cleaner was driven live in
-both themes, which found and fixed two defects: preview was blocked by read-only mode, and
-Overview's cache warnings rendered as one run-on sentence.
+storage categorization, developer/AI cache inspection, review-first cache cleaning with a recoverable
+quarantine, application uninstallation with exit code 3010 reboot recognition, process discovery and
+critical-process-protected termination, leftover scanning with confidence & risk ratings, automatic .reg
+registry backup before subkey deletion, and sequential batch uninstallation are implemented and tested.
+Priority 0 hardening (crash-consistent write-ahead recovery journal, atomic MoveFileExW no-overwrite
+restoration, approved snapshot binding, purge preservation, quarantine storage caps) is complete.
+The debug desktop build and launch are verified (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`), as are the
+isolated cleanup fixture (`CLEANUP_FIXTURE_OK`) and all test suites (71 frontend, 148 Rust); release
+installers and signing remain unverified.
 
 ## Stack
 
@@ -31,10 +30,12 @@ Overview's cache warnings rendered as one run-on sentence.
 
 ## How it works (the non-obvious parts)
 
-- **IPC surface** is nineteen commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
-  discovery/scan/duplicate/measurement/reveal, `clear_history`, and eight cleanup commands
+- **IPC surface** is twenty-six commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
+  discovery/scan/duplicate/measurement/reveal, `clear_history`, eight cleanup commands
   (`get_cleanup_mode`, `set_cleanup_mode`, `preview_cleanup`, `start_cleanup`, `list_quarantine`,
-  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`). A running job id is rejected rather
+  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`), and seven Phase 4 uninstaller commands
+  (`discover_app_processes`, `terminate_app_processes`, `parse_uninstall_command`, `execute_uninstall`,
+  `scan_app_leftovers`, `clean_app_leftovers`, `execute_batch_uninstall`). A running job id is rejected rather
   than silently re-registered. Payloads use `#[serde(rename_all = "camelCase")]`;
   `src/lib/types.ts` mirrors the data contract. Change both together.
 - **Cleanup engine** (`cleanup.rs`) is the only module that modifies user files. `preview_cleanup`

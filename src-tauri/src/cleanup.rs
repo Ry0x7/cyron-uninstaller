@@ -24,6 +24,9 @@ pub const MAX_PREVIEW_FILES: usize = 400;
 /// Hard cap on files considered for one catalog location.
 pub const MAX_FILES_PER_TARGET: usize = 100_000;
 pub const CLEANUP_EVENT: &str = "cyron-cleanup-progress";
+pub const JOURNAL_FILE: &str = "recovery_journal.jsonl";
+pub const MIN_FREE_SPACE_BYTES: u64 = 512 * 1024 * 1024; // 512 MB
+pub const MAX_QUARANTINE_TOTAL_BYTES: u64 = 20 * 1024 * 1024 * 1024; // 20 GB
 
 const MAX_DIRS: usize = 20_000;
 const MAX_ERRORS: usize = 20;
@@ -65,6 +68,8 @@ pub struct CleanupPlan {
     pub exclusions: Vec<PathBuf>,
     pub expected_files: u64,
     pub expected_bytes: u64,
+    /// Approved preview snapshot paths and their expected sizes.
+    pub snapshot_paths: std::collections::HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,6 +140,8 @@ pub struct CleanupReport {
     pub run_id: String,
     pub plan_id: String,
     pub bytes: u64,
+    pub space_moved: u64,
+    pub space_freed: u64,
     pub files: u64,
     pub dirs_removed: u64,
     pub quarantined: u64,
@@ -348,17 +355,17 @@ pub fn plan_specs_with_exclusions(
     let mut files = Vec::new();
     let mut skipped = Vec::new();
     let mut warnings = Vec::new();
+    let mut snapshot_paths = std::collections::HashMap::new();
     let mut total_files = 0u64;
     let mut planned_files = 0u64;
     let mut planned_bytes = 0u64;
     let mut truncated = false;
 
     for spec in &specs {
-        let remaining = MAX_PREVIEW_FILES.saturating_sub(files.len());
         let walk = walk_target(
             &spec.path,
             MAX_FILES_PER_TARGET,
-            remaining,
+            MAX_FILES_PER_TARGET,
             None,
             &exclusion_keys,
         );
@@ -395,14 +402,14 @@ pub fn plan_specs_with_exclusions(
             );
         }
         for (path, size) in &walk.files {
-            if files.len() >= MAX_PREVIEW_FILES {
-                break;
+            snapshot_paths.insert(normalize_key(path), *size);
+            if files.len() < MAX_PREVIEW_FILES {
+                files.push(CleanupPreviewFile {
+                    path: path.to_string_lossy().to_string(),
+                    size: *size,
+                    target_id: spec.id.clone(),
+                });
             }
-            files.push(CleanupPreviewFile {
-                path: path.to_string_lossy().to_string(),
-                size: *size,
-                target_id: spec.id.clone(),
-            });
         }
 
         targets.push(CleanupTarget {
@@ -450,6 +457,7 @@ pub fn plan_specs_with_exclusions(
         exclusions,
         expected_files: planned_files,
         expected_bytes: planned_bytes,
+        snapshot_paths,
     };
     let preview = CleanupPreview {
         plan_id,
@@ -476,6 +484,65 @@ enum MoveError {
     Failed(String),
 }
 
+/// Returns available free bytes on the volume holding `path`.
+pub fn get_available_disk_space(path: &Path) -> Result<u64, String> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut root = path.to_path_buf();
+    while !root.exists() {
+        if let Some(parent) = root.parent() {
+            root = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    let mut wide: Vec<u16> = root.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let mut free_bytes_available: u64 = 0;
+    let mut total_number_of_bytes: u64 = 0;
+    let mut total_number_of_free_bytes: u64 = 0;
+    let success = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_bytes_available,
+            &mut total_number_of_bytes,
+            &mut total_number_of_free_bytes,
+        )
+    };
+    if success == 0 {
+        return Ok(u64::MAX);
+    }
+    Ok(free_bytes_available)
+}
+
+fn append_journal_entry(journal_path: &Path, item: &ManifestItem) -> Result<(), String> {
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(journal_path)
+        .map_err(|error| format!("Could not open recovery journal: {error}"))?;
+    let json = serde_json::to_string(item)
+        .map_err(|error| format!("Could not encode journal item: {error}"))?;
+    writeln!(file, "{json}").map_err(|error| format!("Could not write to recovery journal: {error}"))?;
+    file.flush().map_err(|error| format!("Could not flush recovery journal: {error}"))?;
+    Ok(())
+}
+
+fn read_journal(journal_path: &Path) -> Option<Vec<ManifestItem>> {
+    let content = fs::read_to_string(journal_path).ok()?;
+    let mut items = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(item) = serde_json::from_str::<ManifestItem>(line) {
+            items.push(item);
+        }
+    }
+    Some(items)
+}
+
 /// Moves every planned file into a quarantine batch. Never deletes content:
 /// the only destructive primitives used are `rename`, `remove_file` (purge and
 /// history's own temp file) and an empty-directory `remove_dir`.
@@ -489,10 +556,32 @@ pub fn execute_plan(
         return Err("Read-only mode is on. Turn it off in Settings before cleaning.".into());
     }
 
+    if let Ok(free_space) = get_available_disk_space(quarantine_root) {
+        if free_space < MIN_FREE_SPACE_BYTES {
+            return Err(format!(
+                "Low disk space on quarantine volume ({} MB free, minimum 512 MB required). Clean cancelled to protect system stability.",
+                free_space / (1024 * 1024)
+            ));
+        }
+    }
+
+    let existing_quarantine = list_quarantine(quarantine_root);
+    let total_quarantine_bytes: u64 = existing_quarantine.iter().map(|b| b.bytes).sum();
+    if total_quarantine_bytes.saturating_add(plan.expected_bytes) > MAX_QUARANTINE_TOTAL_BYTES {
+        return Err(
+            "Quarantine storage limit reached (20 GB max). Please purge older quarantine batches before cleaning."
+                .into(),
+        );
+    }
+
     let started = Instant::now();
     let now = seconds_now();
     let run_id = next_id("run", now);
     let batch = quarantine_root.join(&run_id);
+    let journal_path = batch.join(JOURNAL_FILE);
+    fs::create_dir_all(&batch)
+        .map_err(|error| format!("Could not create the quarantine folder: {error}"))?;
+
     let mut manifest = BatchManifest {
         run_id: run_id.clone(),
         created_at: now,
@@ -553,11 +642,6 @@ pub fn execute_plan(
                 format!("{}: {reason} — left alone.", path.display()),
             );
         }
-        if !walk.files.is_empty() {
-            fs::create_dir_all(&batch).map_err(|error| {
-                format!("Could not create the quarantine folder: {error}")
-            })?;
-        }
 
         let target_root = fs::canonicalize(&spec.path).unwrap_or_else(|_| spec.path.clone());
         for (path, _size) in walk.files {
@@ -567,7 +651,25 @@ pub fn execute_plan(
             }
             index += 1;
             attempted += 1;
-            match quarantine_file(&path, &target_root, &batch, index) {
+
+            // Bind execution strictly to the approved preview snapshot
+            let path_key = normalize_key(&path);
+            if !plan.snapshot_paths.is_empty() && !plan.snapshot_paths.contains_key(&path_key) {
+                skipped += 1;
+                if items.len() < MAX_ITEMS {
+                    items.push(CleanupItemResult {
+                        target_id: spec.id.clone(),
+                        path: path.to_string_lossy().to_string(),
+                        bytes: 0,
+                        status: "skipped".into(),
+                        reason: Some("Created after preview was approved — left alone.".into()),
+                        quarantine_path: None,
+                    });
+                }
+                continue;
+            }
+
+            match quarantine_file(&path, &target_root, &batch, index, &journal_path) {
                 Ok((stored, size)) => {
                     quarantined += 1;
                     moved_bytes += size;
@@ -644,6 +746,7 @@ pub fn execute_plan(
         write_manifest(&batch, &manifest)?;
     } else {
         // Nothing was moved, so there is nothing to restore or purge.
+        let _ = fs::remove_file(journal_path);
         let _ = fs::remove_dir(&batch);
     }
 
@@ -665,6 +768,8 @@ pub fn execute_plan(
         run_id: run_id.clone(),
         plan_id: plan.plan_id.clone(),
         bytes: moved_bytes,
+        space_moved: moved_bytes,
+        space_freed: 0,
         files: quarantined,
         dirs_removed,
         quarantined,
@@ -688,6 +793,7 @@ fn quarantine_file(
     target_root: &Path,
     batch: &Path,
     index: usize,
+    journal_path: &Path,
 ) -> Result<(PathBuf, u64), MoveError> {
     let meta = fs::symlink_metadata(file)
         .map_err(|error| MoveError::Failed(describe(file, &error)))?;
@@ -716,6 +822,16 @@ fn quarantine_file(
         .ok_or_else(|| MoveError::Skipped("no file name".into()))?;
     let destination = batch.join(format!("{index}-{}", name.to_string_lossy()));
     let size = meta.len();
+
+    // Durable write-ahead journal entry before the destructive move
+    let item = ManifestItem {
+        original_path: file.to_string_lossy().to_string(),
+        stored_path: destination.to_string_lossy().to_string(),
+        size,
+    };
+    append_journal_entry(journal_path, &item)
+        .map_err(|error| MoveError::Failed(error))?;
+
     fs::rename(file, &destination).map_err(|error| MoveError::Failed(describe(file, &error)))?;
     Ok((destination, size))
 }
@@ -835,21 +951,29 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
 
     manifest.items = remaining;
     if manifest.items.is_empty() {
+        let _ = fs::remove_file(dir.join(JOURNAL_FILE));
         let _ = fs::remove_file(dir.join(MANIFEST));
         // `remove_dir` only succeeds on an empty folder, so nothing outside the
         // batch can be removed here.
         let _ = fs::remove_dir(&dir);
     } else {
         let _ = write_manifest(&dir, &manifest);
+        // Rewrite journal to reflect remaining items
+        let journal_path = dir.join(JOURNAL_FILE);
+        let _ = fs::remove_file(&journal_path);
+        for item in &manifest.items {
+            let _ = append_journal_entry(&journal_path, item);
+        }
     }
     Ok(report)
 }
 
 /// Deletes the files of one batch, then the batch itself. Only paths recorded
 /// in that batch's manifest and still inside the batch folder are removed.
+/// If any file fails to delete, the manifest is preserved so the user can safely retry.
 pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
     let dir = batch_dir(root, run_id)?;
-    let manifest = read_manifest(&dir)
+    let mut manifest = read_manifest(&dir)
         .ok_or_else(|| format!("No quarantine batch named {run_id} was found."))?;
     let canonical_dir = fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
 
@@ -858,24 +982,45 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
         removed_files: 0,
         freed_bytes: 0,
     };
-    for item in &manifest.items {
+    let mut remaining = Vec::new();
+
+    for item in manifest.items {
         let stored = Path::new(&item.stored_path);
         let Ok(canonical) = fs::canonicalize(stored) else {
+            // File already gone
             continue;
         };
         if !is_within(&canonical, &canonical_dir) {
+            remaining.push(item);
             continue;
         }
-        if fs::remove_file(&canonical).is_ok() {
-            report.removed_files += 1;
-            report.freed_bytes += item.size;
+        match fs::remove_file(&canonical) {
+            Ok(()) => {
+                report.removed_files += 1;
+                report.freed_bytes += item.size;
+            }
+            Err(_) => {
+                remaining.push(item);
+            }
         }
     }
 
-    let _ = fs::remove_file(dir.join(MANIFEST));
-    // `remove_dir` fails if anything unexpected is still inside, which is the
-    // behaviour we want.
-    let _ = fs::remove_dir(&dir);
+    if remaining.is_empty() {
+        let _ = fs::remove_file(dir.join(JOURNAL_FILE));
+        let _ = fs::remove_file(dir.join(MANIFEST));
+        // `remove_dir` fails if anything unexpected is still inside, which is the
+        // behaviour we want.
+        let _ = fs::remove_dir(&dir);
+    } else {
+        manifest.items = remaining;
+        let _ = write_manifest(&dir, &manifest);
+        // Re-sync journal with remaining items
+        let journal_path = dir.join(JOURNAL_FILE);
+        let _ = fs::remove_file(&journal_path);
+        for item in &manifest.items {
+            let _ = append_journal_entry(&journal_path, item);
+        }
+    }
     Ok(report)
 }
 
@@ -893,19 +1038,105 @@ fn batch_dir(root: &Path, run_id: &str) -> Result<PathBuf, String> {
 }
 
 fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
-    if fs::rename(stored, original).is_ok() {
+    use std::os::windows::ffi::OsStrExt;
+
+    if original.exists() {
+        return Err(format!(
+            "{} already exists, so the quarantined copy was kept.",
+            original.display()
+        ));
+    }
+    if let Some(parent) = original.parent() {
+        if parent.exists() && is_reparse(parent) {
+            return Err(format!(
+                "Parent directory {} is a link or junction.",
+                parent.display()
+            ));
+        }
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let mut stored_wide: Vec<u16> = stored.as_os_str().encode_wide().collect();
+    stored_wide.push(0);
+    let mut original_wide: Vec<u16> = original.as_os_str().encode_wide().collect();
+    original_wide.push(0);
+
+    // Win32 MoveFileExW with MOVEFILE_COPY_ALLOWED (0x2) and WITHOUT MOVEFILE_REPLACE_EXISTING (0x1).
+    // This provides an atomic guarantee at the OS filesystem level that an existing file is never overwritten.
+    const MOVEFILE_COPY_ALLOWED: u32 = 0x2;
+    let res = unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+            stored_wide.as_ptr(),
+            original_wide.as_ptr(),
+            MOVEFILE_COPY_ALLOWED,
+        )
+    };
+    if res != 0 {
         return Ok(());
     }
-    // Cross-volume moves need a copy; the quarantined file is only removed
-    // once the copy succeeded.
-    fs::copy(stored, original)
-        .map_err(|error| error.to_string())
-        .and_then(|_| fs::remove_file(stored).map_err(|error| error.to_string()))
+
+    let os_error = std::io::Error::last_os_error();
+    if os_error.raw_os_error() == Some(80) || os_error.raw_os_error() == Some(183) {
+        return Err(format!(
+            "{} already exists, so the quarantined copy was kept.",
+            original.display()
+        ));
+    }
+    Err(format!(
+        "Could not restore {}: {os_error}",
+        original.display()
+    ))
 }
 
 fn read_manifest(dir: &Path) -> Option<BatchManifest> {
-    let text = fs::read_to_string(dir.join(MANIFEST)).ok()?;
-    serde_json::from_str(&text).ok()
+    let manifest_path = dir.join(MANIFEST);
+    let journal_path = dir.join(JOURNAL_FILE);
+
+    let manifest_opt: Option<BatchManifest> = fs::read_to_string(&manifest_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+
+    let journal_items = read_journal(&journal_path);
+
+    match (manifest_opt, journal_items) {
+        (Some(mut manifest), Some(items)) => {
+            let mut known: std::collections::HashSet<String> = manifest
+                .items
+                .iter()
+                .map(|item| item.stored_path.clone())
+                .collect();
+            for item in items {
+                if Path::new(&item.stored_path).exists() && known.insert(item.stored_path.clone()) {
+                    manifest.items.push(item);
+                }
+            }
+            Some(manifest)
+        }
+        (Some(manifest), None) => Some(manifest),
+        (None, Some(items)) => {
+            let valid_items: Vec<ManifestItem> = items
+                .into_iter()
+                .filter(|item| Path::new(&item.stored_path).exists())
+                .collect();
+            if valid_items.is_empty() {
+                return None;
+            }
+            let run_id = dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("recovered")
+                .to_string();
+            let now = seconds_now();
+            Some(BatchManifest {
+                run_id,
+                created_at: now,
+                expires_at: now + RETENTION_DAYS * 86_400,
+                target_ids: Vec::new(),
+                items: valid_items,
+            })
+        }
+        (None, None) => None,
+    }
 }
 
 fn write_manifest(dir: &Path, manifest: &BatchManifest) -> Result<(), String> {
@@ -1659,5 +1890,112 @@ mod tests {
         let report = run(&fixture, &plan);
         assert_eq!(report.quarantined, 0);
         assert!(report.quarantine_dir.is_none());
+    }
+
+    #[test]
+    fn journal_recovers_interrupted_run_and_manifest_corruption() {
+        let fixture = Fixture::new("journal-recovery");
+        let (plan, _) = plan_specs(vec![fixture.spec()], false).expect("plan");
+        let report = run(&fixture, &plan);
+        let batch_dir = PathBuf::from(report.quarantine_dir.expect("batch dir"));
+
+        // Corrupt manifest.json intentionally to simulate partial write or crash
+        let manifest_path = batch_dir.join(MANIFEST);
+        fs::write(&manifest_path, b"{ broken json corrupt ...").expect("corrupt manifest");
+
+        // Verify read_manifest recovers manifest from recovery_journal.jsonl!
+        let recovered = read_manifest(&batch_dir).expect("recovered manifest from journal");
+        assert_eq!(recovered.items.len(), 2);
+
+        // Verify restore works completely using the recovered journal
+        let restore = restore_batch(&fixture.quarantine(), &report.run_id).expect("restore");
+        assert_eq!(restore.restored, 2);
+        assert_eq!(
+            fs::read(fixture.cache().join("a.txt")).expect("restored a"),
+            b"hello"
+        );
+        assert_eq!(
+            fs::read(fixture.nested().join("b.bin")).expect("restored b"),
+            b"0123456789"
+        );
+    }
+
+    #[test]
+    fn execution_binds_to_approved_preview_snapshot() {
+        let fixture = Fixture::new("snapshot-binding");
+        let (plan, preview) = plan_specs(vec![fixture.spec()], false).expect("plan");
+        assert_eq!(preview.file_count, 2);
+
+        // Add an unapproved new file created after preview was approved
+        let intruder = fixture.cache().join("intruder.txt");
+        fs::write(&intruder, b"i appeared after preview").expect("write intruder");
+
+        let report = run(&fixture, &plan);
+        // Only the 2 approved preview files may be quarantined
+        assert_eq!(report.quarantined, 2);
+        // The unapproved intruder file must remain intact
+        assert!(intruder.exists(), "files created after preview must never be moved");
+        assert_eq!(fs::read(&intruder).expect("read intruder"), b"i appeared after preview");
+    }
+
+    #[test]
+    fn purge_failure_preserves_manifest_for_safe_retry() {
+        use std::os::windows::ffi::OsStrExt;
+
+        let fixture = Fixture::new("purge-retry");
+        let (plan, _) = plan_specs(vec![fixture.spec()], false).expect("plan");
+        let report = run(&fixture, &plan);
+        let batch_dir = PathBuf::from(report.quarantine_dir.expect("batch dir"));
+
+        // Open one quarantined file without FILE_SHARE_DELETE so Windows refuses to delete it
+        let locked_file_path = PathBuf::from(&report.items[0].quarantine_path.clone().unwrap());
+        let mut wide: Vec<u16> = locked_file_path.as_os_str().encode_wide().collect();
+        wide.push(0);
+
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn CreateFileW(
+                name: *const u16,
+                access: u32,
+                share: u32,
+                sec: *const core::ffi::c_void,
+                disp: u32,
+                flags: u32,
+                tmpl: isize,
+            ) -> isize;
+            fn CloseHandle(handle: isize) -> i32;
+        }
+
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                0x8000_0000, // GENERIC_READ
+                0x0000_0001, // FILE_SHARE_READ only, NO FILE_SHARE_DELETE
+                std::ptr::null(),
+                3, // OPEN_EXISTING
+                0x80, // FILE_ATTRIBUTE_NORMAL
+                0,
+            )
+        };
+        assert_ne!(handle, -1, "failed to acquire non-deletable handle");
+
+        // First purge will fail on the locked file
+        let purge1 = purge_batch(&fixture.quarantine(), &report.run_id).expect("partial purge");
+        assert_eq!(purge1.removed_files, 1);
+        // The batch and manifest MUST still exist with the remaining file!
+        assert!(batch_dir.exists(), "batch folder must be preserved on purge failure");
+        assert!(batch_dir.join(MANIFEST).exists(), "manifest must be preserved on purge failure");
+        let remaining_manifest = read_manifest(&batch_dir).expect("read remaining manifest");
+        assert_eq!(remaining_manifest.items.len(), 1);
+
+        // Close handle
+        unsafe {
+            CloseHandle(handle);
+        }
+
+        // Safe retry of purge must now clean the remaining file
+        let purge2 = purge_batch(&fixture.quarantine(), &report.run_id).expect("retry purge");
+        assert_eq!(purge2.removed_files, 1);
+        assert!(!batch_dir.exists(), "batch folder should be removed once all files are purged");
     }
 }

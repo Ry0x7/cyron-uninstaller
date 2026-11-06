@@ -87,6 +87,25 @@ describe("Tauri IPC contract", () => {
     }
   });
 
+  it("uses the Phase 4 uninstall and leftover commands and payloads", async () => {
+    const calls = [
+      { run: () => api.discoverAppProcesses("C:\\Program Files\\App"), command: "discover_app_processes", args: { installLocation: "C:\\Program Files\\App" } },
+      { run: () => api.terminateAppProcesses([1234, 5678]), command: "terminate_app_processes", args: { pids: [1234, 5678] } },
+      { run: () => api.parseUninstallCommand("C:\\Program Files\\App\\uninstall.exe /S"), command: "parse_uninstall_command", args: { rawCommand: "C:\\Program Files\\App\\uninstall.exe /S" } },
+      { run: () => api.executeUninstall("app-1", "C:\\Program Files\\App\\uninstall.exe /S", 60), command: "execute_uninstall", args: { appId: "app-1", command: "C:\\Program Files\\App\\uninstall.exe /S", timeoutSecs: 60 } },
+      { run: () => api.scanAppLeftovers("app-1", "Test App", "Publisher", "C:\\Program Files\\App"), command: "scan_app_leftovers", args: { appId: "app-1", appName: "Test App", publisher: "Publisher", installLocation: "C:\\Program Files\\App" } },
+      { run: () => api.cleanAppLeftovers("app-1", [{ id: "c1", kind: "directory", path: "C:\\cand", confidence: "high", risk: "safe", sizeBytes: 100, reason: "app" }]), command: "clean_app_leftovers", args: { appId: "app-1", candidates: [{ id: "c1", kind: "directory", path: "C:\\cand", confidence: "high", risk: "safe", sizeBytes: 100, reason: "app" }] } },
+      { run: () => api.executeBatchUninstall(["app-1", "app-2"]), command: "execute_batch_uninstall", args: { appIds: ["app-1", "app-2"], quiet: false } },
+    ];
+
+    for (const { run, command, args } of calls) {
+      invoke.mockClear();
+      invoke.mockResolvedValue(undefined);
+      await run();
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(command, args);
+    }
+  });
+
   it("sends Settings exclusions with a preview so the backend can enforce them", async () => {
     invoke.mockResolvedValue(undefined);
     await api.previewCleanup(["user-temp"], ["C:\\keep"]);

@@ -311,6 +311,8 @@ export interface CleanupReport {
   runId: string;
   planId: string;
   bytes: number;
+  spaceMoved: number;
+  spaceFreed: number;
   files: number;
   dirsRemoved: number;
   quarantined: number;
@@ -372,3 +374,86 @@ export interface CleanupLogEntry {
 }
 
 export const CLEANUP_EVENT = "cyron-cleanup-progress";
+
+/* ----------------------------------------------------------------- phase 4 */
+
+export interface AppProcess {
+  pid: number;
+  name: string;
+  path: string | null;
+  isCritical: boolean;
+  title: string | null;
+}
+
+export interface ProcessTerminateResult {
+  pid: number;
+  name: string;
+  success: boolean;
+  graceful: boolean;
+  error: string | null;
+}
+
+export interface ParsedUninstallCommand {
+  executable: string;
+  arguments: string[];
+  isMsi: boolean;
+  isValid: boolean;
+  rejectionReason: string | null;
+}
+
+export interface UninstallExecutionResult {
+  appId: string;
+  exitCode: number | null;
+  status: "completed" | "restart_required" | "failed" | "cancelled";
+  restartRequired: boolean;
+  message: string;
+  elapsedMs: number;
+}
+
+export interface LeftoverCandidate {
+  id: string;
+  kind: "directory" | "file" | "registry_key";
+  path: string;
+  confidence: "high" | "medium" | "low";
+  risk: "safe" | "caution" | "protected";
+  reason: string;
+  size: number;
+  fileCount: number;
+  selected: boolean;
+}
+
+export interface LeftoverScanReport {
+  appId: string;
+  appName: string;
+  candidates: LeftoverCandidate[];
+  totalSize: number;
+  totalFiles: number;
+  registryKeysCount: number;
+}
+
+export interface LeftoverCleanReport {
+  runId: string;
+  appId: string;
+  quarantinedFiles: number;
+  quarantinedBytes: number;
+  deletedRegistryKeys: number;
+  registryBackupPath: string | null;
+  quarantineDir: string | null;
+  errors: string[];
+}
+
+export interface BatchUninstallItemResult {
+  appId: string;
+  name: string;
+  status: string;
+  exitCode: number | null;
+  message: string;
+}
+
+export interface BatchUninstallReport {
+  total: number;
+  completed: number;
+  failed: number;
+  restartRequired: number;
+  results: BatchUninstallItemResult[];
+}
