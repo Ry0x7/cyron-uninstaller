@@ -117,6 +117,15 @@ Keep documentation accurate and honest:
 
 ---
 
+## Contributors
+
+- **Ry0x7** (Creator, Maintainer & Lead Systems Engineer)
+- **Gemini** (Advanced Agentic Systems & Implementation)
+- **Claude Code** (Systems Hardening & Feature Development)
+- **Codex** (Code Intelligence & Implementation)
+
+---
+
 ## License and Intellectual Property
 
 Cyron Uninstaller is source-available software with all rights reserved on code reuse. See [LICENSE](LICENSE) for the full legal terms.

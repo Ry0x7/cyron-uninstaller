@@ -174,6 +174,15 @@ npm run verify:signatures                              # Authenticode signature 
 
 ---
 
+## Contributors
+
+- **Ry0x7** — Project Creator, Systems Architecture & Core Engineering
+- **Gemini** — Contributor (Advanced Agentic Systems & Implementation)
+- **Claude Code** — Contributor (Systems Hardening & Feature Development)
+- **Codex** — Contributor (Code Intelligence & Implementation)
+
+---
+
 ## License & Git Workflow Policy
 
 - **Source-Available / No-Reuse License**: Cyron Uninstaller is source-available for viewing, security auditing, and personal compilation under the [Cyron Source-Available License](LICENSE). **Code reuse, redistribution, or extraction into any other project or commercial product is strictly prohibited** without prior written permission from the author (Ry0x7).
