@@ -659,23 +659,56 @@ pub fn get_cleanup_log(app: tauri::AppHandle) -> Vec<cleanup::CleanupLogEntry> {
 /* ----------------------------------------------------------------- phase 4 */
 
 #[tauri::command]
-pub async fn discover_app_processes(install_location: Option<String>) -> Result<Vec<process::AppProcess>, String> {
-    run_blocking("Process discovery", move || {
-        process::discover_app_processes(install_location.as_deref())
+pub async fn discover_app_processes(
+    state: State<'_, AppState>,
+    app_id: String,
+) -> Result<Vec<process::AppProcess>, String> {
+    let app_id_trimmed = app_id.trim().to_string();
+    let inventory = run_blocking("Application lookup for process discovery", apps::discover_apps).await?;
+    let app = inventory.apps.iter().find(|a| a.id == app_id_trimmed);
+    let install_location = app.and_then(|a| a.install_location.clone());
+
+    let (snapshot, procs) = run_blocking("Process discovery", move || {
+        process::discover_app_processes(&app_id_trimmed, install_location.as_deref())
     })
-    .await
+    .await?;
+
+    let mut snapshots = state
+        .process_snapshots
+        .lock()
+        .map_err(|_| "Process snapshot registry is unavailable.".to_string())?;
+    snapshots.insert(snapshot.app_id.clone(), snapshot);
+
+    Ok(procs)
 }
 
 #[tauri::command]
-pub async fn terminate_app_processes(pids: Vec<u32>, force: bool) -> Result<Vec<process::ProcessTerminateResult>, String> {
+pub async fn terminate_app_processes(
+    state: State<'_, AppState>,
+    app_id: String,
+    pids: Vec<u32>,
+    force: bool,
+) -> Result<Vec<process::ProcessTerminateResult>, String> {
     if pids.is_empty() {
         return Ok(Vec::new());
     }
     if pids.len() > 64 {
         return Err("Cannot terminate more than 64 processes at once.".into());
     }
+
+    let snapshot = {
+        let snapshots = state
+            .process_snapshots
+            .lock()
+            .map_err(|_| "Process snapshot registry is unavailable.".to_string())?;
+        snapshots
+            .get(&app_id)
+            .cloned()
+            .ok_or_else(|| "No verified process snapshot found for this application. Please refresh processes.".to_string())?
+    };
+
     run_blocking("Process termination", move || {
-        process::terminate_processes(&pids, force)
+        process::terminate_processes_verified(&app_id, &snapshot, &pids, force)
     })
     .await
 }
@@ -686,30 +719,125 @@ pub fn parse_uninstall_command(raw_command: String) -> uninstall::ParsedUninstal
 }
 
 #[tauri::command]
-pub async fn execute_uninstall(
+pub async fn prepare_uninstall(
+    state: State<'_, AppState>,
     app_id: String,
-    command: uninstall::ParsedUninstallCommand,
+    quiet: bool,
+) -> Result<uninstall::UninstallPlan, String> {
+    let app_id_trimmed = app_id.trim().to_string();
+    if app_id_trimmed.is_empty() {
+        return Err("Application ID is required.".into());
+    }
+
+    let inventory = run_blocking("Application lookup", apps::discover_apps).await?;
+    let app = inventory
+        .apps
+        .iter()
+        .find(|a| a.id == app_id_trimmed)
+        .ok_or_else(|| "Application is not registered in uninstall inventory.".to_string())?;
+
+    let plan = uninstall::create_uninstall_plan(app, quiet)?;
+    let public_plan = uninstall::to_public_plan(&plan);
+
+    let mut plans = state
+        .uninstall_plans
+        .lock()
+        .map_err(|_| "Uninstall plan registry is unavailable.".to_string())?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    plans.retain(|_, p| p.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan);
+
+    Ok(public_plan)
+}
+
+#[tauri::command]
+pub async fn execute_uninstall(
+    state: State<'_, AppState>,
+    app_id: String,
+    plan_id: String,
     timeout_secs: Option<u64>,
 ) -> Result<uninstall::UninstallExecutionResult, String> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
+    // Consume single-use plan from backend registry
+    let plan = {
+        let mut plans = state
+            .uninstall_plans
+            .lock()
+            .map_err(|_| "Uninstall plan registry is unavailable.".to_string())?;
+        plans
+            .remove(&plan_id)
+            .ok_or_else(|| "Uninstall plan expired or not found. Please review and confirm again.".to_string())?
+    };
+
+    if now > plan.expires_at {
+        return Err("Uninstall plan has expired. Please review and confirm again.".into());
+    }
+
+    if plan.app_id != app_id {
+        return Err("Uninstall plan application ID mismatch.".into());
+    }
+
+    // Re-verify against live system inventory to detect uninstaller tampering or uninstalled state
+    let inventory = run_blocking("Live application verification", apps::discover_apps).await?;
+    let live_app = inventory
+        .apps
+        .iter()
+        .find(|a| a.id == app_id)
+        .ok_or_else(|| "Application is no longer registered in uninstall inventory.".to_string())?;
+
+    let live_cmd = if plan.command.arguments.iter().any(|a| a == "/qn" || a == "/quiet" || a == "/s" || a == "/S") && live_app.quiet_uninstall_string.is_some() {
+        live_app.quiet_uninstall_string.as_deref().unwrap_or(&plan.raw_command)
+    } else {
+        live_app.uninstall_string.as_deref().unwrap_or(&plan.raw_command)
+    };
+
+    if live_cmd != plan.raw_command {
+        return Err("The registered uninstaller command was modified after confirmation. Execution aborted.".into());
+    }
+
     let cancel = Arc::new(AtomicBool::new(false));
     let timeout = timeout_secs.unwrap_or(600);
+    let plan_command = plan.command;
+    let plan_app_id = plan.app_id;
+
     run_blocking("Standard uninstall", move || {
-        uninstall::execute_uninstaller(&app_id, &command, &cancel, timeout)
+        uninstall::execute_uninstaller(&plan_app_id, &plan_command, &cancel, timeout)
     })
     .await?
 }
 
 #[tauri::command]
 pub async fn scan_app_leftovers(
+    state: State<'_, AppState>,
     app_id: String,
-    app_name: String,
-    publisher: Option<String>,
-    install_location: Option<String>,
 ) -> Result<leftovers::LeftoverScanReport, String> {
-    run_blocking("Leftover scan", move || {
-        leftovers::scan_app_leftovers(&app_id, &app_name, publisher.as_deref(), install_location.as_deref())
+    let app_id_trimmed = app_id.trim().to_string();
+    let inventory = run_blocking("Application lookup for leftover scan", apps::discover_apps).await?;
+    let app = inventory
+        .apps
+        .iter()
+        .find(|a| a.id == app_id_trimmed)
+        .ok_or_else(|| "Application not found in uninstall inventory.".to_string())?;
+
+    let name = app.name.clone();
+    let publisher = app.publisher.clone();
+    let install_location = app.install_location.clone();
+
+    let (plan, report) = run_blocking("Leftover scan", move || {
+        leftovers::scan_app_leftovers(&app_id_trimmed, &name, publisher.as_deref(), install_location.as_deref())
     })
-    .await
+    .await?;
+
+    let mut plans = state
+        .leftover_plans
+        .lock()
+        .map_err(|_| "Leftover plan registry is unavailable.".to_string())?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    plans.retain(|_, p| p.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan);
+
+    Ok(report)
 }
 
 #[tauri::command]
@@ -717,12 +845,28 @@ pub async fn clean_app_leftovers(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     app_id: String,
-    candidates: Vec<leftovers::LeftoverCandidate>,
+    plan_id: String,
+    candidate_ids: Vec<String>,
 ) -> Result<leftovers::LeftoverCleanReport, String> {
     ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
     let quarantine_root = cleanup_quarantine_root(&app)?;
+
+    let plan = {
+        let mut plans = state
+            .leftover_plans
+            .lock()
+            .map_err(|_| "Leftover plan registry is unavailable.".to_string())?;
+        plans
+            .remove(&plan_id)
+            .ok_or_else(|| "Residual cleanup plan expired or not found. Please scan again.".to_string())?
+    };
+
+    if plan.app_id != app_id {
+        return Err("Residual cleanup plan application ID mismatch.".into());
+    }
+
     run_blocking("Leftover cleanup", move || {
-        leftovers::clean_leftovers(&app_id, &candidates, &quarantine_root)
+        leftovers::clean_leftovers(&plan, &candidate_ids, &quarantine_root)
     })
     .await?
 }

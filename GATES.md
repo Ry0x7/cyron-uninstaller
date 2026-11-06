@@ -179,11 +179,46 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   EVIDENCE: verified by `restore_never_overwrites_an_existing_file` in `tests/security.rs` and
   `quarantine_enforces_storage_cap_and_disk_free_space` in unit tests.
 
+## Phase 4.1 Priority 0 Hardening & Phase 5 Release Gates
+
+- [x] G23: uninstaller execution boundary & server-side resolution
+  CHECK: `src-tauri/src/uninstall.rs`, `commands.rs`
+  EXPECT: frontend cannot supply arbitrary executable or arguments; command resolved server-side from
+  registry; single-use expiring `UninstallPlan` (10m TTL); revalidation against live registry before execution.
+  EVIDENCE: verified by `uninstall::tests` and `prepare_uninstall`/`execute_uninstall` command contract.
+
+- [x] G24: process termination snapshot and PID creation time verification
+  CHECK: `src-tauri/src/process.rs`, `tests/security.rs`
+  EXPECT: PIDs must match verified snapshot for target app; creation time (`GetProcessTimes`) re-verified
+  to defeat PID recycling; image path verified inside app root; critical processes denied.
+  EVIDENCE: verified by `process_termination_rejects_unlisted_pids_and_mismatched_apps` and
+  `critical_system_processes_cannot_be_terminated` in `tests/security.rs`.
+
+- [x] G25: leftover scanner server-side plans & non-following traversal
+  CHECK: `src-tauri/src/leftovers.rs`, `tests/security.rs`
+  EXPECT: single-use `LeftoverPlan` (10m TTL); bounded directory walker (depth <= 32, max 100k files)
+  skips junctions, symlinks, and reparse points; journal writes flushed and synchronized (`sync_all`).
+  EVIDENCE: verified by `leftover_scanner_guards_system_roots_and_user_profiles` and leftover tests.
+
+- [x] G26: recursive multi-type registry backup and restore roundtrip
+  CHECK: `src-tauri/src/leftovers.rs`
+  EXPECT: exports all subkeys and value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`,
+  `REG_MULTI_SZ`); verifies backup integrity before deletion; restores keys and values cleanly.
+  EVIDENCE: verified by `registry_backup_and_restore_roundtrip_fixture` in `src-tauri/src/leftovers.rs`.
+
+- [x] G27: release installer generation & reproducible checksums
+  CHECK: `node scripts/verify-release-bundles.mjs`
+  EXPECT: both NSIS (`.exe`) and WiX MSI (`.msi`) installers build and verify with exact SHA-256 hashes.
+  EVIDENCE: `RELEASE_BUNDLES_OK`:
+  - NSIS: `Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`)
+  - WiX MSI: `Cyron_0.1.0_x64_en-US.msi` (2.00 MiB, SHA-256: `29453c42694a87723fe30b4827d4e9a92e52413038e9daded7592fd277271dc8`)
+
 ## Not gated
 
 - [ ] Windows CI remote run: workflow now runs the security, cleanup-stress and fixture steps;
   no GitHub Actions run has been observed from this machine.
-- [ ] Release MSI/NSIS packaging and signing: not produced.
+- [ ] Authenticode production signing: signing credentials/HSM were not provided; installers are verified
+  as unsigned release candidates.
 - [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;
   the engine was exercised only against isolated fixtures.
 - [ ] Elevation: Cyron never requests administrator rights for cleaning; locked or system-owned

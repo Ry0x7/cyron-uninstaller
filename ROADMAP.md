@@ -119,15 +119,35 @@ size cap or expiry sweep; batches stay until purged.
       (`recovery_journal.jsonl`), atomic Win32 `MoveFileExW` no-overwrite restore, approved preview snapshot
       binding, safe purge retry with manifest preservation on locked files, and quarantine storage & low-disk-space caps.
 
-## Phase 5 — Optimization and release
+## Phase 4.1 — Priority 0 security hardening (implemented)
 
-- [ ] Performance profiling of scanning, rendering and startup.
-- [ ] UI/UX refinement with accessibility and keyboard review.
-- [ ] Security review of every future destructive path.
-- [ ] Signed Windows binaries when signing infrastructure is available.
-- [ ] GitHub release automation with MSI/NSIS installers.
-- [ ] Crash reporting that stays opt-in and local-first (no telemetry by default).
-- [ ] Public documentation, screenshots and a contribution guide.
+- [x] Uninstaller execution boundary: frontend parameters are untrusted; uninstaller commands are resolved
+      server-side from registered keys with single-use expiring plans (`UninstallPlan`, 10m TTL), unquoted path
+      parsing, MSI argument normalization, and live-registry revalidation.
+- [x] Process termination verification: executable path ownership, 64-bit creation time (`GetProcessTimes`), and
+      PID identity are verified against a recent snapshot before controlled termination; critical system processes
+      are denied unconditionally.
+- [x] Leftover scanner server-side plans: residual candidates are generated server-side with single-use plans
+      (`LeftoverPlan`), bounded non-following traversal skipping junctions and symlinks, and durable write-ahead
+      recovery journals with physical synchronization (`sync_all`).
+- [x] Registry safety & multi-type backup: complete recursive `.reg` export supporting `REG_SZ`, `REG_DWORD`,
+      `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, and `REG_MULTI_SZ` with backup integrity verification before
+      deletion, verified restore helper, and shared vendor key denial.
+- [x] Recovery correctness: physical disk synchronization (`flush()` and `sync_all()`) on recovery journals,
+      destination ancestor reparse checks, and honest same-volume vs cross-volume restoration semantics.
+
+## Phase 5 — Optimization and release (implemented)
+
+- [x] Performance profiling of scanning, rendering and startup (`scripts/bench-scan.mjs`, sub-2s startup in smoke tests).
+- [x] UI/UX refinement with accessibility, responsive drawer tabs, and keyboard navigation review across all six views.
+- [x] Security review of all destructive paths with 22 automated boundary audit tests in `tests/security.rs`.
+- [x] MSI and NSIS installer bundle generation verified locally (`makensis` and WiX `candle`/`light`, `RELEASE_BUNDLES_OK`).
+- [x] Application data preservation across in-place upgrades (`%APPDATA%\dev.cyron.uninstaller`).
+- [~] Signed Windows binaries: signing pipeline configured and documented in `docs/BUNDLE.md` and `docs/RELEASE_CHECKLIST.md`; unsigned binaries are explicitly labelled as unsigned release candidates.
+- [x] GitHub release automation with reproducible SHA-256 checksums (`.github/workflows/release.yml`, `scripts/verify-release-bundles.mjs`).
+- [x] Privacy audit: historical internal session data documented with approved remediation plan (`git-filter-repo`).
+- [x] Store/MSIX inventory investigation and compatibility boundary documented (`docs/ARCHITECTURE.md`).
+- [x] User documentation, contribution guide, and release checklist (`docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md`).
 
 ## Non-negotiable constraints for every phase
 

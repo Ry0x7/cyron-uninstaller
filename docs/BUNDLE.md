@@ -36,9 +36,13 @@ available on supported Windows 10 installations; a machine without it needs the 
 installed before the desktop app can render its UI.
 
 The bundle configuration references icons in `src-tauri/icons/`; all configured icon files are
-present. The debug executable was built and verified locally. **Release MSI/NSIS packaging has
-not been run or verified.** No signed binary or installer has been produced; outputs are
-unsigned and Windows may display a publisher warning.
+present. The debug executable was built and verified locally (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`).
+
+**Release MSI and NSIS packaging has been verified locally (`RELEASE_BUNDLES_OK`):**
+- **NSIS Setup**: `src-tauri/target/release/bundle/nsis/Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`).
+- **WiX MSI Package**: `src-tauri/target/release/bundle/msi/Cyron_0.1.0_x64_en-US.msi` (2.00 MiB, SHA-256: `29453c42694a87723fe30b4827d4e9a92e52413038e9daded7592fd277271dc8`).
+
+Outputs are currently unsigned release binaries; Windows SmartScreen will display an untrusted publisher warning until an Authenticode certificate is applied.
 
 ## User data
 

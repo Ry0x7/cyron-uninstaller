@@ -165,22 +165,26 @@ Notes:
     remain unverified.
 11. **Windows only.** Win32 APIs are called unconditionally.
 
-## Phase 4 readiness
+## Phase 4 & 4.1 Acceptance
 
-Phase 3 delivers the reusable halves of an uninstall engine: a validated command boundary, a
-single-use plan/confirmation model, a quarantine with manifests and restore, a local operation log,
-a permission-boundary test suite that can be extended to new destructive modules, and a UI pattern
-for preview → confirm → progress → results.
+| # | Requirement | Status | Evidence and limits |
+| --- | --- | --- | --- |
+| 1 | Standard uninstaller execution | Done | `src-tauri/src/uninstall.rs`: commands tokenized safely, MSI product codes normalized, shell interpreters (`cmd.exe`, `powershell.exe`) rejected; exit code tracking with reboot requirement (code 3010) |
+| 2 | Process discovery and controlled termination | Done | `src-tauri/src/process.rs`: discovers processes executing within app install directory; verifies PID identity and 64-bit creation times (`GetProcessTimes`) against verified snapshots; critical system processes denied; graceful `WM_CLOSE` precedes `TerminateProcess` |
+| 3 | Leftover & residual scanner | Done | `src-tauri/src/leftovers.rs`: classifies candidate directories and registry keys by confidence and risk; guards system roots and profile folders; non-following bounded directory walker (depth <= 32, max 100k files) skips junctions |
+| 4 | Staged registry backup and restore | Done | Complete recursive `.reg` export supporting `REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, and `REG_MULTI_SZ` with backup integrity verification before subkey deletion; verified restore helper |
+| 5 | Batch sequential uninstaller | Done | `Uninstaller.tsx`: reviewable queue executing sequentially with failure isolation; requires separate confirmation for residual review |
+| 6 | Priority 0 uninstaller execution boundary | Done | Frontend commands and arguments untrusted; commands resolved server-side from registered uninstall keys into single-use expiring `UninstallPlan` (10m TTL); revalidated against live registry |
+| 7 | Priority 0 recovery correctness | Done | Durable crash-consistent write-ahead recovery journal (`recovery_journal.jsonl`) with physical disk synchronization (`sync_all`); atomic Win32 `MoveFileExW` no-overwrite restore; destination ancestor reparse checks |
 
-Phase 4 still needs, before it may ship:
+## Phase 5 Acceptance
 
-1. Process discovery and a critical-process deny list, since uninstallers need to detect and stop
-   holding processes. Phase 3 deliberately has no termination path.
-2. Registry export/backup plus restore, because leftover detection will read and eventually remove
-   registry keys.
-3. A plan model that covers non-file operations (registry values, services) rather than only file
-   moves.
-4. Explicit handling for shared dependencies and system components, with a reviewed allow list and
-   a refusal path like `guard_path`.
-5. Extending `tests/security.rs` module boundaries and adding fixtures for shell execution of
-   vendor uninstallers, which Phase 3 does not run at all.
+| # | Requirement | Status | Evidence and limits |
+| --- | --- | --- | --- |
+| 1 | Automated release workflows | Done | `.github/workflows/release.yml`: automated release pipeline on version tags, builds release binaries, generates SHA-256 checksums, publishes GitHub releases |
+| 2 | NSIS and WiX MSI installer packaging | Done | Verified locally (`RELEASE_BUNDLES_OK` via `scripts/verify-release-bundles.mjs`): NSIS (`Cyron_0.1.0_x64-setup.exe`, 1.42 MiB) and WiX MSI (`Cyron_0.1.0_x64_en-US.msi`, 2.00 MiB) |
+| 3 | Application data preservation | Done | Upgrade contract preserves `%APPDATA%\dev.cyron.uninstaller` (`history.json`, `quarantine/`, `cleanup-log.json`) across in-place upgrades |
+| 4 | Authenticode signing model | Configured / Documented | Unsigned release candidate status explicitly labelled; signing parameters and verification steps documented in `docs/RELEASE_CHECKLIST.md` and `docs/BUNDLE.md` |
+| 5 | Store/MSIX inventory investigation | Documented | Investigated and documented in `docs/ARCHITECTURE.md`: AppModel registry repository vs WinRT COM bindings; uninstallation requires Windows Runtime COM interfaces without shell scripts |
+| 6 | Git history privacy audit | Documented | Historical session metadata in commit `62414cc` documented with approved `git-filter-repo` remediation plan |
+| 7 | User guide and contribution documentation | Done | `docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md` |

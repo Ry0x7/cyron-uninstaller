@@ -4,20 +4,27 @@ Cyron is a Windows desktop utility that combines an application inventory, a dis
 and a developer/AI cache cleaner. It is the foundation for a Revo Uninstaller + BleachBit +
 WinDirStat replacement with plain-language risk labels, built for people who are not sysadmins.
 
-> **Review-first cleaning.** Cyron measures caches, shows you every file it plans to touch, and
+> **Review-first cleaning & uninstallation.** Cyron measures caches, shows you every file it plans to touch, and
 > only after an explicit confirmation moves them into a recoverable quarantine. Protected data —
 > conversation histories, AI models, settings, credentials, Docker/WSL data and browser profiles —
 > is refused by the backend, not merely hidden in the interface. Cleaning is off by default:
-> Cyron starts in read-only mode until you enable it. It still does not uninstall programs, stop
-> processes or edit the registry; those remain Phase 4.
+> Cyron starts in read-only mode until you enable it. Uninstallation verifies commands server-side,
+> protects Windows critical processes, backs up registry subkeys to `.reg` files before deletion,
+> and moves residuals to quarantine.
 
 ## What works today
 
-- **Application inventory** — reads the Windows uninstall registry (64-bit and 32-bit views,
+- **Application inventory & uninstallation** — reads the Windows uninstall registry (64-bit and 32-bit views,
   machine and current user), hides updates/patches/system components, and shows publisher,
-  version, install date, architecture, estimated size and install location when the installer
-  recorded them. Search, filter by scope, sort, open the install folder, or measure the real
-  on-disk size of the install folder.
+  version, install date, architecture, estimated size and install location.
+  - **Standard Uninstaller**: validates registered vendor uninstallers and MSI packages, rejecting dangerous
+    shell interpreters (`cmd.exe`, `powershell.exe`). Tracks process exit codes and handles reboot-required code `3010`.
+  - **Process Manager**: discovers processes executing from the app's installation folder, checks creation time
+    against verified snapshots to prevent PID recycling issues, and unconditionally protects critical Windows system processes.
+  - **Residual & Leftover Scanner**: detects leftover files, directories, and registry keys under AppData, ProgramData,
+    and the registry. Automatically creates a complete recursive `.reg` backup before deleting any subkey and moves files
+    into a recoverable quarantine batch.
+  - **Batch Uninstaller**: unattended sequential uninstallation with failure isolation.
 - **Disk analyzer** — pick a drive or folder, watch live progress, cancel, then work in three
   modes:
   - **Map** — a squarified treemap beside a persistent, resizable folder tree. Selection,
@@ -42,9 +49,10 @@ WinDirStat replacement with plain-language risk labels, built for people who are
   and 12 are **Protected** (histories, models, settings, Docker/WSL data, Firefox profiles, the
   Windows Update download cache) — measured, explained and refused by the backend. Cleaning is a five-step workflow: preview the exact paths, confirm, watch
   progress, read per-item results, then restore from quarantine / purge.
-- **Recoverable quarantine** — every cleaned file is moved, not deleted, into
-  `<app_data>\quarantine\<run-id>\` with a manifest. A batch stays restorable for 7 days; restoring
-  never overwrites an existing file, and purging is the only permanent step.
+- **Recoverable quarantine** — every cleaned or residual file is moved, not deleted, into
+  `<app_data>\quarantine\<run-id>\` alongside an append-only, durable write-ahead recovery journal
+  (`recovery_journal.jsonl` with `sync_all`). Restoring never overwrites an existing file, and purging is
+  the only permanent step.
 - **Read-only mode and cleanup log** — cleaning starts disabled and is enabled explicitly in the
   Cleaner or Settings. Each run, restore and purge is appended to a local cleanup log (max 100
   entries) and to the Activity history.
@@ -53,6 +61,7 @@ WinDirStat replacement with plain-language risk labels, built for people who are
 - **Activity** — local history of completed and cancelled disk scans (up to 100 entries).
 - **Settings** — system/light/dark theme, include-hidden-files toggle, and an exclusion list that
   is sent to both scanners.
+- **Installer Bundles** — pre-built NSIS (`.exe`) and WiX MSI (`.msi`) release installers.
 
 Cleaning never touches anything outside the catalog, and no command accepts a free-form path to
 delete. Cyron does not uninstall programs, terminate processes or write registry values; the

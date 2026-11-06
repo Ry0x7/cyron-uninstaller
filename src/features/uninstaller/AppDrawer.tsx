@@ -9,6 +9,7 @@ import type {
   Measured,
   ParsedUninstallCommand,
   UninstallExecutionResult,
+  UninstallPlan,
 } from "../../lib/types";
 import {
   Badge,
@@ -65,6 +66,7 @@ export function AppDrawer({
 
   // Uninstaller execution state
   const [parsedCmd, setParsedCmd] = useState<ParsedUninstallCommand | null>(null);
+  const [uninstallPlan, setUninstallPlan] = useState<UninstallPlan | null>(null);
   const [uninstallConfirm, setUninstallConfirm] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallResult, setUninstallResult] = useState<UninstallExecutionResult | null>(null);
@@ -96,6 +98,7 @@ export function AppDrawer({
     setTerminating(false);
 
     setParsedCmd(null);
+    setUninstallPlan(null);
     setUninstallConfirm(false);
     setUninstalling(false);
     setUninstallResult(null);
@@ -109,16 +112,27 @@ export function AppDrawer({
     setCleaning(false);
     setCleanReport(null);
 
-    if (app?.uninstallString) {
-      api.parseUninstallCommand(app.uninstallString)
-        .then((parsed) => {
-          if (activeId.current === app.id) setParsedCmd(parsed);
-        })
-        .catch(() => {});
-    }
+    if (app?.id) {
+      loadProcesses(app.id);
 
-    if (app?.installLocation) {
-      loadProcesses(app.installLocation);
+      if (!app.isProtected) {
+        api.prepareUninstall(app.id, false)
+          .then((plan) => {
+            if (activeId.current === app.id) setUninstallPlan(plan);
+          })
+          .catch((err) => {
+            if (activeId.current === app.id) {
+              setUninstallError(errorMessage(err));
+              if (app.uninstallString) {
+                api.parseUninstallCommand(app.uninstallString)
+                  .then((parsed) => {
+                    if (activeId.current === app.id) setParsedCmd(parsed);
+                  })
+                  .catch(() => {});
+              }
+            }
+          });
+      }
     }
   }, [app?.id]);
 
@@ -129,18 +143,18 @@ export function AppDrawer({
     [app.version ? `Version ${app.version}` : null, app.publisher].filter(Boolean).join(" · ") ||
     "Installed application";
 
-  const loadProcesses = async (loc?: string) => {
-    const target = loc ?? location;
-    if (!target) return;
+  const loadProcesses = async (appId?: string) => {
+    const id = appId ?? app?.id;
+    if (!id) return;
     setLoadingProcesses(true);
     setProcessError(null);
     try {
-      const res = await api.discoverAppProcesses(target);
-      if (activeId.current === app.id) setProcesses(res);
+      const res = await api.discoverAppProcesses(id);
+      if (activeId.current === id) setProcesses(res);
     } catch (err) {
-      if (activeId.current === app.id) setProcessError(errorMessage(err));
+      if (activeId.current === id) setProcessError(errorMessage(err));
     } finally {
-      if (activeId.current === app.id) setLoadingProcesses(false);
+      if (activeId.current === id) setLoadingProcesses(false);
     }
   };
 
@@ -150,7 +164,7 @@ export function AppDrawer({
     setProcessError(null);
     try {
       const pids = processes.map((p) => p.pid);
-      const results = await api.terminateAppProcesses(pids, terminateForce);
+      const results = await api.terminateAppProcesses(app.id, pids, terminateForce);
       const failed = results.filter((r) => !r.success);
       if (failed.length > 0) {
         setProcessError(failed.map((f) => `${f.name}: ${f.error}`).join(" · "));
@@ -192,11 +206,11 @@ export function AppDrawer({
   };
 
   const launchUninstall = async () => {
-    if (!parsedCmd || !parsedCmd.isValid || !uninstallConfirm || uninstalling) return;
+    if (!uninstallPlan || !uninstallConfirm || uninstalling) return;
     setUninstalling(true);
     setUninstallError(null);
     try {
-      const res = await api.executeUninstall(app.id, parsedCmd);
+      const res = await api.executeUninstall(app.id, uninstallPlan.planId);
       if (activeId.current === app.id) {
         setUninstallResult(res);
         if (res.status === "completed" && onUninstallSuccess) {
@@ -214,12 +228,7 @@ export function AppDrawer({
     setScanningLeftovers(true);
     setLeftoverError(null);
     try {
-      const report = await api.scanAppLeftovers(
-        app.id,
-        app.name,
-        app.publisher,
-        app.installLocation,
-      );
+      const report = await api.scanAppLeftovers(app.id);
       if (activeId.current === app.id) {
         setLeftoverReport(report);
         const defaults = new Set(
@@ -248,13 +257,13 @@ export function AppDrawer({
     setCleaning(true);
     setLeftoverError(null);
     try {
-      const candidatesToClean = leftoverReport.candidates
-        .filter((c) => selectedCandidates.has(c.id))
-        .map((c) => ({ ...c, selected: true }));
-      const report = await api.cleanAppLeftovers(app.id, candidatesToClean);
+      const report = await api.cleanAppLeftovers(
+        app.id,
+        leftoverReport.planId,
+        Array.from(selectedCandidates),
+      );
       if (activeId.current === app.id) {
         setCleanReport(report);
-        // Refresh leftover scan
         await startLeftoverScan();
       }
     } catch (err) {
@@ -484,7 +493,7 @@ export function AppDrawer({
               This application is registered as a protected Windows component. Cyron refuses to launch
               uninstallation for system software.
             </Banner>
-          ) : parsedCmd && parsedCmd.isValid ? (
+          ) : uninstallPlan ? (
             <>
               <p className="un-hint">
                 Validated command line registered by the software vendor. Shell interpreters and
@@ -495,18 +504,18 @@ export function AppDrawer({
                 <div>
                   <span className="un-command__label">Executable</span>
                   <pre className="un-command" tabIndex={0}>
-                    {parsedCmd.executable}
+                    {uninstallPlan.executable}
                   </pre>
                 </div>
-                {parsedCmd.arguments.length > 0 && (
+                {uninstallPlan.arguments.length > 0 && (
                   <div>
                     <span className="un-command__label">Arguments</span>
                     <pre className="un-command" tabIndex={0}>
-                      {parsedCmd.arguments.join(" ")}
+                      {uninstallPlan.arguments.join(" ")}
                     </pre>
                   </div>
                 )}
-                {parsedCmd.isMsi && (
+                {uninstallPlan.isMsi && (
                   <Badge tone="accent">Windows Installer (MSI) package</Badge>
                 )}
               </div>
@@ -563,7 +572,8 @@ export function AppDrawer({
             </>
           ) : (
             <Banner tone="caution">
-              {parsedCmd?.rejectionReason ??
+              {uninstallError ??
+                parsedCmd?.rejectionReason ??
                 app.uninstallString ??
                 "No registered uninstall command found for this application."}
             </Banner>

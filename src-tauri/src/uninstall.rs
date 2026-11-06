@@ -3,12 +3,13 @@
 //! Validates registered uninstall commands, rejects shell wrappers and arbitrary
 //! script invocations, tokenizes arguments safely, and executes vendor uninstallers
 //! with timeout, exit code tracking (including restart requirement 3010), and cancellation.
+//! Destruction commands require backend-generated, expiring, single-use plans.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,6 +23,29 @@ pub struct ParsedUninstallCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StoredUninstallPlan {
+    pub plan_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub raw_command: String,
+    pub command: ParsedUninstallCommand,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UninstallPlan {
+    pub plan_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub executable: String,
+    pub arguments: Vec<String>,
+    pub is_msi: bool,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UninstallExecutionResult {
     pub app_id: String,
     pub exit_code: Option<i32>,
@@ -31,7 +55,7 @@ pub struct UninstallExecutionResult {
     pub elapsed_ms: u64,
 }
 
-fn is_forbidden_shell(name: &str) -> bool {
+pub fn is_forbidden_shell(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
         lower.as_str(),
@@ -43,6 +67,8 @@ fn is_forbidden_shell(name: &str) -> bool {
             | "sh.exe"
             | "reg.exe"
             | "regedit.exe"
+            | "rundll32.exe"
+            | "mshta.exe"
     ) || lower.starts_with("pwsh")
         || (lower.starts_with("power") && lower.ends_with(".exe"))
 }
@@ -60,8 +86,9 @@ pub fn parse_uninstall_command(raw_command: &str) -> ParsedUninstallCommand {
         };
     }
 
-    let tokens = tokenize_command(trimmed);
-    if tokens.is_empty() {
+    // Resolve executable and arguments, handling both quoted and unquoted paths with spaces.
+    let (raw_exe, args) = extract_executable_and_args(trimmed);
+    if raw_exe.is_empty() {
         return ParsedUninstallCommand {
             executable: String::new(),
             arguments: Vec::new(),
@@ -71,21 +98,18 @@ pub fn parse_uninstall_command(raw_command: &str) -> ParsedUninstallCommand {
         };
     }
 
-    let raw_exe = &tokens[0];
-    let mut args = tokens[1..].to_vec();
-
     // Check for MSI uninstaller
-    let exe_name = Path::new(raw_exe)
+    let exe_name = Path::new(&raw_exe)
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or(raw_exe)
+        .unwrap_or(&raw_exe)
         .to_ascii_lowercase();
 
     if exe_name == "msiexec.exe" || exe_name == "msiexec" {
         let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
         let system_msiexec = format!("{windir}\\System32\\msiexec.exe");
 
-        // Normalize /I (install) or /X (uninstall) to /X
+        // Normalize /I (install) or /X (uninstall) to /x
         let mut normalized_args = Vec::new();
         let mut has_uninstall_switch = false;
         for arg in args {
@@ -105,6 +129,9 @@ pub fn parse_uninstall_command(raw_command: &str) -> ParsedUninstallCommand {
         if !has_uninstall_switch {
             normalized_args.insert(0, "/x".into());
         }
+
+        // Clean up dangerous shell arguments
+        normalized_args.retain(|arg| !matches!(arg.as_str(), "|" | ">" | ">>" | "<" | "&" | "&&" | ";" | "^"));
 
         return ParsedUninstallCommand {
             executable: system_msiexec,
@@ -128,38 +155,99 @@ pub fn parse_uninstall_command(raw_command: &str) -> ParsedUninstallCommand {
         };
     }
 
-    // Verify executable exists
-    let exe_path = PathBuf::from(raw_exe);
-    if !exe_path.exists() {
-        // Try looking up with .exe suffix
+    // Verify executable exists and has .exe extension
+    let exe_path = PathBuf::from(&raw_exe);
+    let resolved_path = if exe_path.exists() {
+        exe_path
+    } else {
         let with_exe = exe_path.with_extension("exe");
         if with_exe.exists() {
+            with_exe
+        } else {
             return ParsedUninstallCommand {
-                executable: with_exe.to_string_lossy().to_string(),
+                executable: raw_exe.clone(),
                 arguments: args,
                 is_msi: false,
-                is_valid: true,
-                rejection_reason: None,
+                is_valid: false,
+                rejection_reason: Some(format!("Uninstaller executable not found: {raw_exe}")),
             };
         }
+    };
+
+    let extension = resolved_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if extension != "exe" {
         return ParsedUninstallCommand {
-            executable: raw_exe.clone(),
+            executable: resolved_path.to_string_lossy().to_string(),
             arguments: args,
             is_msi: false,
             is_valid: false,
-            rejection_reason: Some(format!("Uninstaller executable not found: {raw_exe}")),
+            rejection_reason: Some(format!(
+                "Non-executable uninstaller format (.{extension}) is refused."
+            )),
         };
     }
 
-    // Clean up arguments: remove any dangerous pipe or redirection syntax
-    args.retain(|arg| !matches!(arg.as_str(), "|" | ">" | ">>" | "<" | "&" | "&&"));
+    // Clean up arguments: remove any dangerous pipe, redirection, or chaining syntax
+    let mut safe_args = args;
+    safe_args.retain(|arg| !matches!(arg.as_str(), "|" | ">" | ">>" | "<" | "&" | "&&" | ";" | "^"));
+
+    let canonical_exe = match std::fs::canonicalize(&resolved_path) {
+        Ok(c) => c.to_string_lossy().to_string(),
+        Err(_) => resolved_path.to_string_lossy().to_string(),
+    };
 
     ParsedUninstallCommand {
-        executable: exe_path.to_string_lossy().to_string(),
-        arguments: args,
+        executable: canonical_exe,
+        arguments: safe_args,
         is_msi: false,
         is_valid: true,
         rejection_reason: None,
+    }
+}
+
+/// Extracts executable and arguments from a command string.
+/// Handles quoted executables as well as unquoted paths with spaces where an existing file ends in .exe.
+fn extract_executable_and_args(cmd: &str) -> (String, Vec<String>) {
+    let trimmed = cmd.trim();
+    if trimmed.starts_with('"') {
+        let tokens = tokenize_command(trimmed);
+        if tokens.is_empty() {
+            (String::new(), Vec::new())
+        } else {
+            (tokens[0].clone(), tokens[1..].to_vec())
+        }
+    } else {
+        // If unquoted, check if the first tokenized executable exists.
+        let tokens = tokenize_command(trimmed);
+        if tokens.is_empty() {
+            return (String::new(), Vec::new());
+        }
+        let first = &tokens[0];
+        if Path::new(first).exists() || Path::new(&format!("{first}.exe")).exists() {
+            return (first.clone(), tokens[1..].to_vec());
+        }
+
+        // If not, search for the first occurrence of .exe in trimmed string
+        let lower = trimmed.to_ascii_lowercase();
+        if let Some(idx) = lower.find(".exe") {
+            let exe_end = idx + 4;
+            let candidate_exe = trimmed[..exe_end].trim();
+            if Path::new(candidate_exe).exists() {
+                let remainder = trimmed[exe_end..].trim();
+                let remaining_args = if remainder.is_empty() {
+                    Vec::new()
+                } else {
+                    tokenize_command(remainder)
+                };
+                return (candidate_exe.to_string(), remaining_args);
+            }
+        }
+
+        (tokens[0].clone(), tokens[1..].to_vec())
     }
 }
 
@@ -182,7 +270,6 @@ pub fn tokenize_command(cmd: &str) -> Vec<String> {
                 }
             }
             '\\' => {
-                // Check if followed by quote
                 if chars.peek() == Some(&'"') {
                     current.push('"');
                     chars.next();
@@ -201,6 +288,53 @@ pub fn tokenize_command(cmd: &str) -> Vec<String> {
     }
 
     tokens
+}
+
+/// Creates a single-use, backend-verified uninstall plan with a 10-minute expiration.
+pub fn create_uninstall_plan(
+    app: &crate::apps::InstalledApp,
+    quiet: bool,
+) -> Result<StoredUninstallPlan, String> {
+    let raw_cmd = if quiet && app.quiet_uninstall_string.is_some() {
+        app.quiet_uninstall_string.as_ref().unwrap()
+    } else if app.uninstall_string.is_some() {
+        app.uninstall_string.as_ref().unwrap()
+    } else {
+        return Err(format!("No registered uninstall command found for {}.", app.name));
+    };
+
+    let parsed = parse_uninstall_command(raw_cmd);
+    if !parsed.is_valid {
+        return Err(parsed.rejection_reason.unwrap_or_else(|| "Invalid uninstaller command.".into()));
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let plan_id = format!("uninst-{}-{}-{}", now, std::process::id(), app.id.replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
+
+    Ok(StoredUninstallPlan {
+        plan_id,
+        app_id: app.id.clone(),
+        app_name: app.name.clone(),
+        raw_command: raw_cmd.clone(),
+        command: parsed,
+        expires_at: now + 600, // 10 minutes TTL
+    })
+}
+
+/// Converts a stored plan to an outward-facing plan without sensitive execution secrets.
+pub fn to_public_plan(plan: &StoredUninstallPlan) -> UninstallPlan {
+    UninstallPlan {
+        plan_id: plan.plan_id.clone(),
+        app_id: plan.app_id.clone(),
+        app_name: plan.app_name.clone(),
+        executable: plan.command.executable.clone(),
+        arguments: plan.command.arguments.clone(),
+        is_msi: plan.command.is_msi,
+        expires_at: plan.expires_at,
+    }
 }
 
 /// Executes a validated uninstaller process and waits for completion.
@@ -314,5 +448,12 @@ mod tests {
     fn rejects_empty_commands() {
         let parsed = parse_uninstall_command("   ");
         assert!(!parsed.is_valid);
+    }
+
+    #[test]
+    fn strips_dangerous_chaining_characters() {
+        let parsed = parse_uninstall_command("msiexec.exe /x {GUID} & calc.exe | notepad.exe");
+        assert!(parsed.is_valid);
+        assert!(!parsed.arguments.iter().any(|a| a == "&" || a == "|"));
     }
 }

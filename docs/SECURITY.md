@@ -127,3 +127,68 @@ execution, and residual leftover management:
    files, reparse points and rollback failure, plus a security review before release. *(Phase 3:
    `tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`; review pending a
    release build.)*
+
+---
+
+## Priority 0 Security Hardening
+
+Phase 4.1 adds critical defense-in-depth hardening across all destructive operations:
+
+1. **Uninstaller Execution Boundary**:
+   - The backend never trusts client-supplied executable paths, arguments, or `isValid` flags.
+   - The uninstaller command is resolved server-side from registered Windows uninstall keys using `app_id`.
+   - Single-use, expiring confirmation plans (`UninstallPlan`, 10-minute TTL) are retained in `AppState`.
+   - Re-validation against live system registry immediately prior to execution ensures the registered command was not tampered with.
+   - Shell wrappers (`cmd.exe`, `powershell.exe`, `pwsh`, `bash`, scripts) are strictly rejected.
+   - MSI product codes and flags are normalized; command-line argument chaining (`&`, `|`, `>`, `<`) is stripped.
+
+2. **Process Termination Verification**:
+   - Process discovery captures a verified snapshot (`StoredProcessSnapshot`) with 64-bit creation times (`GetProcessTimes`).
+   - Termination requires `app_id` and checks against the verified snapshot.
+   - Process image path must reside strictly inside the application's canonical install location.
+   - Process creation time is re-queried immediately before termination to prevent attacks against recycled PIDs.
+   - Critical system processes (`csrss.exe`, `smss.exe`, `services.exe`, `lsass.exe`, `explorer.exe`, etc.) and system directories (`System32`, `SysWOW64`) are unconditionally protected.
+   - Separate confirmation is enforced for force termination (`TerminateProcess`) after graceful `WM_CLOSE` is attempted.
+
+3. **Leftover & Residual Scanner Hardening**:
+   - Residual candidates are generated server-side with a single-use plan (`LeftoverPlan`, 10-minute TTL).
+   - Candidate directory paths are re-guarded (`guard_leftover_path`); top-level roots, user profile roots, and system directories are refused.
+   - Non-following, bounded directory walker skips reparse points, symlinks, and junctions.
+   - Quarantining uses a durable write-ahead journal (`recovery_journal.jsonl`) with physical disk synchronization (`flush()` and `sync_all()`).
+
+4. **Registry Safety & Multi-Type Backup**:
+   - Recursive registry export preserves all value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and all nested subkeys.
+   - Backup file integrity (header, size, non-empty structure) is strictly verified before calling `delete_subkey_all`.
+   - Shared vendor keys (`Software\Microsoft`, `Software\Google`, `Software\Apple`, `Software\Intel`, etc.) are protected from deletion.
+   - Roundtrip backup and restoration is verified using isolated test fixtures.
+
+5. **Recovery Correctness**:
+   - Recovery journals are appended and physically synchronized (`sync_all`) before any destructive `fs::rename`.
+   - Restoring files verifies that destination parent directories exist and are not symlinks/junctions.
+   - Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` prevents destination overwrites; on the same volume this provides atomic rename, and across volumes it safely copies and removes without overwriting.
+
+---
+
+## Code Signing & Release Security
+
+- **Authenticode Signing**:
+  - Production releases should be signed with an Authenticode code-signing certificate (via `signtool.exe` with RFC 3161 timestamping).
+  - An unsigned binary must never be represented as signed. Unsigned builds are explicitly marked as "Unsigned Release Candidate".
+- **Reproducible Checksums**:
+  - Every release publishes SHA-256 hashes in `SHA256SUMS.txt`.
+
+---
+
+## Git History Privacy Findings & Remediation
+
+- **Finding**:
+  In commit `62414cc6c679eec3e957616b0137b6474b1717e9`, internal session metadata files under `.chryypt/sessions/` were committed. In commit `04acf98071ac58eaf540f881e386caac5b638421`, these files were deleted from the tree, but historical Git commit objects still contain the data.
+- **Remediation**:
+  Per repository guidelines, Git history must **never** be rewritten without explicit operator approval.
+  When authorized, the operator can purge historical `.chryypt/` data using:
+  ```powershell
+  git-filter-repo --path .chryypt --invert-paths
+  git reflog expire --expire=now --all
+  git gc --prune=now
+  ```
+  Pending authorization, access controls and branch protection remain in place.

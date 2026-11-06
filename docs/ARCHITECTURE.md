@@ -449,6 +449,18 @@ pass; `invalidateCaches()` forces the next request to run again after a cleanup 
 The treemap layout is pure TypeScript (`squarify`) with no chart dependency; extension families,
 colors and labels live in `lib/categories.ts`.
 
+## Store/MSIX inventory investigation and compatibility notes
+
+Windows Store, UWP, and modern packaged applications (MSIX) do not write standard Win32 uninstall keys under `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`. Instead, their metadata is stored in:
+- `HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages`
+- `HKLM\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages`
+
+### Technical Findings:
+1. **Discovery**: Read-only inventory discovery of installed packages can enumerate these `AppModel\Repository\Packages` subkeys to extract package full names, display names, and install paths.
+2. **Uninstallation Boundary**: Unlike standard Win32 applications, MSIX packages have no `UninstallString` or MSI product code. Uninstallation requires invoking Windows Runtime COM interfaces: `Windows.Management.Deployment.PackageManager::RemovePackageAsync`.
+3. **Security Constraints**: Invoking `powershell.exe -Command Remove-AppxPackage` is strictly refused because Cyron forbids spawning shell interpreters or running arbitrary scripts. A native WinRT COM projection (using the `windows` crate) is required to remove MSIX packages safely without shell wrappers.
+4. **Roadmap**: Store/MSIX enumeration is designed as a distinct read-only inventory source with separate badges, keeping standard Win32 desktop uninstallation strictly isolated and safe.
+
 ## Persistence
 
 | Data | Location | Lifetime |
@@ -458,34 +470,30 @@ colors and labels live in `lib/categories.ts`.
 | Tree column width | `localStorage["cyron.analyzer.treeWidth"]` | Same |
 | Scan history | `<app_data_dir>/history.json` | Until cleared from Activity or the profile is removed |
 | Quarantine batches | `<app_data_dir>/quarantine/<run-id>/` | Until restored and retired or purged by the user |
+| Recovery journal | `<quarantine>/<run-id>/recovery_journal.jsonl` | Append-only per-move write-ahead log |
 | Cleanup log | `<app_data_dir>/cleanup-log.json` | Newest 100 entries |
 | Scan and duplicate results | Rust memory / React state | Session only |
 | Pending cleanup plans | Rust memory (`AppState::plans`) | 10 minutes or until executed |
+| Pending uninstall plans | Rust memory (`AppState::uninstall_plans`) | 10 minutes or until executed |
+| Process snapshots | Rust memory (`AppState::process_snapshots`) | 5 minutes or until refreshed |
+| Pending leftover plans | Rust memory (`AppState::leftover_plans`) | 10 minutes or until executed |
 
 Disk scans, cleanup runs, restores and purges write history; cache discovery and duplicate runs are
 measurements and are not logged.
 
 ## Security and safety constraints
 
-- Only `cleanup.rs` may modify user files, and only through the catalog/plan/quarantine flow. No
-  command accepts a path to delete, and there is no recursive delete. No command uninstalls
-  applications, terminates processes or writes registry values. `clear_history` deletes only
-  Cyron's own history log; still the only file removal outside quarantine.
-- Command inputs are validated before use: job ids are 1–64 characters of `[A-Za-z0-9_-]`; paths
-  must be non-empty, absolute, existing, canonicalized and (for scans) directories. Explorer
-  arguments are passed as separate arguments, not interpolated into a shell string.
+- **File modifications** are strictly confined to `cleanup.rs` and `leftovers.rs` through review-first plans, quarantine batches, write-ahead recovery journals, and atomic no-overwrite restoration.
+- **Process management** in `process.rs` verifies executable ownership, creation time (`GetProcessTimes`), and PID identity against a recent snapshot. Critical Windows system processes and Windows directory binaries can never be terminated.
+- **Uninstaller execution** in `uninstall.rs` validates vendor command lines, normalizes MSI product codes, and rejects shell wrappers (`cmd.exe`, `powershell.exe`, `.bat`, etc.). Executables and arguments are resolved server-side from registered keys; caller-supplied executables are never launched.
+- **Registry modifications** in `leftovers.rs` are guarded against shared vendor keys and system roots, and require an automatic multi-type recursive `.reg` backup before deleting any subkey.
+- Command inputs are validated before use: job ids are 1–64 characters of `[A-Za-z0-9_-]`; paths must be non-empty, absolute, existing, canonicalized and directories.
 - Reparse points are skipped during traversal, preventing cycle and mount-point escapes.
-- Scan depth, returned child counts, retained nodes, file nodes, largest-file output, extension
-  stats and keys, errors, tracked file ids, the native directory buffer and the MFT record budget
-  are all capped.
-- The WebView runs with a strict CSP (`default-src 'self'`, IPC allowed, no remote scripts) and
-  only the dialog-open capability is granted beyond Tauri core defaults.
+- Scan depth, returned child counts, retained nodes, file nodes, largest-file output, extension stats and keys, errors, tracked file ids, the native directory buffer and the MFT record budget are all capped.
+- The WebView runs with a strict CSP (`default-src 'self'`, IPC allowed, no remote scripts) and only the dialog-open capability is granted beyond Tauri core defaults.
 - No network API, telemetry, analytics or auto-update code is present.
-- The app does not request elevation. Without it, MFT is unavailable, the walk reports unreadable
-  folders, and locked cache files are skipped instead of forced.
-- Cleanup starts in read-only mode. Preview stays available because it only reads sizes and paths;
-  `start_cleanup` refuses until the switch is off, and every run also needs a single-use server-held
-  plan id plus the confirmation checkbox.
+- The app does not request elevation. Without it, MFT is unavailable, the walk reports unreadable folders, and locked cache files are skipped instead of forced.
+- Cleanup starts in read-only mode.
 
 ## Performance characteristics and limits
 
@@ -505,39 +513,18 @@ but slower; neither is a WizTree comparison. Details and caveats are in
 
 ## Testing and CI
 
-- `src/lib/*.test.ts` — treemap geometry (area, bounds, overlap), formatting, category mapping,
-  risk vocabulary, analyzer filters, cleanup grouping/selection/confirmation rules and the cleanup
-  IPC contract: 70 tests in 7 files.
-- Rust unit tests — registry filtering/deduplication/date and size parsing, native enumeration,
-  hard-link dedupe, exclusions, depth, cancellation, progress, stats, output caps, MFT record
-  parsing/fixups/budget, duplicate verification, storage classification/age buckets/insights, cache
-  catalog validity and protection rules, volume sanity, history ordering, command validation,
-  duplicate-job registration, and the cleanup engine (guard, exclusions, preview accounting and
-  truncation, quarantine round trip, restore/purge boundaries, log ordering and cap, plan helpers).
-- `tests/real_system.rs` — live registry count, live cache targets, a temporary fixture tree with
-  exact byte assertions.
-- `tests/security.rs` — module boundaries for destructive APIs, protected-path and ancestor refusal,
-  hostile ids and run ids, junction and link handling, restore/purge boundaries, read-only refusal,
-  a fixture round trip and hard-link accounting.
-- `tests/cleanup_stress.rs` — wide cleanup fixture with a bounded preview, locked file, cancelled
-  run, consecutive batches and empty/missing targets.
-- `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` — end-to-end plan → quarantine →
-  restore → purge against `%TEMP%\cyron-cleanup-<pid>`, printing `CLEANUP_FIXTURE_OK`.
-- `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep
-  nesting, access-denied folders, exclusion subtree and cancellation.
-- `.github/workflows/ci.yml` — Windows CI for typecheck, Vitest, frontend build, `cargo test`, the
-  security and cleanup-stress suites and the cleanup fixture.
-- `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, `bench-scan.mjs` —
-  artefact checks and the benchmark harness.
+- `src/lib/*.test.ts` — 71 tests in 7 files covering formatting, categories, risk ratings, analyzer filters, cleanup selection rules, treemap geometry, and Tauri IPC contracts.
+- Rust unit tests — 120+ unit tests covering registry discovery, directory traversal, MFT parsing, duplicate detection, storage categorization, cache catalog validity, quarantine roundtrip, uninstaller tokenization, process filters, and recursive registry backup/restore.
+- `tests/real_system.rs` — live registry count, live cache targets, a temporary fixture tree with exact byte assertions.
+- `tests/security.rs` — 22 architectural boundary and security tests: module boundaries for destructive APIs, protected-path refusal, hostile IDs, junction/symlink swaps, shell rejection, process termination boundaries, and registry backup verification.
+- `tests/cleanup_stress.rs` — wide cleanup fixture with a bounded preview, locked file, cancelled run, consecutive batches and empty/missing targets.
+- `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` — end-to-end plan → quarantine → restore → purge against `%TEMP%\cyron-cleanup-<pid>`, printing `CLEANUP_FIXTURE_OK`.
+- `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep nesting, access-denied folders, exclusion subtree and cancellation.
+- `.github/workflows/ci.yml` & `release.yml` — Windows CI for typecheck, Vitest, frontend build, `cargo test`, security and cleanup-stress suites, release packaging, checksum generation, and GitHub release automation.
+- `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, `verify-release-bundles.mjs`, `bench-scan.mjs` — artefact verification, desktop launch smoke checks, and release bundle verification.
 
 ## Deferred design work
 
-- MFT scanning for volumes above the record budget (e.g. streaming aggregation without retaining all
-  records).
-- Store/MSIX application inventory and application icons.
+- MFT scanning for volumes above the record budget (e.g. streaming aggregation without retaining all records).
+- Native WinRT COM bindings for Store/MSIX package removal without shell scripts.
 - Cold-cache benchmark methodology and multi-run statistics published from CI hardware.
-- Uninstall engine: process discovery with a critical-process deny list, registry export/backup
-  and restore, a plan model for non-file operations, leftover detection and batch queues
-  (Phase 4).
-- Standard/advanced/force uninstall, uninstall queues, process control and critical-process
-  protection (Phase 4); registry backup/restore before any registry removal (Phase 4).

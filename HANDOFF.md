@@ -1,103 +1,84 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-06 (Phase 4 complete & Priority 0 hardening)
+Updated: 2026-11-06 (Phase 4.1 Priority 0 Hardening & Phase 5 Release Engineering complete)
 
 ## Current status
 
-Phases 1–4 are implemented across the Rust backend and React interface. Cyron discovers installed
-Windows applications, scans folders with an NTFS MFT reader or a streaming directory walk, renders a
-treemap with a persistent synchronized folder tree, verifies duplicates, categorizes storage,
-measures 48 developer/AI/Windows cache locations, cleans caches safely via recoverable quarantine,
-**uninstalls applications with exit-code tracking and reboot alerts, terminates associated processes safely,
-scans leftovers with risk ratings, exports registry backups, cleans residuals into quarantine, and executes
-sequential batch uninstall queues with failure isolation.**
+Phases 1–5 and Priority 0 security hardening are implemented and verified across the Rust backend
+and React desktop interface. Cyron discovers installed Windows applications, scans folders with an
+NTFS MFT reader or a streaming directory walk, renders a treemap with a persistent synchronized folder
+tree, verifies duplicates, categorizes storage, measures 48 developer/AI/Windows cache locations, cleans
+caches safely via recoverable quarantine, uninstalls applications with server-side command resolution
+and reboot alerts, terminates associated processes with snapshot verification and PID recycling guards,
+scans leftovers with risk ratings, exports multi-type recursive registry backups, cleans residuals into
+quarantine with durable write-ahead journals (`sync_all`), and executes sequential batch uninstall queues.
 
-Priority 0 cleanup recovery risks have been hardened: durable crash-consistent write-ahead recovery
-journal (`recovery_journal.jsonl`), atomic Win32 `MoveFileExW` no-overwrite restore, approved preview snapshot
-binding, purge preservation for safe retry on locked files, and quarantine storage & low-space limits.
+Priority 0 hardening has secured all destructive operations:
+1. **Uninstaller execution boundary**: Client-supplied executable paths and arguments are untrusted.
+   Commands are resolved server-side from registered keys into single-use, 10-minute expiring plans
+   (`UninstallPlan`), with unquoted path support, MSI normalization, and live-registry revalidation.
+2. **Process termination**: Verified process snapshots with 64-bit creation times (`GetProcessTimes`),
+   strict executable install-location verification, PID recycling denial, and unconditional critical
+   system process protection.
+3. **Leftover cleanup**: Server-side `LeftoverPlan` with TTL, bounded non-following directory walker
+   skipping junctions and symlinks, and durable write-ahead recovery journals (`sync_all`).
+4. **Registry safety**: Recursive `.reg` export supporting all registry value types (`REG_SZ`, `REG_DWORD`,
+   `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and subkeys, verified backup integrity
+   prior to deletion, and verified restore helper.
+5. **Recovery correctness**: Physical disk synchronization (`sync_all`), destination ancestor reparse
+   checks, safe purge retries, and honest same-volume vs cross-volume restoration semantics.
 
-Latest measured checks: typecheck clean; **71 frontend tests in 7 files pass**; **148 Rust tests
-pass** (116 unit, 21 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress) with 3 ignored;
-`CLEANUP_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`. No real user application was
-uninstalled during automated verification — engines were exercised against isolated fixtures only.
-Release MSI/NSIS packaging and signing remain unverified.
+Release packaging has been verified locally (`RELEASE_BUNDLES_OK`):
+- **NSIS Setup**: `src-tauri/target/release/bundle/nsis/Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`).
+- **WiX MSI Package**: `src-tauri/target/release/bundle/msi/Cyron_0.1.0_x64_en-US.msi` (2.00 MiB, SHA-256: `29453c42694a87723fe30b4827d4e9a92e52413038e9daded7592fd277271dc8`).
 
-## Implemented
+Latest measured verification:
+- `npm run typecheck`: exit 0 (0 diagnostics).
+- `npm test`: 71/71 tests pass across 7 files.
+- `node scripts/verify-dist.mjs`: `DIST_OK` (2 assets, 448.8 KiB).
+- `cargo test`: **153 tests pass** (120 unit, 22 security, 5 cleanup_stress, 1 real_system, 5 stress_scan) with 3 ignored.
+- `node scripts/verify-cleanup.mjs`: `CLEANUP_FIXTURE_OK`.
+- `node scripts/verify-desktop-binary.mjs`: `DESKTOP_BINARY_OK` (15.83 MiB).
+- `node scripts/smoke-desktop.mjs`: `DESKTOP_SMOKE_OK` ("Cyron").
+- `node scripts/verify-release-bundles.mjs`: `RELEASE_BUNDLES_OK`.
 
-### Phase 1
+## Verification table
 
-- Tauri v2 shell with strict CSP, dialog capability, one native window and the inventory, scan,
-  duplicate, measurement, reveal and history commands.
-- Registry inventory: four uninstall hives, update/patch/system filtering, dedupe, install-date and
-  `EstimatedSize` normalization.
-- Volumes: local fixed/removable capacity and free space; network/optical skipped deliberately.
-- Cache catalog: AI tools, IDEs, package managers, containers/WSL and Windows/browser locations;
-  Safe / Review / Protected risk model.
-- UI: Overview, Uninstaller, Disk Analyzer, Cleaner, Activity, Settings; light/dark themes.
-- Local persistence: `history.json` in app-data (max 100, atomic write), settings in
-  `localStorage["cyron.settings.v1"]`.
-- Tooling: `scripts/msvc-env.mjs`, `verify-dist.mjs`, `verify-desktop-binary.mjs`,
-  `smoke-desktop.mjs`, Windows CI, Vitest, Rust unit/integration tests.
+| Check | Command | Last result |
+| --- | --- | --- |
+| TypeScript | `npm run typecheck` | Pass (0 diagnostics) |
+| Frontend tests | `npm test` | 71/71 pass, 7 files |
+| Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` (448.8 KiB) |
+| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 153 pass, 3 ignored |
+| Permission boundaries | `... --test security -- --nocapture` | 22/22 pass |
+| Cleanup stress | `... --test cleanup_stress -- --nocapture` | 5/5 pass |
+| Cleanup fixture | `node scripts/verify-cleanup.mjs` | `CLEANUP_FIXTURE_OK` |
+| Real system | `... --test real_system -- --nocapture` | Pass |
+| Scanner stress | `... --test stress_scan -- --nocapture` | 5/5 pass (1 ignored) |
+| Desktop binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` (15.83 MiB) |
+| Launch smoke test | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` ("Cyron") |
+| Release packaging | `node scripts/verify-release-bundles.mjs` | `RELEASE_BUNDLES_OK` (NSIS + MSI) |
+| GitHub CI & Release | `.github/workflows/ci.yml`, `release.yml` | Workflows configured |
 
-### Phase 2
+## Key files
 
-- **MFT scanner** (`mft.rs`): boot sector and `$MFT` run-list parsing, fixups,
-  `FILE_NAME`/`$DATA`/`$STANDARD_INFORMATION`, subtree construction, per-record hard-link dedupe, a
-  768 MiB record budget checked before allocation, cancellation every 4,096 records. Live elevated
-  measurement on `C:\`: 2,211,292 files / 604,557 dirs / 332.3 GiB in 14.52 s.
-- **Bounded walker** (`scan.rs`): streaming enumeration with node/child/extension/id caps,
-  top-24 extensions, top-100 largest files, throttled progress and cancellation.
-- **Duplicates** (`duplicates.rs`): size buckets → 4 KiB edge SHA-256 → full streaming SHA-256,
-  hard links flagged, caps with a `truncated` flag.
-- **Storage** (`storage.rs`): ten categories with known/inferred confidence, age buckets, insights.
-- **Analyzer UI**: Map / Duplicates / Storage, persistent resizable virtualized tree, filters,
-  synchronized selection, scanner-method badge, partial and stale states.
-- **Benchmarks**: `scripts/bench-scan.mjs` + `examples/scan_bench.rs`, results in
-  [docs/BENCHMARKS.md](docs/BENCHMARKS.md) (warm cache, one machine).
+- `src-tauri/src/process.rs`: process discovery, snapshot tracking, PID creation time checks, critical process deny list, controlled termination.
+- `src-tauri/src/uninstall.rs`: server-side command resolution, `UninstallPlan` creation, safe uninstaller tokenization, execution, exit code tracking.
+- `src-tauri/src/leftovers.rs`: server-side `LeftoverPlan`, bounded non-following directory walker, recursive multi-type `.reg` backup and restore, residual quarantine.
+- `src-tauri/src/cleanup.rs`: cleanup engine, durable write-ahead recovery journal (`sync_all`), quarantine, atomic no-overwrite restore, audit log.
+- `src-tauri/src/commands.rs`: 27 validated IPC commands.
+- `src-tauri/tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`: security & stress suites.
+- `src/features/uninstaller/AppDrawer.tsx`, `Uninstaller.tsx`: uninstaller UI, plan-based execution, process manager, residual reviewer, batch queue.
+- `scripts/verify-release-bundles.mjs`: verification of release MSI and NSIS installers with SHA-256 hashes.
+- `docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md`: comprehensive documentation.
+- `GATES.md`: acceptance ledger with recorded evidence.
 
-### Phase 3
+## Known limitations & Release considerations
 
-- **Cleanup engine** (`src-tauri/src/cleanup.rs`, new): `catalog_specs` → `guard_path` →
-  `plan_specs_with_exclusions` → server-held `CleanupPlan` → `execute_plan`. Limits: 64 ids,
-  128 exclusions, 100,000 files per target, 400 listed preview files, 500 result items, 100 skips,
-  20 errors, depth 64, 10-minute plan TTL, 7-day retention metadata, 100-entry log.
-- **Safety model**: target ids only, protected entries and their ancestors refused, reparse points
-  and hard links never moved, canonical parent re-checked immediately before each rename, user
-  exclusions validated and stored in the plan, read-only switch on by default.
-- **Quarantine** (`<app_data>\quarantine\<run-id>\`): manifest written during the run and flushed
-  every 256 moves, byte-exact restore that never overwrites, batch retired when fully restored,
-  single-batch purge as the only permanent removal.
-- **Operation log** (`<app_data>\cleanup-log.json`, max 100) plus an Activity entry per run,
-  restore and purge. `clear_history` still removes only Cyron's own history.
-- **IPC**: 8 new commands — `get_cleanup_mode`, `set_cleanup_mode`, `preview_cleanup` (accepts
-  validated exclusions), `start_cleanup`, `list_quarantine`, `restore_quarantine`,
-  `purge_quarantine`, `get_cleanup_log` — for 19 total.
-- **Cleaner UI**: groups (Windows / Applications / Developer tools / AI tools), risk and category
-  filters, search, expandable per-target detail with impact text, selection bar, preview drawer with
-  the planned path list and confirmation checkbox, progress bar, per-item results, Quarantine tab
-  (restore/purge with confirmation) and History tab.
-- **Security suite**: `tests/security.rs` (17 tests) replaces the blanket `read_only.rs` source
-  audit with module boundaries plus protected-path, id, junction, link, restore/purge and read-only
-  assertions. `tests/cleanup_stress.rs` (5) and `examples/cleanup_fixture.rs` cover wide fixtures,
-  locked files, cancellation and the full round trip. CI runs all three.
-- **Catalog adjustment**: the Windows Update download cache moved to `protected` so Cyron never
-  manipulates servicing state; final split is 27 safe / 9 caution / 12 protected.
-
-### Phase 4 & Priority 0 Hardening
-
-- **Process manager** (`src-tauri/src/process.rs`, new): discovers active processes executing from the
-  application installation directory. Enforces critical system process protection (`csrss.exe`,
-  `services.exe`, `explorer.exe`, etc.) and denies termination of system directory binaries. Sends
-  graceful `WM_CLOSE` to top-level windows before falling back to `TerminateProcess`.
-- **Standard uninstaller** (`src-tauri/src/uninstall.rs`, new): safely tokenizes registry uninstall
-  commands, normalizes MSI uninstallers (`msiexec.exe /x`), rejects shell wrappers (`cmd.exe`,
-  `powershell.exe`, `.bat`, `.cmd`, `.ps1`), verifies executable presence, runs uninstaller without
-  arbitrary shell interpolation, tracks exit codes, and surfaces reboot requirements (code 3010).
-- **Leftover scanner & recovery** (`src-tauri/src/leftovers.rs`, new): scans likely leftover directories
-  and registry subkeys for uninstalled apps with confidence (`high`/`medium`/`low`) and risk
-  (`safe`/`caution`/`protected`) classification. Protects shared vendor folders and system roots.
-  Automatically exports registry backup (`.reg`) into the quarantine run batch prior to deleting any
-  registry subkey. Quarantines file/directory leftovers using the crash-consistent recovery engine.
+- **Authenticode signing**: Binary and installers are unsigned release candidates. Production distribution requires an Authenticode certificate and timestamping (documented in `docs/RELEASE_CHECKLIST.md`).
+- **Store/MSIX apps**: Enumeration is deferred to a distinct read-only inventory source; uninstallation of Store apps requires native WinRT COM interfaces (`Windows.Management.Deployment.PackageManager`) without shell scripts (documented in `docs/ARCHITECTURE.md`).
+- **Git history privacy**: Historical internal session data under commit `62414cc` remains in Git blobs. Remediation via `git-filter-repo` is documented and awaits operator authorization.
+- **Elevation**: Cyron never requests administrator rights for cleanup; locked or system-owned files are reported and skipped. MFT scanning requires an elevated shell for raw volume handle access.
 - **Batch uninstaller**: sequential execution queue with isolated per-item results and exit codes.
   Prevents automatic follow-up cleanup approval, requiring separate user review before residual deletion.
 - **Priority 0 cleanup recovery hardening**:

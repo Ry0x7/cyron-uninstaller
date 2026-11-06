@@ -383,6 +383,7 @@ export interface AppProcess {
   path: string | null;
   isCritical: boolean;
   title: string | null;
+  creationTime: number;
 }
 
 export interface ProcessTerminateResult {
@@ -399,6 +400,16 @@ export interface ParsedUninstallCommand {
   isMsi: boolean;
   isValid: boolean;
   rejectionReason: string | null;
+}
+
+export interface UninstallPlan {
+  planId: string;
+  appId: string;
+  appName: string;
+  executable: string;
+  arguments: string[];
+  isMsi: boolean;
+  expiresAt: number;
 }
 
 export interface UninstallExecutionResult {
@@ -423,12 +434,14 @@ export interface LeftoverCandidate {
 }
 
 export interface LeftoverScanReport {
+  planId: string;
   appId: string;
   appName: string;
   candidates: LeftoverCandidate[];
   totalSize: number;
   totalFiles: number;
   registryKeysCount: number;
+  expiresAt: number;
 }
 
 export interface LeftoverCleanReport {

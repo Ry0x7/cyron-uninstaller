@@ -525,6 +525,7 @@ fn append_journal_entry(journal_path: &Path, item: &ManifestItem) -> Result<(), 
         .map_err(|error| format!("Could not encode journal item: {error}"))?;
     writeln!(file, "{json}").map_err(|error| format!("Could not write to recovery journal: {error}"))?;
     file.flush().map_err(|error| format!("Could not flush recovery journal: {error}"))?;
+    file.sync_all().map_err(|error| format!("Could not sync recovery journal: {error}"))?;
     Ok(())
 }
 
@@ -1047,11 +1048,15 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
         ));
     }
     if let Some(parent) = original.parent() {
-        if parent.exists() && is_reparse(parent) {
-            return Err(format!(
-                "Parent directory {} is a link or junction.",
-                parent.display()
-            ));
+        let mut curr = parent;
+        while let Some(p) = curr.parent() {
+            if curr.exists() && is_reparse(curr) {
+                return Err(format!(
+                    "Parent directory {} is a link or junction.",
+                    curr.display()
+                ));
+            }
+            curr = p;
         }
         let _ = fs::create_dir_all(parent);
     }
@@ -1062,7 +1067,8 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
     original_wide.push(0);
 
     // Win32 MoveFileExW with MOVEFILE_COPY_ALLOWED (0x2) and WITHOUT MOVEFILE_REPLACE_EXISTING (0x1).
-    // This provides an atomic guarantee at the OS filesystem level that an existing file is never overwritten.
+    // On the same volume, this provides an atomic rename without overwriting; across volumes, it safely
+    // copies and removes without overwriting an existing destination.
     const MOVEFILE_COPY_ALLOWED: u32 = 0x2;
     let res = unsafe {
         windows_sys::Win32::Storage::FileSystem::MoveFileExW(

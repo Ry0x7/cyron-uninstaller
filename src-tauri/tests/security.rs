@@ -730,12 +730,69 @@ fn critical_system_processes_cannot_be_terminated() {
         Some("C:\\Windows\\System32\\custom.exe")
     ));
 
-    let results = process::terminate_processes(&[0, 4], true);
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let snapshot = process::StoredProcessSnapshot {
+        app_id: "test-app".into(),
+        install_location: "C:\\Program Files\\TestApp".into(),
+        timestamp: now,
+        processes: vec![
+            process::AppProcess {
+                pid: 0,
+                name: "System Idle Process".into(),
+                path: None,
+                is_critical: true,
+                title: None,
+                creation_time: 0,
+            },
+            process::AppProcess {
+                pid: 4,
+                name: "System".into(),
+                path: None,
+                is_critical: true,
+                title: None,
+                creation_time: 0,
+            },
+        ],
+    };
+
+    let results = process::terminate_processes_verified("test-app", &snapshot, &[0, 4], true);
     assert_eq!(results.len(), 2);
     assert!(!results[0].success);
     assert!(!results[1].success);
     assert!(results[0].error.as_ref().unwrap().contains("critical"));
     assert!(results[1].error.as_ref().unwrap().contains("critical"));
+}
+
+#[test]
+fn process_termination_rejects_unlisted_pids_and_mismatched_apps() {
+    use cyron_lib::process;
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let snapshot = process::StoredProcessSnapshot {
+        app_id: "app-target".into(),
+        install_location: "C:\\Program Files\\TargetApp".into(),
+        timestamp: now,
+        processes: vec![process::AppProcess {
+            pid: 12345,
+            name: "target.exe".into(),
+            path: Some("C:\\Program Files\\TargetApp\\target.exe".into()),
+            is_critical: false,
+            title: None,
+            creation_time: 99999,
+        }],
+    };
+
+    // 1. Mismatched app id
+    let res_mismatch = process::terminate_processes_verified("different-app", &snapshot, &[12345], false);
+    assert_eq!(res_mismatch.len(), 1);
+    assert!(!res_mismatch[0].success);
+    assert!(res_mismatch[0].error.as_ref().unwrap().contains("does not belong to this application"));
+
+    // 2. Unlisted arbitrary PID injection attempt
+    let res_unlisted = process::terminate_processes_verified("app-target", &snapshot, &[99999], false);
+    assert_eq!(res_unlisted.len(), 1);
+    assert!(!res_unlisted[0].success);
+    assert!(res_unlisted[0].error.as_ref().unwrap().contains("was not found in the verified process snapshot"));
 }
 
 #[test]
@@ -772,6 +829,12 @@ fn leftover_scanner_guards_system_roots_and_user_profiles() {
         assert!(leftovers::guard_leftover_path(&Path::new(&profile).join("Desktop")).is_err());
         assert!(leftovers::guard_leftover_path(&Path::new(&profile).join("Downloads")).is_err());
     }
+
+    // Shared vendor protection
+    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software\\Microsoft"));
+    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software\\Google"));
+    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software\\Apple"));
+    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software"));
 }
 
 #[test]
@@ -795,8 +858,16 @@ fn leftover_cleanup_creates_registry_backup_before_deletion() {
         selected: true,
     }];
 
+    let plan = leftovers::StoredLeftoverPlan {
+        plan_id: "plan-1".into(),
+        app_id: "test-app".into(),
+        app_name: "Test App".into(),
+        candidates,
+        expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 600,
+    };
+
     // Attempting cleanup on nonexistent key creates backup file or handles safely
-    let res = leftovers::clean_leftovers("test-app", &candidates, &quarantine);
+    let res = leftovers::clean_leftovers(&plan, &["reg-1".to_string()], &quarantine);
     // Since nonexistent key open fails in winreg, it aborts to protect registry
     assert!(res.is_err(), "Nonexistent key backup aborts residual cleanup cleanly");
 }

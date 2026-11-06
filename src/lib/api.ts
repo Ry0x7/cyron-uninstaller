@@ -10,7 +10,6 @@ import type {
   DuplicateOptions,
   DuplicateReport,
   HistoryEntry,
-  LeftoverCandidate,
   LeftoverCleanReport,
   LeftoverScanReport,
   Measured,
@@ -22,6 +21,7 @@ import type {
   ScanOptions,
   ScanResult,
   UninstallExecutionResult,
+  UninstallPlan,
   VolumeInfo,
 } from "./types";
 
@@ -91,18 +91,20 @@ export const api = {
     call<RestoreReport>("restore_quarantine", { runId }),
   purgeQuarantine: (runId: string) => call<PurgeReport>("purge_quarantine", { runId }),
   getCleanupLog: () => call<CleanupLogEntry[]>("get_cleanup_log"),
-  discoverAppProcesses: (installLocation: string | null) =>
-    call<AppProcess[]>("discover_app_processes", { installLocation }),
-  terminateAppProcesses: (pids: number[], force: boolean) =>
-    call<ProcessTerminateResult[]>("terminate_app_processes", { pids, force }),
+  discoverAppProcesses: (appId: string) =>
+    call<AppProcess[]>("discover_app_processes", { appId }),
+  terminateAppProcesses: (appId: string, pids: number[], force: boolean) =>
+    call<ProcessTerminateResult[]>("terminate_app_processes", { appId, pids, force }),
   parseUninstallCommand: (rawCommand: string) =>
     call<ParsedUninstallCommand>("parse_uninstall_command", { rawCommand }),
-  executeUninstall: (appId: string, command: ParsedUninstallCommand, timeoutSecs?: number) =>
-    call<UninstallExecutionResult>("execute_uninstall", { appId, command, timeoutSecs }),
-  scanAppLeftovers: (appId: string, appName: string, publisher?: string | null, installLocation?: string | null) =>
-    call<LeftoverScanReport>("scan_app_leftovers", { appId, appName, publisher, installLocation }),
-  cleanAppLeftovers: (appId: string, candidates: LeftoverCandidate[]) =>
-    call<LeftoverCleanReport>("clean_app_leftovers", { appId, candidates }),
+  prepareUninstall: (appId: string, quiet = false) =>
+    call<UninstallPlan>("prepare_uninstall", { appId, quiet }),
+  executeUninstall: (appId: string, planId: string, timeoutSecs?: number) =>
+    call<UninstallExecutionResult>("execute_uninstall", { appId, planId, timeoutSecs }),
+  scanAppLeftovers: (appId: string) =>
+    call<LeftoverScanReport>("scan_app_leftovers", { appId }),
+  cleanAppLeftovers: (appId: string, planId: string, candidateIds: string[]) =>
+    call<LeftoverCleanReport>("clean_app_leftovers", { appId, planId, candidateIds }),
   executeBatchUninstall: (appIds: string[], quiet = false) =>
     call<BatchUninstallReport>("execute_batch_uninstall", { appIds, quiet }),
 };
