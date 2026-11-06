@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cyron Uninstaller",
+  "version": "0.1.0",
+  "identifier": "dev.cyron.uninstaller",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Cyron Uninstaller",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 1000,
+        "minHeight": 680,
+        "center": true,
+        "decorations": true,
+        "resizable": true,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "publisher": "Chryypt",
+    "copyright": "Copyright © 2026 Chryypt",
+    "category": "Utility",
+    "shortDescription": "Windows Application Uninstaller, Disk Analyzer & Cleaner",
+    "longDescription": "Windows Application Uninstaller, Disk Analyzer & Cleaner with review-first cache cleanup, recoverable quarantine, process management, and leftover scanning.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "upgradeCode": "c2bcd648-205f-5904-9e5c-85726e376ec2",
+        "language": ["en-US"]
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

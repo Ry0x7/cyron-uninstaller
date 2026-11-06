@@ -1,0 +1,229 @@
+/* TreeSize-inspired detailed Explorer table styles */
+
+.az-details-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--surface-1);
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.az-details-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  gap: 12px;
+}
+
+.az-details-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 280px;
+}
+
+.az-details-search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.az-details-search-input {
+  width: 100%;
+  padding: 4px 8px 4px 28px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-1);
+  color: var(--text-strong);
+  font-size: 12px;
+}
+
+.az-details-summary {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.az-details-table-scroll {
+  flex: 1;
+  overflow: auto;
+}
+
+.az-details-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.az-details-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 11.5px;
+  z-index: 2;
+}
+
+.az-details-table thead th:hover {
+  color: var(--text-strong);
+  background: var(--surface-3);
+}
+
+.az-details-table thead th.is-sorted {
+  color: var(--accent);
+}
+
+.az-details-table thead th span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sort-chevron {
+  display: inline-block;
+  vertical-align: middle;
+  transition: transform 0.15s ease;
+}
+
+.sort-chevron--asc {
+  transform: rotate(180deg);
+}
+
+.az-details-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+
+.az-details-row:hover {
+  background: var(--surface-2);
+}
+
+.az-details-row.is-selected {
+  background: var(--surface-3);
+}
+
+.az-details-row td {
+  padding: 6px 10px;
+  white-space: nowrap;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.az-col-name {
+  font-family: var(--font-sans) !important;
+  text-align: left;
+}
+
+.az-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.az-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  width: 16px;
+}
+
+.az-item-icon--dir {
+  color: var(--accent);
+}
+
+.az-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+
+.az-col-size,
+.az-col-allocated,
+.az-col-percent,
+.az-col-files,
+.az-col-modified {
+  text-align: right;
+}
+
+.az-percent-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.az-percent-bar-wrap {
+  width: 50px;
+  height: 5px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.az-percent-bar {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.az-percent-label {
+  width: 42px;
+  text-align: right;
+}
+
+.az-details-empty {
+  text-align: center;
+  padding: 32px;
+  color: var(--text-muted);
+}
+
+.az-context-menu {
+  position: fixed;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+}
+
+.az-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.az-context-item:hover {
+  background: var(--accent);
+  color: #fff;
+}

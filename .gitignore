@@ -1,0 +1,17 @@
+node_modules/
+dist/
+target/
+src-tauri/target/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+
+# Internal agent runtime data (sessions, checkpoints) never belongs in the repo.
+.chryypt/
+
+# Local scratch
+*.log
+/tmp/
+/screenshots/
+src-tauri/*-bench.txt

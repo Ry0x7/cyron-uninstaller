@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, tests, build)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run docs:check
+      - run: npm run build
+
+  rust:
+    name: Rust core (tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `generate_context!` validates `frontendDist`, so the dist folder must exist
+      # before the Rust crate is compiled.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # Phase 3 safety gates. Each suite is separate so a cleanup failure is
+      # attributed to the boundary it broke, not hidden in the unit run.
+      - name: Permission boundary and protected-path tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture
+      - name: Cleanup stress and cancellation tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
+      - name: Isolated cleanup fixture (plan, quarantine, restore, purge)
+        run: node scripts/verify-cleanup.mjs
+      - name: End-to-end uninstallation & residual recovery fixture
+        run: node scripts/verify-e2e.mjs
