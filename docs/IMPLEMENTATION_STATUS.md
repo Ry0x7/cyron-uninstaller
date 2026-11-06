@@ -1,203 +1,83 @@
-# Cyron — Implementation status
+# Cyron — Implementation Status
 
-Last updated: 2026-11-06 (Phase 6 — competitive expansion & release candidate)
+Last updated: 2026-11-06 (Phase 7 — Code Signing Architecture & Release Packaging)
 
 ## Summary
 
-Phases 1–6 are implemented. Cyron is a real Tauri v2 + Rust backend with a React/TypeScript
-interface, live Windows registry and filesystem data, an interactive treemap with a persistent
-folder tree, an MFT scanner with a directory-walk fallback, duplicate-file verification, storage
-categorization, a reproducible benchmark harness, review-first cache cleaning with quarantine and
-restore, standard uninstallation with reboot code 3010 tracking, process discovery and snapshot-verified
-termination, leftover residual scanning with recursive multi-type `.reg` backup, batch uninstallation,
-Windows Explorer context menu integration, multi-source app discovery (Win32, Store/MSIX, Steam, Portable),
-direct Analyzer-to-Cleaner workflows, declarative cleanup providers, and verified release packaging (NSIS and MSI).
+Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x64 featuring:
+- Multi-source application inventory (Win32 64/32-bit, Microsoft Store / AppX / MSIX, Steam game libraries, and portable heuristic scanning).
+- Application uninstallation with exit code 3010 (reboot required) tracking.
+- Process discovery, snapshot-verified termination with critical-process protection and PID recycling prevention.
+- Leftover scanning with confidence & risk ratings, automatic recursive multi-type `.reg` backup, and quarantine storage.
+- Sequential batch uninstallation with failure isolation.
+- Interactive disk space analyzer with Squarified treemap and persistent virtualized folder tree (220–520 px).
+- Dual scan engine: elevated NTFS MFT volume parsing with automatic streaming directory-walk fallback.
+- 3-stage duplicate file verification with hard-link deduplication.
+- Storage categorization into 10 categories with known vs inferred confidence ratings.
+- Review-first cache cleaner over extensible declarative providers (`schema_version: 1`).
+- Crash-consistent recoverable quarantine with durable write-ahead recovery journal (`recovery_journal.jsonl` with `sync_all`), atomic Win32 `MoveFileExW` no-overwrite restoration, and manifest-scoped purging.
+- Windows Explorer context menu integration (`HKCU\Software\Classes`) with safe argument routing.
+- Standardized Windows PE VERSIONINFO, WiX MSI properties, and NSIS installer headers (`WINDOWS_METADATA_OK`).
+- Two-track code signing architecture: local development self-signing (`DEV_TEST_SIGNED`, `SIGNATURES_VERIFIED_OK`) and prepared SignPath Foundation public release automation (`SIGNPATH_SIGNED`).
+- Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`).
 
-Cleaning exists, but only over validated cleanup providers and catalog entries, only after a preview and an
-explicit confirmation, and only from a non-read-only backend. Files are **moved into quarantine**,
-never deleted outright; the only permanent step is purging a batch the user selects. Protected
-entries (histories, models, settings, credentials, Docker/WSL data, Firefox profiles, Windows
-Update downloads) are refused in the backend.
+Historical narratives and early acceptance logs for Phases 1–3 are preserved in [docs/archive/PHASE_HISTORY.md](archive/PHASE_HISTORY.md).
 
-Latest measured verification: frontend typecheck clean; **71 Vitest tests in 7 files pass**;
-**170+ Rust tests pass** (134 unit, 25 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress; 2 ignored);
-`CLEANUP_FIXTURE_OK`; `RC1_E2E_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`;
-`RELEASE_BUNDLES_OK`; `BENCHMARK_OK`. No real user cache or personal data was cleaned during verification.
+---
 
-## Phase 1 acceptance
+## Current Acceptance Ledger
 
-| # | Requirement | Status | Evidence |
-| --- | --- | --- | --- |
-| 1 | Tauri v2 + React + TypeScript scaffold | Done | `src-tauri/`, `src/`, `package.json`, `vite.config.ts`, `src-tauri/tauri.conf.json` |
-| 2 | Design system and six-section navigation | Done | `src/styles/tokens.css`, `src/styles/app.css`, `src/App.tsx`, `src/components/ui.tsx`; light/dark themes, collapsible sidebar |
-| 3 | Discover installed Windows applications | Done | `src-tauri/src/apps.rs` reads four uninstall registry views, filters updates/system components, deduplicates, normalizes dates and sizes; unit tests in the module |
-| 4 | Publisher, version, size, date and path | Done where published | `Uninstaller.tsx`, `AppDrawer.tsx`; `estimatedSize` is `null` when absent and the UI shows “—” |
-| 5 | Filesystem scanning and directory-size analysis | Done | `fs.rs` native enumeration + fallback, `scan.rs` streaming walker; totals/depth/exclusion/hard-link/cancellation/progress tests |
-| 6 | Interactive treemap with drill-down | Done | `Treemap.tsx`, `lib/treemap.ts` (squarified), `lib/treemap.test.ts` |
-| 7 | Synchronized selection between treemap, tree and details | Done | Persistent tree column, treemap selection, breadcrumbs and details rail all share one selected node |
-| 8 | WinDirStat-style folder tree | Done | `TreeView.tsx`: virtualized (no 500-row cap), resizable column, ARIA tree keyboard navigation, selection sync, per-root reset |
-| 9 | Real storage usage and scan progress | Done | `volumes.rs`, `GetDiskFreeSpaceExW`; throttled `cyron-scan-progress`; live counters |
-| 10 | Developer/AI cache discovery | Done | 48-location catalog in `caches.rs`, measured with `scan::measure_path` |
-| 11 | Risk classification and plain-language explanations | Done | `lib/risk.ts`, Cleaner rows, protected-data section |
-| 12 | Cancellation, error handling and exclusions | Done | Atomic cancel flag, capped error list, validated exclusion prefixes |
-| 13 | Tests | Passing | 51 Vitest; 84 Rust tests passed, 3 ignored (see table below) |
-| 14 | No user-data cleanup/uninstall | Superseded by Phase 3, within bounds | Phase 3 added catalog-only cleaning with quarantine. Uninstall, process termination, registry writes and arbitrary-path deletion still do not exist; the boundary is enforced by `tests/security.rs` |
-| 15 | Local-only privacy | Done | No network code; settings in localStorage; history in app-data |
-| 16 | Windows CI | Workflow added, remote run not observed | `.github/workflows/ci.yml` runs typecheck, Vitest, build and `cargo test` on `windows-latest` |
-| 17 | Documentation | Done | `README.md`, this file, `ARCHITECTURE.md`, `ROADMAP.md`, `AGENTS.md`, `HANDOFF.md`, `BENCHMARKS.md` |
-| 18 | Native desktop build and launch | Done for the debug build with a running Vite dev server; release packaging unverified | `verify-desktop-binary.mjs` → `DESKTOP_BINARY_OK`; `smoke-desktop.mjs` → `DESKTOP_SMOKE_OK`; all six views captured in both themes |
+### 1. Application Inventory & Uninstallation
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Win32 Discovery | Done | `apps.rs` enumerates `HKLM`/`HKCU` in 64-bit and 32-bit registry views; deduplicates, normalizes sizes/dates, flags broken entries. |
+| Store / MSIX Discovery | Done | Discovers installed modern packages via `AppModel\Repository\Packages`; provides read-only lifecycle indicators and leftover scanning. |
+| Steam Game Libraries | Done | Discovers multi-library Steam games via `libraryfolders.vdf` and `appmanifest_*.acf`. |
+| Portable Executables | Done | Bounded heuristic detection under `%LOCALAPPDATA%\Programs`. |
+| Standard Uninstaller Runner | Done | `uninstall.rs`: validates commands, strips command-chaining injection, rejects shell interpreters (`cmd.exe`, `powershell.exe`), handles reboot exit code `3010`. |
+| Server-Held Confirmation Plans | Done | All destructive operations require server-generated, single-use, 10-minute expiring plans (`UninstallPlan`, `BatchUninstallPlan`, `CleanupPlan`, `LeftoverPlan`). |
+| Process Management | Done | `process.rs`: matches processes strictly by executable path inside application root; verifies PID creation times (`GetProcessTimes`) against snapshot; protects critical Windows system processes. |
+| Leftover Residual Cleaning | Done | `leftovers.rs`: discovers residual files and registry subkeys; creates automatic recursive multi-type `.reg` backup before deletion; moves files to quarantine. |
+| Sequential Batch Uninstallation | Done | Sequential queue with failure isolation; residual cleanup requires separate confirmation. |
 
-## Phase 2 acceptance
+### 2. Disk Analysis & Intelligence
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Direct NTFS MFT Reader | Done | `mft.rs`: reads boot sector and `$MFT` run list; validates record count against 768 MiB budget before allocating; parses records and builds subtree. Measured live on `C:\` in 14.52 s. |
+| Streaming Directory Walk | Done | `scan.rs`: depth-first streaming traversal; bounds hard links at 1M IDs; caps tree nodes at 100K and folder file nodes at 40; cancellation check latency < 120 ms. |
+| Automatic Method Selection | Done | Drive roots select MFT when elevated; subfolders and non-elevated shells select streaming directory walk. |
+| Treemap & Persistent Tree | Done | Canvas-based squarified treemap; virtualized resizable folder tree column with ARIA keyboard navigation. |
+| Duplicate File Detection | Done | `duplicates.rs`: size grouping -> 4 KiB edge hashing -> full streaming SHA-256; hard links counted once for physical storage. |
+| Storage Categorization | Done | `storage.rs`: 10 categories, 5 age buckets, known vs inferred confidence ratings, explainable insights. |
+| Analyzer -> Cleaner Direct Action | Done | `inspect_cleanable_directory`: selecting recognized cache directory displays reclaimable space and provides 1-click review in Cleaner. |
 
-| # | Requirement | Status | Evidence and limits |
-| --- | --- | --- | --- |
-| 1 | NTFS MFT scanning | Done | `src-tauri/src/mft.rs` reads the boot sector, `$MFT` run list, applies update-sequence fixups and parses `FILE_NAME`, `$DATA` and `$STANDARD_INFORMATION` into a subtree. Measured live on `C:`: 2,211,292 files / 604,557 dirs / 332.3 GiB in 14.52 s. Requires an elevated process; unverified below administrator rights by design (it returns a clear reason and falls back) |
-| 2 | Directory-walk fallback | Done | `scan.rs` unchanged in role; `mft::scan` returns `fallback_reason` for non-NTFS, inaccessible volume handles, parse failures, volume record budget exceeded and cancellation. `method`/`methodNote` are surfaced in `ScanResult` and the analyzer |
-| 3 | Automatic method selection | Done | `method: auto` selects MFT only for a drive root (e.g. `C:\`); subfolders use the walk because MFT loads the whole volume (measured: System32 3.91 s MFT vs 0.28 s walk). An explicit `mft` request on a subfolder is allowed |
-| 4 | Junctions, hard links, permissions | Done | Reparse points never followed in either scanner; MFT uses a per-record bitset so one file is counted once; the walk bounds hard-link ids at 1,000,000; unreadable folders become capped errors |
-| 5 | Bounded memory, streaming, cancellation, progress | Done | The walk streams directory entries (no per-directory entry vector), retains ≤200 children per folder, ≤100,000 tree nodes, ≤40 file nodes per folder and ≤4,096 extension keys; MFT enforces a 768 MiB parse budget (4,910,404 records at the current record size) before allocating, polls cancellation every 4,096 records and uses one fixed 1,024-byte stack buffer |
-| 6 | Persistent, resizable tree column | Done | `Analyzer.tsx` split view with a drag handle (220–520 px, persisted), `TreeView.tsx` virtualized rows |
-| 7 | Synchronized expansion/selection/breadcrumbs/details | Done | Treemap click updates the tree and details; tree selection updates the treemap outline and details; drill-down updates breadcrumbs; changing the root resets tree state |
-| 8 | Large trees without a row cap | Done | Virtualized rendering with `ResizeObserver`; the tree renders only the visible window |
-| 9 | Sorting and filtering | Done | `lib/analyzerFilters.ts`: name, minimum size, age, extension, category/type, sort by size/name/files/modified; filters apply to the tree, largest files and treemap with filtered totals |
-| 10 | Logical vs allocated size and percentages | Done | Both reported in totals and details; share always computed from logical size |
-| 11 | Duplicate detection | Done | Size buckets → 4 KiB head/tail SHA-256 → full streaming SHA-256; progress and cancellation; hard links flagged and excluded from recoverable bytes; files that change during hashing are reported, not trusted |
-| 12 | Duplicate groups UI | Done (read-only) | `DuplicatesPanel.tsx`: groups, locations, per-file size, wasted bytes, pagination, cancel; no delete action |
-| 13 | Storage categorization | Done | `storage.rs`: ten categories (applications, games, downloads, documents, media, system, developer, AI, caches, other) with `known` vs `inferred` confidence, five age buckets and up to six explained insights; `StoragePanel.tsx` shows categories, sizes and confidence |
-| 14 | Developer/AI storage visibility without disposal claims | Done | Docker/WSL/package caches/model locations are classified and explained; copy states they are observations, not removal guidance |
-| 15 | Benchmark harness | Done | `scripts/bench-scan.mjs` + `examples/scan_bench.rs`; results in [BENCHMARKS.md](BENCHMARKS.md). Warm-cache, single machine, one run per MFT target |
-| 16 | Reliability under large inputs | Done | `tests/stress_scan.rs`: 20,000-file wide directory with exact totals and bounded children, deep nesting, access-denied directories, exclusion and cancellation; `scan.rs` unit tests cover the node/extension caps |
-| 17 | Read-only preservation | Superseded by Phase 3 | Phase 2 added no destructive command and its read-only guarantees still hold for scanning, duplicates and storage. The blanket source audit was replaced in Phase 3 by the narrower `tests/security.rs` boundary suite |
-| 18 | Documentation | Done | README, this file, ARCHITECTURE, ROADMAP, HANDOFF, BENCHMARKS, GATES |
+### 3. Review-First Cache Cleaning & Quarantine
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Extensible Declarative Providers | Done | `providers.rs`: versioned (`schema_version: 1`) declarative definitions; validates environment roots, rejects path traversals and attempts to mark protected data safe. |
+| Cache Catalog & Guard | Done | `caches.rs`: 48 fixed locations; `cleanup.rs` guard refuses protected entries (histories, models, configurations, browser profiles, Docker/WSL). |
+| Read-Only Mode Default | Done | Backend initializes with `read_only = true`, gating `start_cleanup` and `clean_app_leftovers` until explicitly enabled. |
+| Crash-Consistent Quarantine | Done | Files moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\`; durable write-ahead recovery journal (`recovery_journal.jsonl`) physically synced (`sync_all`) before moves. |
+| Atomic No-Overwrite Restore | Done | Restores use Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, preventing destination file overwrites. |
+| Manifest-Scoped Purge | Done | `purge_quarantine` permanently deletes only files recorded in that batch manifest whose paths remain inside the batch folder. |
+| Storage Caps & Low Space Protection | Done | Quarantine total storage is capped at 20 GB (`MAX_QUARANTINE_TOTAL_BYTES`); cleanup aborts if free space on the quarantine volume is below 512 MB. |
 
-## Phase 3 acceptance
+### 4. Windows Integration & Packaging
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Explorer Shell Integration | Done | `explorer.rs`: per-user shell verbs registered in `HKCU\Software\Classes` without elevation; safe CLI argument sanitization; toggleable and repairable via Settings. |
+| Windows Metadata Standards | Done | Product name, version, publisher (`Ry0x7`), UpgradeCode, and description enforced across PE, MSI, and NSIS (`WINDOWS_METADATA_OK`). |
+| Local Dev Code Signing | Done | `scripts/sign-dev-build.ps1` signs binaries with local self-signed certificate (`DEV_TEST_SIGNED`); signature integrity and negative tests verified (`SIGNATURES_VERIFIED_OK`). |
+| SignPath Foundation Integration | Prepared | Prepared `.github/workflows/signpath-release.yml` and `docs/CODE_SIGNING_POLICY.md` pending open-source onboarding. |
+| Installer Bundling | Done | NSIS setup (`.exe`) and WiX MSI (`.msi`) generated and verified (`RELEASE_BUNDLES_OK`). |
 
-| # | Requirement | Status | Evidence and limits |
-| --- | --- | --- | --- |
-| 1 | Modular cleanup engine with audited providers | Done | `src-tauri/src/cleanup.rs` (guard, planner, executor, quarantine, log) over the fixed catalog in `caches.rs`. Providers are catalog entries, not plugins: 27 safe, 9 caution, 12 protected |
-| 2 | Scan → preview → selection → confirmation → execution → verification | Done | `preview_cleanup` returns a server-held plan plus a preview; `start_cleanup` consumes the plan id once, re-checks the selection, the 10-minute TTL and read-only mode; the report carries per-item status and the quarantine batch is listed immediately |
-| 3 | Backend enforces eligibility, never trusts the frontend | Done | Commands accept target **ids** only; `catalog_specs` refuses unknown and protected ids; `guard_path` runs before planning and again before each target; `check_plan_selection` rejects ids the plan does not contain |
-| 4 | Dry run, progress, cancellation, failure recovery, detailed results | Done | Preview is the dry run; `cyron-cleanup-progress` events every 120 ms; cancellation is an `AtomicBool` polled per file; a locked file is skipped and the run continues; results list up to 500 items with reasons |
-| 5 | Revalidate identity/location/eligibility before modification | Done | Each file is re-`symlink_metadata`d, rejected if it is not a regular file or carries a reparse attribute, and its canonicalized parent must still be inside the target root immediately before the rename |
-| 6 | No symlink/junction traversal, path escapes or protected deletion | Done | Reparse points are skipped in the walk and refused per file; `normalize_key`/`is_within_key` compare canonical prefixes; protected catalog paths and their ancestors are refused; `tests/security.rs` covers junction, link and escape cases |
-| 7 | Windows and application providers | Done | User temp, Windows temp, crash dumps, INetCache, Chrome/Edge caches, VS Code/Cursor/Antigravity cache+GPU+log entries, Docker logs. Windows Update downloads are measured but protected; no servicing or update-service manipulation |
-| 8 | Developer and AI providers | Done | Claude Code, Codex CLI, Gemini CLI, Cursor, Antigravity, VS Code, npm, pnpm, Yarn, pip, Cargo, NuGet, Ollama/LM Studio logs. Each entry carries an impact note saying whether it regenerates, is re-downloaded, or costs a reset |
-| 9 | Strict protection of repositories, models, histories, credentials, Docker/WSL, browser profiles | Done | 12 protected entries plus a guard that refuses ancestors of protected data; hard links and reparse points are never moved; no command accepts a free-form path |
-| 10 | Review-first workflow, never automatic | Done | Backend starts read-only; preview works in that mode because it only reads, while `start_cleanup` refuses until cleaning is enabled; the drawer requires a confirmation checkbox; nothing runs on a timer or at startup |
-| 11 | Safe / Review / Protected classification | Done | `risk` on every catalog entry, surfaced as `RiskBadge`, filters and the protected-data section; protected rows have no checkbox and the backend refuses them anyway |
-| 12 | Confirmation showing paths, impact and recovery | Done | Preview drawer lists target paths, per-target impact, the planned file list (capped at 400 with an explicit note), skipped items, warnings, expiry time and the quarantine promise |
-| 13 | Recoverable quarantine with retention and restore | Done | `<app_data>\quarantine\<run-id>\manifest.json`; restore is byte-exact, never overwrites, and retires the batch when everything is back; `expiresAt` records 7-day retention. No automatic expiry sweep or size cap |
-| 14 | Identify operations that cannot be rolled back | Done | Purge is labelled permanent in the UI and the confirmation text; restore failures and skipped files are reported per item |
-| 15 | Backend-controlled exclusions, audit log, global read-only mode | Done | Settings exclusions are validated as absolute non-root paths by `preview_cleanup`, stored in the plan and applied to both preview and execution; `cleanup-log.json` keeps 100 entries; `read_only` is an `AtomicBool` in `AppState` |
-| 16 | No administrator rights requested | Done | No elevation call exists; locked or system-owned files are reported as skipped |
-| 17 | Functional Cleaner UI in the existing page | Done | `Cleaner.tsx`: Windows/Applications/Developer/AI groups, risk and category filters, search, per-target detail, selection bar, preview drawer, progress, results, Quarantine and History tabs, read-only banner, empty/error/stale states |
-| 18 | Destructive-operation security suite replacing the blanket audit | Done | `tests/read_only.rs` removed; `tests/security.rs` (17 tests) asserts which modules may call destructive APIs, protected-path refusal, hostile ids, junction/link handling, restore/purge boundaries, read-only refusal and two plan-to-execution junction swaps |
-| 19 | Cleanup tested only on isolated fixtures | Done | `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` use `%TEMP%\cyron-cleanup-<pid>`; `tests/cleanup_stress.rs` uses temp fixtures. No personal cache was cleaned |
-| 20 | Path traversal, junction, TOCTOU, locked, partial, cancellation, restore-failure tests | Done | `tests/security.rs` covers hostile run ids, a junction target, and two TOCTOU swaps (subfolder and whole target replaced by a junction between preview and execution — nothing outside moves, the swap is reported); `tests/cleanup_stress.rs` and the fixture cover locked files, cancelled runs, restore onto an existing file and purge accounting. Moving files consumes no extra disk space, so the insufficient-space case reduces to the manifest write, which is written incrementally |
-| 21 | Reconcile Phase 2 counting differences before quoting recoverable space | Done | Cleaner sizes and preview totals both come from the same directory walk (`walk_target`), so the preview matches the measured target; MFT totals are never used for cleanup figures. The UI labels sizes as measured, not as guaranteed savings |
-| 22 | Windows CI, native build, all suites, real UI behaviour | Partly verified | CI workflow extended with the security, cleanup-stress and fixture steps (remote run not observed); native build, binary check and launch smoke pass; the Cleaner was driven live in both themes on 2026-11-06 (G13), which found and fixed the preview/read-only defect and an Overview warning layout bug |
-| 23 | Milestone documentation | Done | README, ROADMAP, HANDOFF, this file, SECURITY, ARCHITECTURE, AGENTS and GATES updated in the same commit |
+---
 
-## Verification commands and current results
+## Known Limitations & Design Boundaries
 
-| Check | Command | Result |
-| --- | --- | --- |
-| TypeScript | `npm run typecheck` | Pass |
-| Frontend unit tests | `npm test` | Pass, 70/70 across 7 files |
-| Frontend production bundle | `node scripts/verify-dist.mjs` | Pass (`DIST_OK`) |
-| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | Pass: 105 unit (2 ignored), 17 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress (1 ignored) |
-| Real registry/cache/scan | `... --test real_system -- --nocapture` | Pass: live registry, live cache targets, exact byte fixture |
-| Permission boundaries | `... --test security -- --nocapture` | Pass 17/17: destructive-API module boundary, protected paths, hostile ids, junction, TOCTOU swaps, links, restore/purge, read-only |
-| Cleanup stress | `... --test cleanup_stress -- --nocapture` | Pass 5/5: wide fixture, locked file, cancellation, consecutive batches, empty targets |
-| Cleanup fixture | `node scripts/verify-cleanup.mjs` | Pass: `CLEANUP_FIXTURE_OK` |
-| Scanner stress | `... --test stress_scan -- --nocapture` | Pass 5/5 (one 20k-file test) |
-| Desktop binary | `npm run build:desktop` + `verify-desktop-binary.mjs` | Pass: `DESKTOP_BINARY_OK` |
-| Launch | `node scripts/smoke-desktop.mjs` | Pass: `DESKTOP_SMOKE_OK` |
-| Visual pass | Six views × two themes plus analyzer Map/Storage/Duplicates and a real `C:\Windows\System32` scan | Captured with the Tauri window attached to a running Vite dev server; no misrendered or blank view |
-| MFT live scan | Elevated benchmark binary | Pass: `method: mft` on `C:` (and intentionally error-free fallback when unelevated) |
-| Windows CI | GitHub Actions `ci.yml` | Workflow present and locally equivalent commands pass; the remote run has not been observed in this session |
-
-Notes:
-
-- `scripts/msvc-env.mjs` discovers the Visual Studio C++ toolchain through `vswhere`. Without it a
-  plain shell can pick up Git's unrelated `link.exe`.
-- The debug desktop executable loads the Vite dev server (`devUrl`) rather than embedded assets, so
-  launching it without `npm run dev` shows a connection error. This is a known limitation of the
-  debug build, not a scanner defect; `smoke-desktop.mjs` checks window presence only.
-
-## Known limitations
-
-1. **Store/MSIX apps have read-only lifecycle.** Store apps are discovered from `AppModel\Repository\Packages`
-   with metadata and leftover detection, but Windows enforces sandboxed package management. They cannot be uninstalled
-   via traditional Win32 command lines; Cyron provides clear guidance to Windows Settings or `winget`.
-2. **MFT needs elevation and NTFS.** Without administrator rights the handle to `\\.\C:` cannot be
-   opened; the scan reports the reason and uses the directory walk. Volumes whose record count
-   exceeds the 768 MiB budget (4,910,404 records at the current record size) are rejected and fall
-   back.
-3. **MFT counts records, not paths.** A file with several hard links appears once; the directory
-   walk counts each path and dedupes allocated bytes only while its id set has room. Whole-volume
-   totals from the two methods therefore differ (see BENCHMARKS.md).
-4. **Subfolder MFT scans are slower than the walk.** MFT reads the whole volume's record set; the
-   UI only auto-selects MFT for drive roots.
-5. **Warm-cache measurements only.** No cold-cache methodology, and no comparison with WizTree or
-   any commercial tool.
-6. **The IPC tree is pruned.** At most 200 children per folder, 8 levels deep and up to 40 file
-   nodes per folder plus aggregate groups; totals cover the whole walk, returned extension stats
-   are the top 24 and largest files the top 100.
-7. **Duplicate detection is candidate-based.** Default minimum size is 1 MiB, at most 1,000,000
-   candidates, 200 returned groups and 50 files per group; the report sets `truncated` when a cap
-   is hit. Files modified during hashing are reported rather than guessed.
-8. **Storage categories are heuristics.** Known locations (Program Files, Downloads, Steam,
-   `.cargo`, Docker/WSL, model folders) are marked `known`; extension-based classification is
-   marked `inferred`. A category is never fully `known` if any of its bytes were inferred.
-9. **No duplicate management.** Duplicates are reported only; only the Cleaner acts, and only on
-   catalog caches.
-9a. **Cleaning is catalog-scoped.** Custom install paths, individual projects and files outside the
-   48 known locations are never touched. A tool that relocates its cache breaks its entry until the
-   catalog is updated.
-9b. **Locked and inaccessible files are left behind.** No restart-manager trick, VSS snapshot,
-   service stop or process termination is used to force a cleanup; skipped items are reported.
-9c. **Quarantine has no size cap or expiry sweep.** The 7-day `expiresAt` is recorded and shown but
-   nothing is deleted automatically; a batch stays restorable until the user purges it.
-9d. **Preview listings are capped.** Up to 400 files are listed and up to 100,000 files per target
-   are considered; the totals and moves cover every considered file, and the preview says when it
-   stopped early.
-9e. **The Windows Update download cache is protected.** Cyron does not manipulate servicing state;
-   Windows Storage Sense or Disk Cleanup remain the supported route.
-10. **Debug build requires the dev server.** Release packaging, signing and a standalone installer
-    remain unverified.
-11. **Windows only.** Win32 APIs are called unconditionally.
-
-## Phase 4 & 4.1 Acceptance
-
-| # | Requirement | Status | Evidence and limits |
-| --- | --- | --- | --- |
-| 1 | Standard uninstaller execution | Done | `src-tauri/src/uninstall.rs`: commands tokenized safely, MSI product codes normalized, shell interpreters (`cmd.exe`, `powershell.exe`) rejected; exit code tracking with reboot requirement (code 3010) |
-| 2 | Process discovery and controlled termination | Done | `src-tauri/src/process.rs`: discovers processes executing within app install directory; verifies PID identity and 64-bit creation times (`GetProcessTimes`) against verified snapshots; critical system processes denied; graceful `WM_CLOSE` precedes `TerminateProcess` |
-| 3 | Leftover & residual scanner | Done | `src-tauri/src/leftovers.rs`: classifies candidate directories and registry keys by confidence and risk; guards system roots and profile folders; non-following bounded directory walker (depth <= 32, max 100k files) skips junctions |
-| 4 | Staged registry backup and restore | Done | Complete recursive `.reg` export supporting `REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, and `REG_MULTI_SZ` with backup integrity verification before subkey deletion; verified restore helper |
-| 5 | Batch sequential uninstaller | Done | `Uninstaller.tsx`: reviewable queue executing sequentially with failure isolation; requires separate confirmation for residual review |
-| 6 | Priority 0 uninstaller execution boundary | Done | Frontend commands and arguments untrusted; commands resolved server-side from registered uninstall keys into single-use expiring `UninstallPlan` (10m TTL); revalidated against live registry |
-| 7 | Priority 0 recovery correctness | Done | Durable crash-consistent write-ahead recovery journal (`recovery_journal.jsonl`) with physical disk synchronization (`sync_all`); atomic Win32 `MoveFileExW` no-overwrite restore; destination ancestor reparse checks |
-
-## Phase 5 Acceptance
-
-| # | Requirement | Status | Evidence and limits |
-| --- | --- | --- | --- |
-| 1 | Automated release workflows | Done | `.github/workflows/release.yml`: automated release pipeline on version tags, builds release binaries, generates SHA-256 checksums, publishes GitHub releases |
-| 2 | NSIS and WiX MSI installer packaging | Done | Verified locally (`RELEASE_BUNDLES_OK` via `scripts/verify-release-bundles.mjs`): NSIS (`Cyron_0.1.0_x64-setup.exe`, 1.42 MiB) and WiX MSI (`Cyron_0.1.0_x64_en-US.msi`, 2.00 MiB) |
-| 3 | Application data preservation | Done | Upgrade contract preserves `%APPDATA%\dev.cyron.uninstaller` (`history.json`, `quarantine/`, `cleanup-log.json`) across in-place upgrades |
-| 4 | Authenticode signing model | Configured / Documented | Unsigned release candidate status explicitly labelled; signing parameters and verification steps documented in `docs/RELEASE_CHECKLIST.md` and `docs/BUNDLE.md` |
-| 5 | Store/MSIX inventory investigation | Documented | Investigated and documented in `docs/ARCHITECTURE.md`: AppModel registry repository vs WinRT COM bindings; uninstallation requires Windows Runtime COM interfaces without shell scripts |
-| 6 | Git history privacy audit | Documented | Historical session metadata in commit `62414cc` documented with approved `git-filter-repo` remediation plan |
-| 7 | User guide and contribution documentation | Done | `docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md` |
-
-## Phase 6 Acceptance (Competitive Feature Expansion)
-
-| # | Requirement | Status | Evidence and limits |
-| --- | --- | --- | --- |
-| 1 | Windows Explorer Context Menu Integration | Done | `src-tauri/src/explorer.rs`: classic per-user shell verbs registered under `HKCU\Software\Classes` for directories, drives, directory backgrounds, and `.exe` files. CLI startup argument sanitization with strictly allowed routes (`--analyze`, `--duplicates`, `--storage`, `--uninstall-target`, `--find-related`). Safe view navigation in `App.tsx`. Single-click Enable, Disable, and Repair in Settings. Never executes destructive actions directly from Explorer |
-| 2 | Enhanced Application Discovery | Done | `src-tauri/src/apps.rs`: Store / AppX / MSIX package discovery via `AppModel\Repository\Packages`; Steam multi-library game discovery via `libraryfolders.vdf` and `appmanifest_*.acf`; bounded portable executable discovery in `%LOCALAPPDATA%\Programs`; broken uninstaller detection flagging missing executables. Source badges and filter tabs (`All`, `Win32`, `Store`, `Steam`, `Portable`, `Broken`) in Uninstaller UI |
-| 3 | Disk Analyzer → Cleaner Direct Review Integration | Done | `src-tauri/src/commands.rs` (`inspect_cleanable_directory`) and `Analyzer.tsx` / `Cleaner.tsx`: inspecting treemap or folder tree nodes identifies matching cleanup providers, displays expected reclaimable space vs occupied bytes, and provides a 1-click "Review for Cleanup" action routing directly to the target in the Cleaner drawer |
-| 4 | Extensible Declarative Cleanup Providers | Done | `src-tauri/src/providers.rs`: versioned (`schema_version: 1`) declarative definitions. Strict schema validation against path traversal (`..`), system roots, and attempts to demote protected data. Supports approved environment roots (`%USERPROFILE%`, `%LOCALAPPDATA%`, `%APPDATA%`, `%TEMP%`, `%PROGRAMDATA%`, `%SYSTEMROOT%`) |
-| 5 | Competitive Performance Benchmarks & Documentation | Done | `scripts/benchmark-competitive.mjs`: release-mode benchmarks measuring cold/warm duration, peak working set, file counting rules, and cancellation latency (< 120 ms). Documented in `docs/BENCHMARKS.md` alongside WinDirStat and WizTree comparisons |
+1. **Store / MSIX Lifecycle:** Windows Store packages are discovered from `AppModel\Repository\Packages` for inventory, file inspection, and residual scanning. Because Store removal requires Windows Runtime COM package management interfaces, traditional Win32 uninstallation is disabled with clear user guidance directing to Windows Settings or `winget`.
+2. **Portable Applications:** Standalone portable executables in `%LOCALAPPDATA%\Programs` are discovered through explainable heuristics. They lack registry uninstaller commands; Cyron provides residual scanning, folder measurement, and Explorer navigation.
+3. **MFT Scanner Elevation:** Accessing raw volume handles (`\\.\X:`) requires administrator elevation. When unelevated, Cyron reports the reason and falls back seamlessly to the streaming directory walk.
+4. **MFT vs Walk Counting Difference:** The MFT reader counts physical NTFS records; the streaming directory walk counts accessible filesystem paths (deduplicating up to 1,000,000 hard-link IDs). Volume totals from the two methods differ by design (see [docs/BENCHMARKS.md](BENCHMARKS.md)).
+5. **Debug Desktop Build:** The debug build executable (`src-tauri/target/debug/cyron.exe`) targets Tauri's `devUrl` and requires the Vite dev server (`npm run dev`). Production release builds embed frontend assets directly and run standalone.
+6. **Platform Scope:** Cyron targets Windows 10/11 x64 exclusively. Win32 APIs are invoked unconditionally.

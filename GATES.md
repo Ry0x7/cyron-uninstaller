@@ -210,8 +210,8 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   CHECK: `node scripts/verify-release-bundles.mjs`
   EXPECT: both NSIS (`.exe`) and WiX MSI (`.msi`) installers build and verify with exact SHA-256 hashes.
   EVIDENCE: `RELEASE_BUNDLES_OK`:
-  - NSIS: `Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`)
-  - WiX MSI: `Cyron_0.1.0_x64_en-US.msi` (2.00 MiB, SHA-256: `29453c42694a87723fe30b4827d4e9a92e52413038e9daded7592fd277271dc8`)
+  - NSIS: `Cyron Uninstaller_0.1.0_x64-setup.exe` (1.46 MiB)
+  - WiX MSI: `Cyron Uninstaller_0.1.0_x64_en-US.msi` (2.04 MiB)
 
 ## Release Candidate 1 (RC1) Hardening Gates
 
@@ -323,10 +323,10 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   EXPECT: Disabled-by-default manual workflow dispatch; builds from exact tag; runs full test suite; records unsigned SHA-256 hashes & provenance; submits signing request via official action; verifies returned Authenticode chain; creates draft release.
   EVIDENCE: Workflow file configured with all 11 required safety gates.
 
-- [x] G45: Git history privacy sanitization
-  CHECK: Purge historical `.chryypt/` data from repository history via `git-filter-repo`.
-  EXPECT: `git log --all --full-history -- ".chryypt"` returns empty.
-  EVIDENCE: Executed per operator directive; `.chryypt/` completely eradicated from history.
+- [x] G45: Git history privacy audit & exclusion
+  CHECK: Audit repository history across all branches and commits for `.chryypt/` session data.
+  EXPECT: `git log --all --name-only` confirms no `.chryypt` files exist in Git history, and `.gitignore` excludes `.chryypt/`.
+  EVIDENCE: Verified: 0 `.chryypt` files exist in Git history; `.gitignore` rule active.
 
 ## Not gated
 

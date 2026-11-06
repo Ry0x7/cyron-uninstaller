@@ -94,13 +94,11 @@ The Activity view maintains an audit log of past scans and quarantine batches:
 
 ## 7. Settings & Safety Controls
 
-- **Read-Only Mode**: Enabled by default upon initial installation. When active, all destructive operations (cleanup, leftover quarantine, process termination) are completely blocked by the backend.
+- **Read-Only Mode**: Enabled by default upon initial installation. When active, cache cleanup (`start_cleanup`) and uninstaller leftover quarantine (`clean_app_leftovers`) are completely blocked by the backend until deliberately toggled off. Process management and uninstaller execution are independently governed by single-use server confirmation plans, process snapshot verification, and critical Windows process allowlists.
 - **Windows Explorer Integration**:
   - Optional native right-click integration registered cleanly under `HKCU\Software\Classes` without needing administrator rights.
   - **Folders & Drives**: "Analyze with Cyron", "Find Duplicates with Cyron", and "View Storage Breakdown".
   - **Executables (`.exe`)**: "Uninstall with Cyron" (opens registered uninstaller review) and "Find Related Files" (opens residual file review).
   - Single-click **Enable**, **Disable**, and **Repair** controls in Settings. Clean uninstallation completely removes all registered shell verbs.
-- **Exclusion Folders**: Define specific absolute directory paths that the scanner and cleaner must never touch.
-- **Theme**: Choose between System, Light, and Dark themes with zero theme flicker on startup.
 - **Exclusion Folders**: Define specific absolute directory paths that the scanner and cleaner must never touch.
 - **Theme**: Choose between System, Light, and Dark themes with zero theme flicker on startup.

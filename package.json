@@ -15,6 +15,7 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
+    "docs:check": "node scripts/verify-docs.mjs",
     "prepare": "powershell -ExecutionPolicy Bypass -File scripts/setup-git-hooks.ps1",
     "tauri": "node scripts/msvc-env.mjs npx tauri",
     "dev:desktop": "node scripts/msvc-env.mjs npx tauri dev",

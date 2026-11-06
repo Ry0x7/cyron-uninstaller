@@ -43,9 +43,9 @@ src/
   components/ui.tsx           Button, Badge, Panel, Drawer, Segmented, Toggle, ...
   components/Icons.tsx        inline SVG icon set
   features/overview/          storage, applications, cleanup, recent activity
-  features/uninstaller/       read-only inventory + application drawer
+  features/uninstaller/       multi-source application inventory, uninstaller, batch queue, process manager & residual drawer
   features/analyzer/          scan controls, treemap, tree, filters, duplicates, storage
-  features/cleaner/           cache inventory and risk explanation (preview only)
+  features/cleaner/           review-first cache cleaner, preview drawer, execution, quarantine, restore & purge
   features/activity/          local scan history
   features/settings/          theme, scan scope, exclusions, safety copy
   lib/api.ts                  typed invoke wrapper + cached cache-inventory request
@@ -59,7 +59,7 @@ src/
   styles/tokens.css           light/dark design tokens
   styles/app.css              shell, primitives and shared layout
 src-tauri/
-  src/apps.rs                 uninstall-registry discovery
+  src/apps.rs                 multi-source application discovery (Win32, Store/MSIX, Steam, Portable)
   src/fs.rs                   native directory enumeration + std::fs fallback
   src/mft.rs                  NTFS MFT reader and subtree construction
   src/scan.rs                 streaming walker, method selection, aggregation
@@ -381,7 +381,7 @@ entries. `isProtected` is a UI hint for entries under `%WINDIR%` or Windows-bran
 does not grant any operation. `EstimatedSize` is read as a DWORD or a string of kilobytes and
 reported as bytes; a missing value stays `null` rather than being guessed.
 
-Windows Store/MSIX applications are not enumerated. Application icons are not extracted.
+Windows Store/MSIX applications are enumerated from `AppModel\Repository\Packages` as a distinct inventory source with read-only lifecycle indicators. Application icons are not extracted.
 
 ## Cache catalog
 
@@ -467,7 +467,7 @@ Windows Store, UWP, and modern packaged applications (MSIX) do not write standar
 1. **Discovery**: Read-only inventory discovery of installed packages can enumerate these `AppModel\Repository\Packages` subkeys to extract package full names, display names, and install paths.
 2. **Uninstallation Boundary**: Unlike standard Win32 applications, MSIX packages have no `UninstallString` or MSI product code. Uninstallation requires invoking Windows Runtime COM interfaces: `Windows.Management.Deployment.PackageManager::RemovePackageAsync`.
 3. **Security Constraints**: Invoking `powershell.exe -Command Remove-AppxPackage` is strictly refused because Cyron forbids spawning shell interpreters or running arbitrary scripts. A native WinRT COM projection (using the `windows` crate) is required to remove MSIX packages safely without shell wrappers.
-4. **Roadmap**: Store/MSIX enumeration is designed as a distinct read-only inventory source with separate badges, keeping standard Win32 desktop uninstallation strictly isolated and safe.
+4. **Implementation**: Store/MSIX packages are enumerated in `apps.rs` with source metadata, install paths, and residual detection. Because safe removal requires Windows Runtime COM package management interfaces, traditional Win32 uninstallation is disabled with clear guidance directing users to Windows Settings or `winget`.
 
 ## Persistence
 
@@ -521,10 +521,10 @@ but slower; neither is a WizTree comparison. Details and caveats are in
 
 ## Testing and CI
 
-- `src/lib/*.test.ts` — 71 tests in 7 files covering formatting, categories, risk ratings, analyzer filters, cleanup selection rules, treemap geometry, and Tauri IPC contracts.
-- Rust unit tests — 120+ unit tests covering registry discovery, directory traversal, MFT parsing, duplicate detection, storage categorization, cache catalog validity, quarantine roundtrip, uninstaller tokenization, process filters, and recursive registry backup/restore.
+- `src/lib/*.test.ts` — Frontend unit test suites covering formatting, categories, risk ratings, analyzer filters, cleanup selection rules, treemap geometry, and Tauri IPC contracts.
+- Rust unit tests — Tests covering registry discovery, directory traversal, MFT parsing, duplicate detection, storage categorization, cache catalog validity, quarantine roundtrip, uninstaller tokenization, process filters, and recursive registry backup/restore.
 - `tests/real_system.rs` — live registry count, live cache targets, a temporary fixture tree with exact byte assertions.
-- `tests/security.rs` — 22 architectural boundary and security tests: module boundaries for destructive APIs, protected-path refusal, hostile IDs, junction/symlink swaps, shell rejection, process termination boundaries, and registry backup verification.
+- `tests/security.rs` — Architectural boundary and security tests: module boundaries for destructive APIs, protected-path refusal, hostile IDs, junction/symlink swaps, shell rejection, process termination boundaries, and registry backup verification.
 - `tests/cleanup_stress.rs` — wide cleanup fixture with a bounded preview, locked file, cancelled run, consecutive batches and empty/missing targets.
 - `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` — end-to-end plan → quarantine → restore → purge against `%TEMP%\cyron-cleanup-<pid>`, printing `CLEANUP_FIXTURE_OK`.
 - `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep nesting, access-denied folders, exclusion subtree and cancellation.

@@ -14,7 +14,7 @@ Cyron is a modern, transparent Windows uninstaller, disk space analyzer, and dev
 - **Multi-Source Discovery:** Discovers Win32 64-bit and 32-bit applications, Microsoft Store / AppX / MSIX packages (read-only inventory), Steam game installations across all configured libraries, and standalone portable executables.
 - **Process Discovery & Snapshot-Verified Termination:** Detects running processes associated with target apps, blocks critical system processes, and guards against PID recycling before termination.
 - **Reboot Code Handling:** Accurately recognizes Windows installer exit code `3010` (Reboot Required) alongside standard success/failure codes.
-- **Deep Leftover Analysis & Safe Registry Cleanup:** Scans leftover directories, files, and registry keys with explicit confidence and risk levels (`safe`, `caution`, `danger`). Performs automatic, recursive multi-type `.reg` registry backups before subkey deletion.
+- **Deep Leftover Analysis & Safe Registry Cleanup:** Scans leftover directories, files, and registry keys with explicit confidence and risk levels (`safe`, `caution`, `protected`). Performs automatic, recursive multi-type `.reg` registry backups before subkey deletion.
 - **Batch Uninstallation:** Sequential uninstallation of multiple selected applications with real-time logging and review gates.
 
 #### 2. Disk Space Analyzer
@@ -25,7 +25,7 @@ Cyron is a modern, transparent Windows uninstaller, disk space analyzer, and dev
 
 #### 3. Review-First Cache & Bloat Cleaner
 - **Declarative Extensible Providers:** Structured catalog covering dev caches (Node/npm, Cargo, Gradle, Docker, Python/pip, Go, NuGet) and system temporary data.
-- **Crash-Consistent Quarantine:** Safe write-ahead recovery journal (`journal.json`), atomic `MoveFileExW` (no-overwrite) moves, and manifest-scoped recovery. Files are never deleted in place during cleanup; restoration is one-click.
+- **Crash-Consistent Quarantine:** Safe write-ahead recovery journal (`recovery_journal.jsonl`), atomic `MoveFileExW` (no-overwrite) moves, and manifest-scoped recovery. Files are never deleted in place during cleanup; restoration is one-click.
 - **Direct Analyzer → Cleaner Review:** Select recognized cache directories in the treemap or tree and jump directly to review.
 
 #### 4. Windows Explorer Context Menu Integration

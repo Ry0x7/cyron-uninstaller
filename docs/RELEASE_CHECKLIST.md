@@ -1,19 +1,20 @@
-# Cyron — Release Checklist & Release Engineering Guide
+# Cyron — Release Checklist & Engineering Guide
 
-This document describes the release engineering steps, verification gates, installer generation, signing protocols, and upgrade compatibility requirements for shipping Cyron.
+This document describes the release engineering steps, verification gates, installer packaging targets, signing protocols, and upgrade compatibility requirements for shipping Cyron Uninstaller.
 
 ---
 
 ## 1. Pre-Release Verification Gates
 
-Every public release candidate must satisfy all acceptance gates before packaging:
+Every public release candidate must satisfy all verification gates before packaging:
 
 - [ ] **Typecheck**: `npm run typecheck` reports 0 diagnostics.
-- [ ] **Frontend Tests**: `npm test` passes all 71 vitest suites across 7 files.
+- [ ] **Frontend Test Suite**: `npm test` passes all Vitest test suites.
+- [ ] **Documentation Integrity**: `npm run docs:check` passes with 0 link or consistency errors.
 - [ ] **Frontend Production Build**: `node scripts/verify-dist.mjs` outputs `DIST_OK`.
-- [ ] **Rust Core Unit Tests**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib` passes all 134 unit tests with 0 failures.
-- [ ] **Destructive Safety Boundaries**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture` passes all 25 boundary audit tests.
-- [ ] **Cleanup & Recovery Stress**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture` passes all 5 tests.
+- [ ] **Rust Core Test Suite**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` passes all tests with 0 failures.
+- [ ] **Destructive Safety Boundaries**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture` passes all boundary audit tests.
+- [ ] **Cleanup & Recovery Stress**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture` passes all stress tests.
 - [ ] **Isolated Cleanup Fixture**: `node scripts/verify-cleanup.mjs` outputs `CLEANUP_FIXTURE_OK`.
 - [ ] **End-to-End Fixture**: `node scripts/verify-e2e.mjs` outputs `RC1_E2E_FIXTURE_OK`.
 - [ ] **Competitive Benchmark**: `node scripts/benchmark-competitive.mjs` outputs `BENCHMARK_OK`.
@@ -22,7 +23,6 @@ Every public release candidate must satisfy all acceptance gates before packagin
 - [ ] **Release Installer Bundles**: `node scripts/verify-release-bundles.mjs` outputs `RELEASE_BUNDLES_OK`.
 - [ ] **Windows Metadata Consistency**: `npm run verify:metadata` outputs `WINDOWS_METADATA_OK`.
 - [ ] **Authenticode Signature & Negative Integrity**: `npm run verify:signatures` outputs `SIGNATURES_VERIFIED_OK`.
-- [ ] **Git History Privacy Audit**: Purge historical `.chryypt/` data from repository history via `git-filter-repo`.
 
 ---
 
@@ -30,7 +30,7 @@ Every public release candidate must satisfy all acceptance gates before packagin
 
 Every build artifact belongs strictly to one of three release classifications:
 
-| Classification | Signature Status | Intended Target | Verification Script |
+| Classification | Signature Status | Intended Target | Verification Command |
 |---|---|---|---|
 | `UNSIGNED_RC` | Unsigned | Internal private testing | `node scripts/verify-release-bundles.mjs` |
 | `DEV_TEST_SIGNED` | Self-Signed (`CN=Cyron Uninstaller Development`) | Developer workstations & isolated test VMs | `npm run verify:signatures` |
@@ -46,31 +46,40 @@ npm run verify:signatures
 ```
 
 ### B. SignPath Foundation Public Signing (`SIGNPATH_SIGNED`)
-Triggered manually via `.github/workflows/signpath-release.yml` once SignPath Foundation eligibility criteria (`docs/SIGNPATH_READINESS.md`) are approved. SignPath submits requests through `signpath/github-action-submit-signing-request`, requires manual approval, and verifies returned Authenticode chains before drafting releases.
+Triggered manually via `.github/workflows/signpath-release.yml` once SignPath Foundation eligibility criteria ([docs/SIGNPATH_READINESS.md](SIGNPATH_READINESS.md)) are approved. SignPath submits requests through `signpath/github-action-submit-signing-request`, requires manual approval, and verifies returned Authenticode chains before drafting releases.
 
 ---
 
 ## 3. Installer Packaging & Targets
 
+Cyron generates two distinct Windows installer packages via Tauri v2 bundler:
+
+1. **NSIS Setup Installer (`.exe`)**:
+   - Location: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_<version>_x64-setup.exe`
+   - Configured for per-user installation without mandatory elevation.
+   - Embeds application metadata, uninstaller hooks, and desktop/start menu shortcuts.
+2. **WiX Windows Installer Package (`.msi`)**:
+   - Location: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_<version>_x64_en-US.msi`
+   - Configured for enterprise deployment and Windows Installer management.
+   - UpgradeCode is permanently locked to `{C2BCD648-205F-5904-9E5C-85726E376EC2}` to ensure seamless in-place upgrades.
+3. **Standalone Portable Executable**:
+   - Location: `src-tauri/target/release/cyron.exe`
+
 ---
 
 ## 4. Checksums & Release Assets
 
-For every release build, generate standard SHA-256 checksums:
+For every release build, generate standard SHA-256 checksums using `scripts/generate-checksums.mjs`:
 
 ```powershell
-$artifacts = Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse -Include *.exe,*.msi
-$lines = foreach ($item in $artifacts) {
-    $hash = (Get-FileHash -Path $item.FullName -Algorithm SHA256).Hash.ToLower()
-    "$hash  $($item.Name)"
-}
-$lines | Out-File -Encoding utf8 -FilePath "SHA256SUMS.txt"
+node scripts/generate-checksums.mjs
 ```
 
-Attach the following assets to the GitHub Release:
-1. `Cyron_<version>_x64-setup.exe` (NSIS Installer)
-2. `Cyron_<version>_x64_en-US.msi` (MSI Package)
-3. `SHA256SUMS.txt` (Cryptographic verification checksums)
+Attach the following verified assets to the GitHub Release:
+1. `Cyron Uninstaller_<version>_x64-setup.exe` (NSIS Installer)
+2. `Cyron Uninstaller_<version>_x64_en-US.msi` (MSI Package)
+3. `cyron.exe` (Standalone Portable Executable)
+4. `SHA256SUMS.txt` (Cryptographic verification checksums)
 
 ---
 

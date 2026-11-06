@@ -61,7 +61,7 @@ flowchart TD
     end
 
     subgraph IPC ["Tauri v2 IPC Boundary (CamelCase JSON)"]
-        Cmds[28 Validated Commands]
+        Cmds[34 Validated Commands]
     end
 
     subgraph Backend ["Rust Core Engine"]
@@ -169,7 +169,7 @@ npm run verify:signatures                              # Authenticode signature 
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): End-user walkthrough of Explorer integration, scanning, cleaning, and uninstallation.
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): Measured performance, working set, and architectural comparison against WinDirStat/WizTree.
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): Release packaging and VM verification steps.
-- [docs/BUNDLE.md](docs/BUNDLE.md): Installer targets, WebView2 requirements, and app data paths.
+- [docs/BUILD_AND_SIGNING.md](docs/BUILD_AND_SIGNING.md): Build instructions, installer targets, WebView2 requirements, and code signing architecture.
 - [CONTRIBUTING.md](CONTRIBUTING.md): Code standards, safety invariants, and contribution workflow.
 
 ---

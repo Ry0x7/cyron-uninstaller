@@ -56,7 +56,7 @@ Cyron Uninstaller is committed to complete user transparency and privacy:
 2. **Local-First Processing:**
    All scanning, disk analysis, duplicate verification, and inventory discovery occur entirely on the local device.
 3. **Review-First System Modifications:**
-   - **Cleaner:** Files moved to quarantine are stored in `%LOCALAPPDATA%\dev.cyron.uninstaller\quarantine` with a write-ahead recovery journal. Quarantined batches can be restored to their original locations or purged permanently upon explicit user command.
+   - **Cleaner:** Files moved to quarantine are stored in `%APPDATA%\dev.cyron.uninstaller\quarantine` with a durable write-ahead recovery journal (`recovery_journal.jsonl`). Quarantined batches can be restored to their original locations or purged permanently upon explicit user command.
    - **Uninstaller:** Application uninstallation invokes only registered vendor uninstall commands. Force process termination protects critical Windows processes and requires explicit confirmation. Leftover registry deletion automatically creates `.reg` backups before any subkey is removed.
    - **Explorer Integration:** Shell verbs are registered per-user under `HKCU\Software\Classes` without administrative elevation, and can be cleanly removed via Settings at any time.
 
@@ -69,15 +69,15 @@ Users and auditors can independently verify the cryptographic integrity of any C
 ### Using PowerShell:
 ```powershell
 # Check Authenticode signature
-Get-AuthenticodeSignature .\Cyron_Uninstaller_x64-setup.exe | Format-List *
+Get-AuthenticodeSignature ".\Cyron Uninstaller_0.1.0_x64-setup.exe" | Format-List *
 
 # Check SHA-256 hash
-Get-FileHash .\Cyron_Uninstaller_x64-setup.exe -Algorithm SHA256
+Get-FileHash ".\Cyron Uninstaller_0.1.0_x64-setup.exe" -Algorithm SHA256
 ```
 
 ### Using Windows SDK SignTool:
 ```powershell
-signtool verify /pa /v .\Cyron_Uninstaller_x64-setup.exe
+signtool verify /pa /v ".\Cyron Uninstaller_0.1.0_x64-setup.exe"
 ```
 
 For `SIGNPATH_SIGNED` releases, `Get-AuthenticodeSignature` will report `Status: Valid` with `SignerCertificate.Subject` containing `SignPath Foundation`.
