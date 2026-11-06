@@ -4,24 +4,21 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const nsisPath = path.join(
-  root,
-  "src-tauri",
-  "target",
-  "release",
-  "bundle",
-  "nsis",
-  "Cyron_0.1.0_x64-setup.exe"
-);
-const msiPath = path.join(
-  root,
-  "src-tauri",
-  "target",
-  "release",
-  "bundle",
-  "msi",
-  "Cyron_0.1.0_x64_en-US.msi"
-);
+const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+const version = pkg.version;
+
+const nsisDir = path.join(root, "src-tauri", "target", "release", "bundle", "nsis");
+const msiDir = path.join(root, "src-tauri", "target", "release", "bundle", "msi");
+
+function findBundle(dir, prefix, ext) {
+  if (!fs.existsSync(dir)) return null;
+  const files = fs.readdirSync(dir);
+  const match = files.find(f => f.startsWith(prefix) && f.includes(version) && f.endsWith(ext));
+  return match ? path.join(dir, match) : null;
+}
+
+const nsisPath = findBundle(nsisDir, "Cyron", ".exe") || path.join(nsisDir, `Cyron Uninstaller_${version}_x64-setup.exe`);
+const msiPath = findBundle(msiDir, "Cyron", ".msi") || path.join(msiDir, `Cyron Uninstaller_${version}_x64_en-US.msi`);
 
 function getSha256(filePath) {
   const buffer = fs.readFileSync(filePath);

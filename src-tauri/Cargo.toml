@@ -1,10 +1,18 @@
 [package]
 name = "cyron"
 version = "0.1.0"
-description = "Windows application inventory, disk analyzer and developer cache inspector"
-authors = ["Cyron contributors"]
+description = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
+authors = ["Ry0x7"]
 edition = "2021"
 rust-version = "1.77"
+
+[package.metadata.tauri-winres]
+OriginalFilename = "cyron.exe"
+InternalName = "cyron.exe"
+FileDescription = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
+ProductName = "Cyron Uninstaller"
+CompanyName = "Ry0x7"
+LegalCopyright = "Copyright © 2026 Ry0x7"
 
 [lib]
 name = "cyron_lib"

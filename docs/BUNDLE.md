@@ -1,6 +1,6 @@
-# Windows build and bundle notes
+# Windows Build and Bundle Notes
 
-## Build commands
+## 1. Build and Signing Commands
 
 Run these commands from the repository root in PowerShell:
 
@@ -8,61 +8,69 @@ Run these commands from the repository root in PowerShell:
 npm install
 npm run typecheck
 npm test
+
+# Standard debug desktop launch
 npm run build:desktop
+
+# Build unsigned release bundles
+npm run build:unsigned
+
+# Build and sign development release bundles (DEV_TEST_SIGNED)
+npm run build:dev-signed
+
+# Verify Authenticode signatures & cryptographic integrity
+npm run verify:signatures
+
+# Verify Windows PE metadata, MSI database properties, and NSIS installer headers
+npm run verify:metadata
 ```
 
 `npm run build:desktop` invokes Tauri in debug mode with `--no-bundle`. The executable is
 `src-tauri/target/debug/cyron.exe`; this is a development build, not an installer. A debug build
-targets Tauri's `devUrl`, so it expects the Vite dev server (`npm run dev`) to be running; without
-it the window shows a connection error. Release builds embed the frontend assets instead.
+targets Tauri's `devUrl`, expecting the Vite dev server (`npm run dev`) to be running. Release builds embed the frontend assets directly.
 
-To build the configured release installers:
+The Tauri bundle config targets **WiX MSI** and **NSIS**, with NSIS configured for a per-user
+installation and MSI locked to UpgradeCode `{C2BCD648-205F-5904-9E5C-85726E376EC2}`.
 
-```powershell
-npm run tauri -- build
-```
+---
 
-The Tauri bundle config targets **MSI** and **NSIS**, with NSIS configured for a per-user
-installation. This command builds the release app and bundles installers; the first bundle run
-may need to download WiX and NSIS tooling. The app requires the Visual Studio 2022 C++ Build
-Tools workload and Windows SDK for the MSVC linker. Use Node.js 22+ and Rust stable with the
-`x86_64-pc-windows-msvc` target. The repository's npm Tauri commands use `scripts/msvc-env.mjs`
-to locate the Visual Studio toolchain when it is not already on `PATH`.
+## 2. Release Bundles and Metadata Verification
 
-## Runtime and artifacts
+Windows metadata is enforced and verified automatically by `scripts/verify-windows-metadata.ps1` (`WINDOWS_METADATA_OK`):
+- **Product Name:** `Cyron Uninstaller`
+- **File Description:** `Windows Application Uninstaller, Disk Analyzer & Cleaner` (VERSIONINFO / MSI property / NSIS header)
+- **Version:** `0.1.0` (derived dynamically from `package.json`)
+- **Internal / Original File Name:** `cyron.exe`
+- **Publisher:** `Ry0x7`
+- **Copyright:** `Copyright © 2026 Ry0x7`
+- **Application ID:** `dev.cyron.uninstaller`
+- **MSI UpgradeCode:** `{C2BCD648-205F-5904-9E5C-85726E376EC2}`
 
-Cyron uses the Microsoft Edge **WebView2 Runtime**. It is included on Windows 11 and is normally
-available on supported Windows 10 installations; a machine without it needs the runtime
-installed before the desktop app can render its UI.
+### Generated Release Bundles:
+- **NSIS Setup:** `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.1.0_x64-setup.exe` (1.46 MiB)
+- **WiX MSI Package:** `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.1.0_x64_en-US.msi` (2.04 MiB)
 
-The bundle configuration references icons in `src-tauri/icons/`; all configured icon files are
-present. The debug executable was built and verified locally (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`).
+---
 
-**Release MSI and NSIS packaging has been verified locally (`RELEASE_BUNDLES_OK`):**
-- **NSIS Setup**: `src-tauri/target/release/bundle/nsis/Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`).
-- **WiX MSI Package**: `src-tauri/target/release/bundle/msi/Cyron_0.1.0_x64_en-US.msi` (2.00 MiB, SHA-256: `29453c42694a87723fe30b4827d4e9a92e52413038e9daded7592fd277271dc8`).
+## 3. Two-Track Code Signing Architecture
 
-Outputs are currently unsigned release binaries; Windows SmartScreen will display an untrusted publisher warning until an Authenticode certificate is applied.
+Cyron implements two distinct code signing workflows:
 
-## User data
+1. **`DEV_TEST_SIGNED` (Active Today):**
+   - Self-signed certificate (`CN=Cyron Uninstaller Development`, RSA 3072, SHA-256) generated in `Cert:\CurrentUser\My` via `scripts/create-dev-cert.ps1`.
+   - Signed using official Windows SDK `signtool.exe` via `scripts/sign-dev-build.ps1`.
+   - Cryptographic digest integrity verified via `scripts/verify-signatures.ps1` (`SIGNATURES_VERIFIED_OK`).
+   - Strictly for local development, regression testing, and isolated test VMs.
+2. **`SIGNPATH_SIGNED` (Prepared for Public Release):**
+   - Free, publicly trusted Authenticode signing via [SignPath Foundation](https://signpath.org/).
+   - Automated via `.github/workflows/signpath-release.yml` using `signpath/github-action-submit-signing-request`.
+   - Disabled by default pending SignPath Foundation project onboarding and secret configuration.
+   - Requirement-by-requirement status tracked in `docs/SIGNPATH_READINESS.md`.
 
-Activity history is kept locally at `history.json` under Tauri's per-application data directory
-(Windows convention: `%APPDATA%\dev.cyron.uninstaller\history.json`). The history log is capped
-at 100 disk-scan entries. Appearance and scan settings are stored in the WebView's local storage
-under `cyron.settings.v1`. Cyron has no telemetry or network service; deleting history removes
-only that log and does not modify scanned files.
+---
 
-## Signing checklist for a future release
+## 4. Runtime and User Data
 
-- Obtain and protect a code-signing certificate and its private key; do not commit either to the
-  repository.
-- Decide the release identity and publisher name, and configure the Windows installer metadata
-  consistently.
-- Sign the application executable and each installer with the approved certificate and a
-  trusted timestamp service in a controlled release pipeline.
-- Verify signature chains and timestamps on the produced artifacts, and test SmartScreen and
-  installation behavior on clean Windows 10/11 machines.
-- Publish hashes and retain the exact signed release artifacts and build provenance.
-
-Signing infrastructure is not configured in this repository. No signing or clean-machine
-installer test is claimed.
+- **WebView2:** Requires the Evergreen Microsoft Edge WebView2 Runtime (pre-installed on Windows 11 and modern Windows 10).
+- **User Data:** History log is stored at `%APPDATA%\dev.cyron.uninstaller\history.json` (capped at 100 entries). Quarantine batches and recovery journals are stored at `%LOCALAPPDATA%\dev.cyron.uninstaller\quarantine`.
+- **Zero Telemetry:** The application contains no network stack and makes no external connections.

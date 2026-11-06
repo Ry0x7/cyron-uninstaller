@@ -20,46 +20,37 @@ Every public release candidate must satisfy all acceptance gates before packagin
 - [ ] **Desktop Debug Binary**: `node scripts/verify-desktop-binary.mjs` outputs `DESKTOP_BINARY_OK`.
 - [ ] **Desktop Smoke Test**: `node scripts/smoke-desktop.mjs` outputs `DESKTOP_SMOKE_OK`.
 - [ ] **Release Installer Bundles**: `node scripts/verify-release-bundles.mjs` outputs `RELEASE_BUNDLES_OK`.
-- [ ] **Git History Privacy Audit**: Confirm no unredacted internal session data exists in pending commits.
+- [ ] **Windows Metadata Consistency**: `npm run verify:metadata` outputs `WINDOWS_METADATA_OK`.
+- [ ] **Authenticode Signature & Negative Integrity**: `npm run verify:signatures` outputs `SIGNATURES_VERIFIED_OK`.
+- [ ] **Git History Privacy Audit**: Purge historical `.chryypt/` data from repository history via `git-filter-repo`.
 
 ---
 
-## 2. Installer Packaging & Targets
+## 2. Release Classifications & Code Signing Protocols
 
-Cyron ships two official installer formats for Windows:
+Every build artifact belongs strictly to one of three release classifications:
 
-### A. NSIS (`.exe`)
-- Target: `src-tauri/target/release/bundle/nsis/Cyron_x.y.z_x64-setup.exe`
-- Mode: Per-user (`currentUser`) or system-wide.
-- Upgrade contract: In-place upgrades preserve `%APPDATA%\dev.cyron.uninstaller` (`history.json`, `quarantine/`, `cleanup-log.json`).
-- Uninstaller contract: Removes application binaries; prompts user before removing quarantine or scan history.
+| Classification | Signature Status | Intended Target | Verification Script |
+|---|---|---|---|
+| `UNSIGNED_RC` | Unsigned | Internal private testing | `node scripts/verify-release-bundles.mjs` |
+| `DEV_TEST_SIGNED` | Self-Signed (`CN=Cyron Uninstaller Development`) | Developer workstations & isolated test VMs | `npm run verify:signatures` |
+| `SIGNPATH_SIGNED` | Publicly Trusted CA (`SignPath Foundation`) | General public releases (after approval) | `.github/workflows/signpath-release.yml` |
 
-### B. WiX MSI (`.msi`)
-- Target: `src-tauri/target/release/bundle/msi/Cyron_x.y.z_x64_en-US.msi`
-- Enterprise-ready deployment package with standard Windows Installer properties (`ADDLOCAL`, `ALLUSERS`).
-
-### Building Bundles Locally
+### A. Local Development Signing (`DEV_TEST_SIGNED`)
 ```powershell
-node scripts/msvc-env.mjs npx tauri build --bundles nsis,msi
+# Build and sign with local self-signed certificate
+npm run build:dev-signed
+
+# Verify cryptographic file integrity & certificate thumbprint
+npm run verify:signatures
 ```
 
+### B. SignPath Foundation Public Signing (`SIGNPATH_SIGNED`)
+Triggered manually via `.github/workflows/signpath-release.yml` once SignPath Foundation eligibility criteria (`docs/SIGNPATH_READINESS.md`) are approved. SignPath submits requests through `signpath/github-action-submit-signing-request`, requires manual approval, and verifies returned Authenticode chains before drafting releases.
+
 ---
 
-## 3. Authenticode Code Signing
-
-> [!WARNING]
-> An unsigned binary must NEVER be described as signed. When signing credentials are not provided, installers must be clearly documented as unsigned release candidates.
-
-When valid code-signing credentials are available:
-1. Export the Authenticode certificate to a PFX file or hardware security module (HSM).
-2. Configure environment variables before triggering the release build:
-   - `CSC_LINK`: Path to `.pfx` certificate.
-   - `CSC_KEY_PASSWORD`: PFX passphrase.
-   - `TIMESTAMP_SERVER`: `http://timestamp.digicert.com` (or RFC 3161 compliant timestamp server).
-3. Verify signature:
-   ```powershell
-   signtool verify /pa /v "src-tauri/target/release/bundle/nsis/Cyron_x.y.z_x64-setup.exe"
-   ```
+## 3. Installer Packaging & Targets
 
 ---
 

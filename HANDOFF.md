@@ -1,38 +1,28 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-06 (Phase 6 Competitive Expansion & RC1 Hardening complete)
+Updated: 2026-11-06 (Phase 7 Code Signing Architecture, Release Provenance & RC1 Hardening complete)
 
 ## Current Status
 
-Phases 1–6, Priority 0 security hardening, and Release Candidate 1 (RC1) hardening are implemented and verified across the Rust backend
-and React desktop interface. Cyron provides a complete, review-first alternative to Revo Uninstaller, WinDirStat/WizTree, BleachBit, and BCUninstaller.
+Phases 1–7, Priority 0 security hardening, Release Candidate 1 (RC1) hardening, and the two-track code signing architecture are implemented and verified across the Rust backend and React desktop interface.
 
-### Competitive Capabilities Delivered:
-1. **Windows Explorer Context Menu Integration**:
-   - Optional native shell integration registered exclusively in `HKEY_CURRENT_USER\Software\Classes` without requiring administrator privileges.
-   - For Folders & Drives: *Analyze with Cyron*, *Find Duplicates with Cyron*, *View Storage Breakdown with Cyron*.
-   - For Executables: *Uninstall with Cyron*, *Find Related Files with Cyron*.
-   - Safe CLI routing (`--analyze`, `--duplicates`, `--storage`, `--uninstall-target`, `--find-related`) validates paths and never triggers destructive operations directly from Explorer.
-   - Settings management panel provides 1-click status checking, enable, disable (with clean unregistration), and repair.
-2. **Enhanced Multi-Source Application Discovery**:
-   - Win32 (64-bit and 32-bit views, machine and user scopes) with broken uninstaller detection when executables no longer exist on disk.
-   - Microsoft Store / MSIX / AppX read-only inventory discovered via `AppModel\Repository\Packages` with Windows Package Manager guidance.
-   - Steam installed-game detection parsing `libraryfolders.vdf` and `appmanifest_*.acf` across all library drives.
-   - Bounded heuristic detection of portable executables in user program folders (`%LOCALAPPDATA%\Programs`).
-   - Uninstaller UI filters (`All`, `Win32`, `Store`, `Steam`, `Portable`, `Broken`) with source badges and explainable lifecycle guidance.
-3. **Disk Analyzer → Cleaner Direct Integration**:
-   - Selecting recognized cache directories in the treemap or folder tree surfaces a **Review for Cleanup** action.
-   - Displays expected reclaimable bytes alongside total occupied bytes.
-   - Reuses existing review-first confirmation plans, quarantine, and atomic restoration workflows.
-   - Protected directories (such as chat histories, configurations, and Windows Update downloads) clearly explain why Cyron prevents automated deletion.
-4. **Extensible Declarative Cleanup Providers**:
-   - Versioned (`schema_version: 1`) provider definitions with strict path validation, safe environment root enforcement, and automated rejection of malicious path definitions.
-   - Added verified developer and AI tool providers (Ollama models/cache, Hugging Face Hub, Cursor workspace storage, pip, Poetry, uv, Rustup, Gradle, vcpkg).
-5. **Competitive Performance Benchmarking**:
-   - Created `scripts/benchmark-competitive.mjs`, measuring cold vs warm scan latency, peak working set, file counting rules, and cancellation response against WinDirStat/WizTree metrics.
-   - Documented in `docs/BENCHMARKS.md`.
-6. **UI/UX Audit & Accessibility Polish**:
-   - High-contrast accessible design tokens, responsive drawers, ARIA keyboard tree navigation, loading states, and clear explanations for nontechnical users.
+### Capabilities Delivered in Phase 7:
+1. **Windows Metadata Normalization & Automated Audit**:
+   - Enforced consistent metadata across all builds: Product Name (`Cyron Uninstaller`), Version dynamically derived from `package.json` (`0.1.0`), Publisher (`Ry0x7`), UpgradeCode (`{C2BCD648-205F-5904-9E5C-85726E376EC2}`), and Internal/Original Executable Name (`cyron.exe`).
+   - Implemented `scripts/verify-windows-metadata.ps1` (`npm run verify:metadata`) to audit PE VERSIONINFO, WiX MSI database properties, NSIS installer headers, and app identity.
+2. **Local Self-Signed Development Builds (`DEV_TEST_SIGNED`)**:
+   - Automated certificate lifecycle via `scripts/create-dev-cert.ps1` (`CN=Cyron Uninstaller Development`, RSA 3072, SHA-256, NonExportable) in `Cert:\CurrentUser\My` with idempotent reuse.
+   - Signing via official Windows SDK `signtool.exe` (`scripts/sign-dev-build.ps1`), signing `cyron.exe`, NSIS setup, and WiX MSI packages.
+   - `npm run build:dev-signed` builds release packages and signs them automatically.
+3. **Authenticode Signature Integrity & Automated Negative Testing**:
+   - Implemented `scripts/verify-signatures.ps1` (`npm run verify:signatures`), separating cryptographic file integrity from root trust.
+   - Includes automated negative testing suite asserting rejection of unsigned files, tampered binaries (hash mismatch), and rogue certificate subjects.
+4. **SignPath Foundation Preparation (`SIGNPATH_SIGNED`)**:
+   - Authored comprehensive eligibility assessment in `docs/SIGNPATH_READINESS.md` tracking OSI license, public repository, and project reputation prerequisites.
+   - Prepared disabled-by-default GitHub Actions workflow (`.github/workflows/signpath-release.yml`) with full test suite gates, unsigned SHA-256 hash provenance, official SignPath request submission action, and Authenticode chain verification.
+   - Authored `docs/CODE_SIGNING_POLICY.md` documenting SignPath attribution, maintainer/approver responsibilities, zero-telemetry privacy policy, and user verification instructions.
+5. **Git History Privacy Sanitization**:
+   - Executed operator directive to purge historical `.chryypt/` data from GitHub history using `git-filter-repo`.
 
 ---
 
@@ -51,10 +41,12 @@ and React desktop interface. Cyron provides a complete, review-first alternative
 | Real System Scanner | `... --test real_system -- --nocapture` | Pass |
 | Scanner Stress Suite | `... --test stress_scan -- --nocapture` | 5/5 pass, 1 ignored |
 | Total Rust Test Suite | `... cargo test --manifest-path src-tauri/Cargo.toml` | **171 tests pass**, 3 ignored |
-| Desktop Binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` (15.89 MiB) |
-| Launch Smoke Test | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` ("Cyron") |
+| Desktop Binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` (16.06 MiB) |
+| Launch Smoke Test | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` ("Cyron Uninstaller") |
+| Windows Metadata Audit | `npm run verify:metadata` | `WINDOWS_METADATA_OK` (5/5 passed) |
+| Authenticode Signatures & Negative Checks | `npm run verify:signatures` | `SIGNATURES_VERIFIED_OK` (3/3 artifacts, 3/3 negative tests) |
 | Competitive Benchmarks | `node scripts/benchmark-competitive.mjs` | `BENCHMARK_OK` |
-| Release Packaging | `node scripts/verify-release-bundles.mjs` | `RELEASE_BUNDLES_OK` (NSIS: 1.42 MiB, MSI: 2.00 MiB) |
+| Release Packaging | `node scripts/verify-release-bundles.mjs` | `RELEASE_BUNDLES_OK` (NSIS: 1.46 MiB, MSI: 2.04 MiB) |
 | Remote Windows CI | `.github/workflows/ci.yml` | Pass (Run #42188091108) |
 
 ---

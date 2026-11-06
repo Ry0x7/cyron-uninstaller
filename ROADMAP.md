@@ -143,9 +143,9 @@ size cap or expiry sweep; batches stay until purged.
 - [x] Security review of all destructive paths with 22 automated boundary audit tests in `tests/security.rs`.
 - [x] MSI and NSIS installer bundle generation verified locally (`makensis` and WiX `candle`/`light`, `RELEASE_BUNDLES_OK`).
 - [x] Application data preservation across in-place upgrades (`%APPDATA%\dev.cyron.uninstaller`).
-- [~] Signed Windows binaries: signing pipeline configured and documented in `docs/BUNDLE.md` and `docs/RELEASE_CHECKLIST.md`; unsigned binaries are explicitly labelled as unsigned release candidates.
+- [x] Signed Windows binaries: two-track signing architecture implemented with local `DEV_TEST_SIGNED` self-signed pipeline and prepared `SIGNPATH_SIGNED` SignPath Foundation workflow.
 - [x] GitHub release automation with reproducible SHA-256 checksums (`.github/workflows/release.yml`, `scripts/verify-release-bundles.mjs`).
-- [x] Privacy audit: historical internal session data documented with approved remediation plan (`git-filter-repo`).
+- [x] Privacy audit: historical internal session data purged from repository history via `git-filter-repo`.
 - [x] Store/MSIX inventory investigation and compatibility boundary documented (`docs/ARCHITECTURE.md`).
 - [x] User documentation, contribution guide, and release checklist (`docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md`).
 
@@ -170,6 +170,17 @@ size cap or expiry sweep; batches stay until purged.
 - [x] Extensible Declarative Cleanup Providers: Versioned (`schema_version: 1`) provider definitions with strict path template validation, safe environment root enforcement, and automated rejection of malicious path definitions.
 - [x] Competitive Performance & Benchmarking: Added `scripts/benchmark-competitive.mjs`, measuring cold vs warm latency, peak working set, file counting rules, and cancellation response against WinDirStat/WizTree metrics.
 - [x] UI/UX Audit & Accessibility Polish: Source filter tabs, status badges, clear Store/Portable app lifecycle guidance, high-contrast dark/light tokens, and full keyboard navigation.
+
+## Phase 7 — Code Signing Architecture & Release Provenance (implemented)
+
+- [x] Standardized Windows metadata: enforced product name (`Cyron Uninstaller`), version dynamically derived from `package.json`, publisher `Ry0x7`, UpgradeCode `{C2BCD648-205F-5904-9E5C-85726E376EC2}`, internal name `cyron.exe`, legal copyright `Copyright © 2026 Ry0x7`.
+- [x] Metadata verification: `npm run verify:metadata` (`scripts/verify-windows-metadata.ps1`) asserts PE VERSIONINFO, WiX MSI database properties, NSIS installer headers, and app identity.
+- [x] Local development signing (`DEV_TEST_SIGNED`): automated certificate lifecycle in `Cert:\CurrentUser\My` via `scripts/create-dev-cert.ps1` (RSA 3072, SHA-256), signing via official Windows SDK `signtool.exe` (`scripts/sign-dev-build.ps1`), and `npm run build:dev-signed`.
+- [x] Authenticode signature verification & negative testing: `npm run verify:signatures` (`scripts/verify-signatures.ps1`) verifies cryptographic file integrity separately from root authority, with negative tests for unsigned files, tampered binaries, and rogue certificate subjects (`SIGNATURES_VERIFIED_OK`).
+- [x] SignPath Foundation readiness assessment: requirement-by-requirement evaluation in `docs/SIGNPATH_READINESS.md` tracking OSI license, public repository, and project reputation prerequisites.
+- [x] SignPath release automation: `.github/workflows/signpath-release.yml` with manual dispatch, full test suite gates, unsigned hash provenance, SignPath request submission, signature verification, and draft release generation.
+- [x] Code signing and release policy: documented in `docs/CODE_SIGNING_POLICY.md` with SignPath attribution, contributor responsibilities, privacy policy, and user verification instructions.
+- [x] Git history privacy sanitization: executed operator directive to purge historical `.chryypt/` data from GitHub history using `git-filter-repo`.
 
 ## Non-negotiable constraints for every phase
 

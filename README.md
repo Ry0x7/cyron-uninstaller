@@ -140,6 +140,8 @@ node scripts/verify-desktop-binary.mjs                 # Desktop binary validati
 node scripts/smoke-desktop.mjs                         # Desktop window launch test: DESKTOP_SMOKE_OK
 node scripts/benchmark-competitive.mjs                 # Competitive scanner benchmark: BENCHMARK_OK
 node scripts/verify-release-bundles.mjs                # Release bundles check: RELEASE_BUNDLES_OK
+npm run verify:metadata                                # Windows PE & MSI metadata audit: WINDOWS_METADATA_OK
+npm run verify:signatures                              # Authenticode signature & negative checks: SIGNATURES_VERIFIED_OK
 ```
 
 ---
@@ -148,7 +150,10 @@ node scripts/verify-release-bundles.mjs                # Release bundles check: 
 
 - **Store / MSIX Uninstallation**: Microsoft Store packages are inventoried with read-only inspection. Because Store lifecycle is managed by Windows Package Manager, standard Win32 uninstallation is disabled with explicit guidance to use Windows Settings or `winget`.
 - **Portable Applications**: Discovered via explainable heuristics; standard uninstaller commands are disabled because portable apps lack registry uninstallers. Leftover and disk analysis are available.
-- **Code Signing**: Official release builds produce unsigned NSIS (`.exe`) and WiX MSI (`.msi`) packages. Authenticode signing is automated in CI when operator certificates (`CSC_LINK` / `CSC_KEY_PASSWORD`) are supplied. Unsigned builds remain clearly labeled as pre-releases.
+- **Code Signing Architecture**: Implements two explicit signing workflows:
+  - `DEV_TEST_SIGNED`: Local self-signed development builds (`CN=Cyron Uninstaller Development`, RSA 3072, SHA-256) for local development and test VMs via `npm run build:dev-signed`.
+  - `SIGNPATH_SIGNED`: Prepared free open-source code signing through [SignPath Foundation](https://signpath.org/) via `.github/workflows/signpath-release.yml` (onboarding prerequisites tracked in `docs/SIGNPATH_READINESS.md`).
+  - Unsigned builds remain clearly labeled `UNSIGNED_RC` for private testing. Real SmartScreen reputation builds progressively with download volume and user trust.
 
 ---
 

@@ -8,13 +8,15 @@ safe to remove but also have the ability to force uninstall and kill process. In
 Revo uninstaller, bleachbit, and windirstat but better indications, material UI, clean simple
 usable for non-tech people.
 
-**Current state: Phases 1, 2, 3, 4, 5, and 6 are implemented and verified.** Application inventory across Win32, Microsoft Store,
+**Current state: Phases 1, 2, 3, 4, 5, 6, and 7 are implemented and verified.** Application inventory across Win32, Microsoft Store,
 Steam games, and portable apps; disk analysis with a treemap plus persistent synchronized folder tree, MFT/directory scanning,
 duplicate verification, storage categorization, direct Analyzer → Cleaner review integration, extensible declarative cleanup providers,
 review-first cache cleaning with a crash-consistent recoverable quarantine, application uninstallation with exit code 3010 reboot recognition,
 process discovery and snapshot-verified termination with critical-process protection and PID recycling denial, leftover scanning
 with confidence & risk ratings, automatic recursive multi-type .reg backup before subkey deletion, sequential batch uninstallation,
-optional Windows Explorer context menu integration, and release installer bundling (NSIS and WiX MSI) are implemented and tested.
+optional Windows Explorer context menu integration, standardized Windows PE/MSI metadata verification (`WINDOWS_METADATA_OK`),
+local self-signed code signing (`DEV_TEST_SIGNED`, `SIGNATURES_VERIFIED_OK`), SignPath Foundation release automation preparation,
+and release installer bundling (NSIS and WiX MSI) are implemented and tested.
 Priority 0 hardening (crash-consistent write-ahead recovery journal with sync_all, atomic MoveFileExW no-overwrite
 restoration, approved snapshot binding, purge preservation, quarantine storage caps) is complete.
 The desktop build and launch are verified (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`), as are the

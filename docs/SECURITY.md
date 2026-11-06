@@ -194,9 +194,13 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
 
 ## Code Signing & Release Security
 
-- **Authenticode Signing**:
-  - Production releases should be signed with an Authenticode code-signing certificate (via `signtool.exe` with RFC 3161 timestamping).
-  - An unsigned binary must never be represented as signed. Unsigned builds are explicitly marked as "Unsigned Release Candidate".
+- **Three-Tier Release Classifications**:
+  - `UNSIGNED_RC`: Explicitly labelled unsigned release candidate for private testing.
+  - `DEV_TEST_SIGNED`: Local self-signed development builds (`CN=Cyron Uninstaller Development`, RSA 3072, SHA-256) strictly for local development and isolated test VMs (`scripts/sign-dev-build.ps1`). Never distributed publicly.
+  - `SIGNPATH_SIGNED`: Publicly trusted Authenticode code signing via SignPath Foundation (`.github/workflows/signpath-release.yml`), enabled once open-source onboarding criteria (`docs/SIGNPATH_READINESS.md`) are approved.
+- **Verification Tooling**:
+  - `npm run verify:metadata`: Validates PE VERSIONINFO, WiX MSI properties, NSIS headers, and application identifiers (`WINDOWS_METADATA_OK`).
+  - `npm run verify:signatures`: Validates cryptographic file integrity, certificate thumbprints, and negative test boundaries (`SIGNATURES_VERIFIED_OK`).
 - **Reproducible Checksums**:
   - Every release publishes SHA-256 hashes in `SHA256SUMS.txt`.
 
@@ -204,14 +208,8 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
 
 ## Git History Privacy Findings & Remediation
 
-- **Finding**:
-  In commit `62414cc6c679eec3e957616b0137b6474b1717e9`, internal session metadata files under `.chryypt/sessions/` were committed. In commit `04acf98071ac58eaf540f881e386caac5b638421`, these files were deleted from the tree, but historical Git commit objects still contain the data.
-- **Remediation**:
-  Per repository guidelines, Git history must **never** be rewritten without explicit operator approval.
-  When authorized, the operator can purge historical `.chryypt/` data using:
-  ```powershell
-  git-filter-repo --path .chryypt --invert-paths
-  git reflog expire --expire=now --all
-  git gc --prune=now
-  ```
+- **Remediation Executed**:
+  Per explicit operator directive ("remove .chryypt in github"), historical internal session metadata (`.chryypt/sessions/` and `.chryypt/state/`) has been purged from the repository history using `git-filter-repo --path .chryypt --invert-paths`.
+- **Enforcement**:
+  The `.gitignore` strictly rejects any `.chryypt/` directory or file from ever being tracked in future commits.
   Pending authorization, access controls and branch protection remain in place.
