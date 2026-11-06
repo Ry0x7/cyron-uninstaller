@@ -47,10 +47,17 @@ function focusableWithin(root: HTMLElement): HTMLElement[] {
 let drawerLockCount = 0;
 let bodyOverflowBeforeDrawer = "";
 
+export function isDrawerOpen(): boolean {
+  return drawerLockCount > 0;
+}
+
 function lockBodyScroll(): () => void {
-  if (drawerLockCount === 0) bodyOverflowBeforeDrawer = document.body.style.overflow;
+  if (drawerLockCount === 0) {
+    bodyOverflowBeforeDrawer = document.body.style.overflow;
+  }
   drawerLockCount += 1;
   document.body.style.overflow = "hidden";
+  window.dispatchEvent(new CustomEvent("cyron:drawer-change", { detail: { open: true } }));
 
   let released = false;
   return () => {
@@ -60,6 +67,7 @@ function lockBodyScroll(): () => void {
     if (drawerLockCount === 0) {
       document.body.style.overflow = bodyOverflowBeforeDrawer;
       bodyOverflowBeforeDrawer = "";
+      window.dispatchEvent(new CustomEvent("cyron:drawer-change", { detail: { open: false } }));
     }
   };
 }

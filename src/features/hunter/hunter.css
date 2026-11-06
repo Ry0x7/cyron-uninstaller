@@ -2,65 +2,76 @@
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 1000;
+  z-index: 45; /* Under Drawer (60) and Modals (100) */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 10px;
+  transition: opacity 180ms var(--ease), transform 180ms var(--ease);
+}
+
+.hunter-floating-widget--hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(14px);
 }
 
 .hunter-trigger-btn {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  background: var(--bg-panel, #18181b);
-  border: 1px solid var(--accent, #6366f1);
-  border-radius: var(--radius-full, 9999px);
-  color: var(--text-base, #eee);
-  font-size: 13px;
+  padding: 9px 15px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text-strong);
+  font-size: 12.5px;
   font-weight: 600;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: transform 140ms var(--ease), box-shadow 140ms var(--ease), background 140ms var(--ease), border-color 140ms var(--ease);
   user-select: none;
 }
 
 .hunter-trigger-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(99, 102, 241, 0.3);
+  transform: translateY(-1px);
+  background: var(--surface-hover);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-2);
 }
 
 .hunter-trigger-btn--active {
-  background: var(--accent, #6366f1);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
   cursor: crosshair;
   animation: hunter-pulse 2s infinite ease-in-out;
 }
 
 .hunter-trigger-btn--dragging {
   cursor: crosshair;
-  background: var(--accent, #6366f1);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: var(--accent);
 }
 
 @keyframes hunter-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6); }
-  70% { box-shadow: 0 0 0 12px rgba(99, 102, 241, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 50%, transparent); }
+  70% { box-shadow: 0 0 0 10px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 .hunter-hud {
   width: 320px;
-  background: var(--bg-panel, #18181b);
-  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.15));
-  border-radius: var(--radius-lg, 12px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  animation: hunter-fade-in 0.2s ease;
+  animation: hunter-fade-in 0.18s var(--ease);
 }
 
 @keyframes hunter-fade-in {
@@ -72,14 +83,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-bottom: 1px solid var(--line);
   padding-bottom: 8px;
 }
 
 .hunter-hud__title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-base, #eee);
+  color: var(--text-strong);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -94,19 +105,29 @@
 
 .hunter-target-title {
   font-weight: 600;
-  color: var(--text-base, #eee);
-  word-break: break-word;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hunter-target-meta {
-  color: var(--text-muted, #888);
-  font-family: var(--font-mono, monospace);
+  color: var(--text-muted);
   font-size: 11px;
+  font-family: var(--font-mono);
 }
 
 .hunter-hud__actions {
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.hunter-confirm-kill-box {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  margin-top: 4px;
+  width: 100%;
 }

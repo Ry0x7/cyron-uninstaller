@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { IconChevronRight, IconFolder } from "../../components/Icons";
 import { formatBytes, formatCount } from "../../lib/format";
 import { filterTree, sortNodes, type AnalyzerFilters } from "../../lib/analyzerFilters";
+import { ObjectArena } from "../../lib/arena";
 import type { ScanNode } from "../../lib/types";
 
 const ROW_HEIGHT = 30;
@@ -18,6 +19,20 @@ interface TreeRow {
   siblings: number;
   hasChildren: boolean;
 }
+
+// Memory arena pool for tree row representations to prevent GC pauses
+const treeRowArena = new ObjectArena<TreeRow>(
+  () => ({
+    node: null as unknown as ScanNode,
+    key: "",
+    parentKey: null,
+    level: 0,
+    index: 0,
+    siblings: 0,
+    hasChildren: false,
+  }),
+  2048,
+);
 
 interface TreeViewProps {
   root: ScanNode;
@@ -68,6 +83,7 @@ export function flattenVisible(
   expanded: Set<string>,
   filters: AnalyzerFilters,
 ): { rows: TreeRow[]; capped: boolean; indexByKey: Map<string, number> } {
+  treeRowArena.reset();
   const rows: TreeRow[] = [];
   const indexByKey = new Map<string, number>();
   let capped = false;
@@ -78,15 +94,15 @@ export function flattenVisible(
     }
     const key = nodeKey(node, parentKey, index);
     indexByKey.set(key, rows.length);
-    rows.push({
-      node,
-      key,
-      parentKey,
-      level,
-      index,
-      siblings,
-      hasChildren: node.children.length > 0,
-    });
+    const row = treeRowArena.borrow();
+    row.node = node;
+    row.key = key;
+    row.parentKey = parentKey;
+    row.level = level;
+    row.index = index;
+    row.siblings = siblings;
+    row.hasChildren = node.children.length > 0;
+    rows.push(row);
     if (!expanded.has(key) || node.children.length === 0) return;
     const children = sortNodes(node.children, filters);
     for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
