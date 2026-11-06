@@ -34,10 +34,10 @@ Updated: 2026-11-07 (Milestone 7.3: Recovery Integrity & Release Validation Phas
 | Signature Integrity & Negative Tests | `npm run verify:signatures` | `SIGNATURES_VERIFIED_OK` (3/3 pass, 3/3 negative pass) |
 | Documentation Integrity | `npm run docs:check` | `DOCS_CHECK: PASSED` |
 
-## 3. Active Policy Blockers & Required Operator Decisions
+## 3. Organizational Code Signing Policy
 
-1. **Prerelease Distribution Conflict:** The public v0.1.0 prerelease on GitHub contains `DEV_TEST_SIGNED` binaries (signed with local `CN=Cyron Uninstaller Development` cert). This conflicts with `docs/BUILD_AND_SIGNING.md` and `docs/CODE_SIGNING_POLICY.md`, which state self-signed builds are strictly for local/VM testing and must not be distributed publicly. Operator decision needed: keep published as an explicitly labeled testing prerelease or unpublish until SignPath signing is secured.
-2. **SignPath Foundation Licensing:** Standard SignPath free open-source code signing requires an OSI-approved license. Cyron currently uses a custom Source-Available / No-Reuse license (`LICENSE`). Submitting an application requires either requesting a SignPath exception or an operator decision regarding licensing terms.
+1. **Chryypt Organization Code Signing:** Per operator directive, code signing is officially conducted under the Chryypt Organization (`CN=Chryypt Organization`, publisher `Chryypt`).
+2. **External CA Dependency Removed:** Third-party external CA dependencies and workflows have been removed, retaining full organizational control over build distribution and signing.
 
 ## 4. Next Engineering Tasks
 

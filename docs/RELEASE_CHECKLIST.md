@@ -28,25 +28,21 @@ Every public release candidate must satisfy all verification gates before packag
 
 ## 2. Release Classifications & Code Signing Protocols
 
-Every build artifact belongs strictly to one of three release classifications:
+Every build artifact belongs strictly to one of two release classifications:
 
 | Classification | Signature Status | Intended Target | Verification Command |
 |---|---|---|---|
 | `UNSIGNED_RC` | Unsigned | Internal private testing | `node scripts/verify-release-bundles.mjs` |
-| `DEV_TEST_SIGNED` | Self-Signed (`CN=Cyron Uninstaller Development`) | Developer workstations & isolated test VMs | `npm run verify:signatures` |
-| `SIGNPATH_SIGNED` | Publicly Trusted CA (`SignPath Foundation`) | General public releases (after approval) | `.github/workflows/signpath-release.yml` |
+| `CHRYYPT_SIGNED` | Signed (`CN=Chryypt Organization`) | Official releases & installers | `npm run verify:signatures` |
 
-### A. Local Development Signing (`DEV_TEST_SIGNED`)
+### Chryypt Organization Signing (`CHRYYPT_SIGNED`)
 ```powershell
-# Build and sign with local self-signed certificate
-npm run build:dev-signed
+# Build and sign with Chryypt Organization certificate
+npm run build:signed
 
 # Verify cryptographic file integrity & certificate thumbprint
 npm run verify:signatures
 ```
-
-### B. SignPath Foundation Public Signing (`SIGNPATH_SIGNED`)
-Triggered manually via `.github/workflows/signpath-release.yml` once SignPath Foundation eligibility criteria ([docs/SIGNPATH_READINESS.md](SIGNPATH_READINESS.md)) are approved. SignPath submits requests through `signpath/github-action-submit-signing-request`, requires manual approval, and verifies returned Authenticode chains before drafting releases.
 
 ---
 

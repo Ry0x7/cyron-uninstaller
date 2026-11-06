@@ -39,7 +39,7 @@ npm run typecheck          # TypeScript check (0 errors)
 npm test                   # Frontend Vitest suite
 npm run docs:check         # Verify documentation integrity
 npm run build:unsigned     # Unsigned release bundles (NSIS & MSI)
-npm run build:dev-signed   # Build and sign with local dev certificate
+npm run build:signed       # Build and sign with Chryypt Organization certificate
 npm run verify:signatures  # Authenticode signature & negative checks
 npm run verify:metadata    # Windows PE VERSIONINFO & MSI audit
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml

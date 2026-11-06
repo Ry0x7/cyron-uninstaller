@@ -1,12 +1,12 @@
 # scripts/verify-signatures.ps1
 # Verifies Authenticode signatures of compiled Cyron binaries and installers.
-# Separates cryptographic file integrity verification from certificate-chain trust.
-# Also includes a negative-test suite mode (-RunNegativeTests).
+# Validates Chryypt Organization code signing and cryptographic integrity.
+# Includes negative-test suite mode (-RunNegativeTests).
 
 [CmdletBinding()]
 param(
-    [ValidateSet("DEV_TEST_SIGNED", "SIGNPATH_SIGNED", "ANY")]
-    [string]$Mode = "DEV_TEST_SIGNED",
+    [ValidateSet("CHRYYPT_SIGNED", "ANY")]
+    [string]$Mode = "CHRYYPT_SIGNED",
     [switch]$RunNegativeTests = $false
 )
 
@@ -69,8 +69,8 @@ if ($RunNegativeTests) {
         if ($signtool) {
             & $signtool sign /fd SHA256 /sha1 $wrongCert.Thumbprint $tempWrong 2>&1 | Out-Null
             $sigWrong = Get-AuthenticodeSignature $tempWrong
-            if ($sigWrong.SignerCertificate.Subject -eq "CN=Cyron Uninstaller Development") {
-                $negFailures += "Negative Test 3 failed: Wrong certificate subject matched dev subject"
+            if ($sigWrong.SignerCertificate.Subject -eq "CN=Chryypt Organization") {
+                $negFailures += "Negative Test 3 failed: Wrong certificate subject matched Chryypt Organization subject"
             } else {
                 Write-Host "PASS: Wrong certificate subject rejected ($($sigWrong.SignerCertificate.Subject))." -ForegroundColor Green
             }
@@ -150,37 +150,22 @@ foreach ($filePath in $artifacts) {
         continue
     }
 
-    if ($Mode -eq "DEV_TEST_SIGNED") {
-        # Must match CN=Cyron Uninstaller Development
-        if ($subject -ne "CN=Cyron Uninstaller Development") {
-            $failures += "$fileName signed by '$subject', expected 'CN=Cyron Uninstaller Development'."
-            Write-Host "  FAIL: Incorrect signer certificate subject." -ForegroundColor Red
+    if ($Mode -eq "CHRYYPT_SIGNED") {
+        # Must match CN=Chryypt Organization
+        if ($subject -ne "CN=Chryypt Organization") {
+            $failures += "$fileName signed by '$subject', expected 'CN=Chryypt Organization'."
+            Write-Host "  FAIL: Incorrect signer certificate subject. Expected 'CN=Chryypt Organization'." -ForegroundColor Red
             continue
         }
-        # In DEV_TEST_SIGNED, the status is expected to be UnknownError (untrusted self-signed root)
-        # unless explicitly installed in a test VM root store.
         if ($status -eq "Valid") {
             Write-Host "  Trust Chain    : Valid (certificate is trusted by the current machine)." -ForegroundColor Green
         } elseif ($status -eq "UnknownError" -and ($statusMsg -match "root certificate which is not trusted" -or $statusMsg -match "untrusted root")) {
-            Write-Host "  Trust Chain    : Expected Self-Signed Root (cryptographically intact, untrusted root)." -ForegroundColor Yellow
+            Write-Host "  Trust Chain    : Chryypt Organization Certificate (cryptographically intact, untrusted root)." -ForegroundColor Yellow
         } else {
             $failures += "$fileName unexpected signature status: $status ($statusMsg)"
             Write-Host "  FAIL: Unexpected signature status: $status ($statusMsg)" -ForegroundColor Red
             continue
         }
-    } elseif ($Mode -eq "SIGNPATH_SIGNED") {
-        # Must match SignPath Foundation and have a valid chained status
-        if ($subject -notmatch "SignPath Foundation") {
-            $failures += "$fileName signer subject '$subject' does not match SignPath Foundation."
-            Write-Host "  FAIL: Subject does not match SignPath Foundation." -ForegroundColor Red
-            continue
-        }
-        if ($status -ne "Valid") {
-            $failures += "$fileName SignPath signature is not valid ($($status): $($statusMsg))"
-            Write-Host "  FAIL: Signature chain is not valid: $status" -ForegroundColor Red
-            continue
-        }
-        Write-Host "  Trust Chain    : Valid SignPath Foundation Authenticode Chain" -ForegroundColor Green
     }
 
     $verified += $fileName

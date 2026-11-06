@@ -18,7 +18,7 @@ Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x6
 - Crash-consistent recoverable quarantine with durable write-ahead recovery journal (`recovery_journal.jsonl` with `sync_all`), atomic Win32 `MoveFileExW` no-overwrite restoration, and manifest-scoped purging.
 - Windows Explorer context menu integration (`HKCU\Software\Classes`) with safe argument routing.
 - Standardized Windows PE VERSIONINFO, WiX MSI properties, and NSIS installer headers (`WINDOWS_METADATA_OK`).
-- Two-track code signing architecture: local development self-signing (`DEV_TEST_SIGNED`, `SIGNATURES_VERIFIED_OK`) and prepared SignPath Foundation public release automation (`SIGNPATH_SIGNED`).
+- Chryypt Organization code signing architecture (`CHRYYPT_SIGNED`, `SIGNATURES_VERIFIED_OK`).
 - Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`).
 
 Historical narratives and early acceptance logs for Phases 1–3 are preserved in [docs/archive/PHASE_HISTORY.md](archive/PHASE_HISTORY.md).
@@ -67,8 +67,7 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 |---|---|---|
 | Explorer Shell Integration | Done | `explorer.rs`: per-user shell verbs registered in `HKCU\Software\Classes` without elevation; safe CLI argument sanitization; toggleable and repairable via Settings. |
 | Windows Metadata Standards | Done | Product name, version, publisher (`Chryypt`), UpgradeCode, and description enforced across PE, MSI, and NSIS (`WINDOWS_METADATA_OK`). |
-| Local Dev Code Signing | Done | `scripts/sign-dev-build.ps1` signs binaries with local self-signed certificate (`DEV_TEST_SIGNED`); signature integrity and negative tests verified (`SIGNATURES_VERIFIED_OK`). |
-| SignPath Foundation Integration | Prepared | Prepared `.github/workflows/signpath-release.yml` and `docs/CODE_SIGNING_POLICY.md` pending open-source onboarding. |
+| Chryypt Organization Code Signing | Done | `scripts/sign-build.ps1` signs binaries with Chryypt Organization certificate (`CHRYYPT_SIGNED`); signature integrity and negative tests verified (`SIGNATURES_VERIFIED_OK`). |
 | Installer Bundling | Done | NSIS setup (`.exe`) and WiX MSI (`.msi`) generated and verified (`RELEASE_BUNDLES_OK`). |
 
 ### 5. Hunter Mode, Startup Manager & Release-Blocking Correctness (Milestones 7.1 & 7.2)

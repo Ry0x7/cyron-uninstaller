@@ -211,10 +211,9 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
 
 ## Code Signing & Release Security
 
-- **Three-Tier Release Classifications**:
+- **Release Classifications**:
   - `UNSIGNED_RC`: Explicitly labelled unsigned release candidate for private testing.
-  - `DEV_TEST_SIGNED`: Local self-signed development builds (`CN=Cyron Uninstaller Development`, RSA 3072, SHA-256) strictly for local development and isolated test VMs (`scripts/sign-dev-build.ps1`). Never distributed publicly.
-  - `SIGNPATH_SIGNED`: Publicly trusted Authenticode code signing via SignPath Foundation (`.github/workflows/signpath-release.yml`), enabled once open-source onboarding criteria (`docs/SIGNPATH_READINESS.md`) are approved.
+  - `CHRYYPT_SIGNED`: Official Authenticode code-signed releases under the Chryypt Organization (`CN=Chryypt Organization`, RSA 3072, SHA-256) via `scripts/sign-build.ps1` (`npm run build:signed`).
 - **Verification Tooling**:
   - `npm run verify:metadata`: Validates PE VERSIONINFO, WiX MSI properties, NSIS headers, and application identifiers (`WINDOWS_METADATA_OK`).
   - `npm run verify:signatures`: Validates cryptographic file integrity, certificate thumbprints, and negative test boundaries (`SIGNATURES_VERIFIED_OK`).

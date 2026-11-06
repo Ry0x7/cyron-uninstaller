@@ -21,7 +21,8 @@
     "dev:desktop": "node scripts/msvc-env.mjs npx tauri dev",
     "build:desktop": "node scripts/msvc-env.mjs npx tauri build --debug --no-bundle",
     "build:unsigned": "node scripts/msvc-env.mjs npx tauri build",
-    "build:dev-signed": "node scripts/msvc-env.mjs npx tauri build && powershell -ExecutionPolicy Bypass -File scripts/sign-dev-build.ps1",
+    "build:signed": "node scripts/msvc-env.mjs npx tauri build && powershell -ExecutionPolicy Bypass -File scripts/sign-build.ps1",
+    "build:dev-signed": "node scripts/msvc-env.mjs npx tauri build && powershell -ExecutionPolicy Bypass -File scripts/sign-build.ps1",
     "verify:signatures": "powershell -ExecutionPolicy Bypass -File scripts/verify-signatures.ps1 -RunNegativeTests",
     "verify:metadata": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-metadata.ps1"
   },

@@ -150,9 +150,8 @@ npm run verify:signatures                              # Authenticode signature 
 
 - **Store / MSIX Uninstallation**: Microsoft Store packages are inventoried with read-only inspection. Because Store lifecycle is managed by Windows Package Manager, standard Win32 uninstallation is disabled with explicit guidance to use Windows Settings or `winget`.
 - **Portable Applications**: Discovered via explainable heuristics; standard uninstaller commands are disabled because portable apps lack registry uninstallers. Leftover and disk analysis are available.
-- **Code Signing Architecture**: Implements two explicit signing workflows:
-  - `DEV_TEST_SIGNED`: Local self-signed development builds (`CN=Cyron Uninstaller Development`, RSA 3072, SHA-256) for local development and test VMs via `npm run build:dev-signed`.
-  - `SIGNPATH_SIGNED`: Prepared free open-source code signing through [SignPath Foundation](https://signpath.org/) via `.github/workflows/signpath-release.yml` (onboarding prerequisites tracked in `docs/SIGNPATH_READINESS.md`).
+- **Code Signing Architecture**: Official Authenticode code signing under the Chryypt Organization:
+  - `CHRYYPT_SIGNED`: Releases and installers signed by Chryypt Organization (`CN=Chryypt Organization`, RSA 3072, SHA-256) via `npm run build:signed` (`scripts/sign-build.ps1`).
   - Unsigned builds remain clearly labeled `UNSIGNED_RC` for private testing. Real SmartScreen reputation builds progressively with download volume and user trust.
 
 ---
