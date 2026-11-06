@@ -3,6 +3,7 @@ import { api, errorMessage, invalidateInstalledApps } from "../../lib/api";
 import { formatBytes, formatCount } from "../../lib/format";
 import type {
   AppProcess,
+  BrokenEntryPlan,
   InstalledApp,
   LeftoverCleanReport,
   LeftoverScanReport,
@@ -61,6 +62,8 @@ export function UninstallWizard({
   const [cleaning, setCleaning] = useState(false);
   const [cleanReport, setCleanReport] = useState<LeftoverCleanReport | null>(null);
   const [cleanError, setCleanError] = useState<string | null>(null);
+  const [brokenPlan, setBrokenPlan] = useState<BrokenEntryPlan | null>(null);
+  const [preparingBrokenPlan, setPreparingBrokenPlan] = useState(false);
 
   const activeAppId = useRef<string | null>(null);
   activeAppId.current = app?.id ?? null;
@@ -207,11 +210,28 @@ export function UninstallWizard({
     }
   };
 
-  const handleCleanEntryOnly = async () => {
+  const handlePrepareCleanEntry = async () => {
+    setPreparingBrokenPlan(true);
+    setCleanError(null);
+    try {
+      const plan = await api.prepareBrokenInventoryCleanup(app.id);
+      setBrokenPlan(plan);
+    } catch (err) {
+      setCleanError(errorMessage(err));
+    } finally {
+      setPreparingBrokenPlan(false);
+    }
+  };
+
+  const handleExecuteCleanEntry = async () => {
+    if (!brokenPlan) return;
     setCleaning(true);
     setCleanError(null);
     try {
-      const report = await api.cleanBrokenInventoryEntry(app.id);
+      const report = await api.executeBrokenInventoryCleanup(
+        brokenPlan.planId,
+        brokenPlan.registryKeyPath,
+      );
       setCleanReport(report);
       invalidateInstalledApps();
       setStep("complete");
@@ -428,13 +448,19 @@ export function UninstallWizard({
             {app.uninstallSupport === "missing" && (
               <label
                 className={`un-mode-card ${mode === "clean_entry" ? "un-mode-card--selected" : ""}`}
-                onClick={() => setMode("clean_entry")}
+                onClick={() => {
+                  setMode("clean_entry");
+                  setBrokenPlan(null);
+                }}
               >
                 <input
                   type="radio"
                   name="un-mode"
                   checked={mode === "clean_entry"}
-                  onChange={() => setMode("clean_entry")}
+                  onChange={() => {
+                    setMode("clean_entry");
+                    setBrokenPlan(null);
+                  }}
                 />
                 <div className="un-mode-card-content">
                   <div className="un-mode-card-title">
@@ -448,25 +474,61 @@ export function UninstallWizard({
                 </div>
               </label>
             )}
+
+            {mode === "clean_entry" && brokenPlan && (
+              <div style={{ marginTop: 12, padding: 12, background: "var(--bg-subtle)", borderRadius: 6, border: "1px solid var(--border)" }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                  Verified Registry Entry Confirmation:
+                </div>
+                <code style={{ fontSize: 11, wordBreak: "break-all", display: "block", marginBottom: 8, color: "var(--accent)" }}>
+                  {brokenPlan.registryKeyPath}
+                </code>
+                <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  A full multi-type .reg backup will be created in quarantine before deletion.
+                </div>
+              </div>
+            )}
+
+            {cleanError && (
+              <div style={{ marginTop: 8 }}>
+                <Banner tone="danger">
+                  {cleanError}
+                </Banner>
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              disabled={app.isProtected}
-              onClick={() => {
-                if (mode === "clean_entry") {
-                  handleCleanEntryOnly();
-                } else {
-                  setStep("processes");
-                }
-              }}
-            >
-              Continue →
-            </Button>
+            {mode === "clean_entry" ? (
+              brokenPlan ? (
+                <Button
+                  variant="danger"
+                  loading={cleaning}
+                  onClick={handleExecuteCleanEntry}
+                >
+                  Confirm & Clean Entry
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  loading={preparingBrokenPlan}
+                  onClick={handlePrepareCleanEntry}
+                >
+                  Review Ghost Entry →
+                </Button>
+              )
+            ) : (
+              <Button
+                variant="primary"
+                disabled={app.isProtected}
+                onClick={() => setStep("processes")}
+              >
+                Continue →
+              </Button>
+            )}
           </div>
         </div>
       )}

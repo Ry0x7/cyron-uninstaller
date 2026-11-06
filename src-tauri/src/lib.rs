@@ -33,7 +33,9 @@ pub struct AppState {
     pub batch_uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredBatchUninstallPlan>>>,
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
+    pub broken_entry_plans: Arc<Mutex<HashMap<String, leftovers::StoredBrokenEntryPlan>>>,
     pub app_snapshots: Arc<Mutex<HashMap<String, apps::InstalledApp>>>,
+    pub cached_apps: Arc<Mutex<Option<(std::time::Instant, apps::AppInventory)>>>,
     pub startup_route: Arc<Mutex<Option<explorer::StartupRoute>>>,
     pub index_manager: Arc<index::IndexManager>,
     /// True until the user deliberately enables cleaning.
@@ -51,7 +53,9 @@ impl Default for AppState {
             batch_uninstall_plans: Arc::default(),
             process_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
+            broken_entry_plans: Arc::default(),
             app_snapshots: Arc::default(),
+            cached_apps: Arc::default(),
             startup_route: Arc::default(),
             index_manager: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
@@ -107,10 +111,12 @@ pub fn run() {
             commands::search_indexed_files,
             commands::get_scan_index_stats,
             commands::snapshot_app_identity,
-            commands::clean_broken_inventory_entry,
+            commands::prepare_broken_inventory_cleanup,
+            commands::execute_broken_inventory_cleanup,
             commands::resolve_cursor_target,
             commands::get_system_specs,
             commands::list_startup_items,
+            commands::set_startup_item_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");

@@ -23,7 +23,9 @@ The Uninstaller view provides transparent management of all desktop software, mo
   - **Microsoft Store / AppX / MSIX**: Modern packaged apps enumerated via `AppModel\Repository\Packages`.
   - **Steam Games**: Multi-library game discovery reading `libraryfolders.vdf` and `appmanifest_*.acf`.
   - **Portable Applications**: Discovers standalone executables installed under `%LOCALAPPDATA%\Programs`.
-  - **Broken Records**: Flags uninstall entries whose executable or uninstall string targets missing binaries.
+  - **Broken Records & Review-First Cleanup**:
+  - Flags uninstall entries whose executable or uninstall string targets missing binaries.
+  - Safe 2-step cleanup: prepares an expiring plan (`BrokenEntryPlan`) showing the exact registry path, generates an automatic multi-type `.reg` backup in quarantine with a write-ahead recovery journal, and deletes the orphaned entry. Protected Windows components and altered entries are strictly refused.
 - **Source Filtering & Badges**: Filter easily between `All`, `Win32`, `Store`, `Steam`, `Portable`, and `Broken` records.
 - **Application Search & Filtering**: Filter by publisher, name, or installation scope (machine-wide vs per-user).
 - **Size Measurement**: Because many installers record inaccurate or missing sizes, use the **Measure folder** action to calculate exact on-disk byte totals.
@@ -100,5 +102,28 @@ The Activity view maintains an audit log of past scans and quarantine batches:
   - **Folders & Drives**: "Analyze with Cyron", "Find Duplicates with Cyron", and "View Storage Breakdown".
   - **Executables (`.exe`)**: "Uninstall with Cyron" (opens registered uninstaller review) and "Find Related Files" (opens residual file review).
   - Single-click **Enable**, **Disable**, and **Repair** controls in Settings. Clean uninstallation completely removes all registered shell verbs.
-- **Exclusion Folders**: Define specific absolute directory paths that the scanner and cleaner must never touch.
-- **Theme**: Choose between System, Light, and Dark themes with zero theme flicker on startup.
+---
+
+## 8. Hunter Mode & Window Targeting
+
+Hunter Mode allows you to identify, inspect, terminate, or uninstall any visible application running on your desktop:
+- **Targeting**:
+  - Drag the targeting crosshair onto any application window on your desktop using pointer capture.
+  - Alternatively, use the keyboard (`Space` or `Enter` to lock target under cursor, `Esc` to cancel).
+- **Fast Process & App Matching**:
+  - Resolves target window and process identities against Cyron's cached inventory in under 1 microsecond without repeating system-wide scans.
+  - Strict directory boundary checks ensure correct matching (e.g., `C:\Apps\Foo` never matches `C:\Apps\FooBar`).
+- **Verified Actions**:
+  - **Process Termination**: Terminates targeted processes with verified PID, image path, and creation time checks immediately before termination, backed by an explicit confirmation dialog.
+  - **Uninstall**: For registered software, opens the standard Uninstaller wizard with process closure and leftover detection.
+  - **Forced Removal**: For unregistered executables, registers a backend-verified app snapshot and opens review-first residual inspection while protecting Windows system roots.
+
+---
+
+## 9. Startup Manager
+
+Manage programs configured to start automatically with Windows:
+- **Comprehensive Coverage**: Discovers startup registrations across HKCU/HKLM `Run` and `RunOnce`, WOW6432Node keys, and user/all-users Startup folders.
+- **Reversible Toggling**: Disables or enables startup items per-user using Windows standard `StartupApproved` binary values (`0x02` enabled, `0x03` disabled) without deleting registry keys or losing launch arguments.
+- **System Protection**: Critical Windows security components (Windows Defender, SecurityHealthSystray, SmartScreen) are clearly badged as **System Protected** and cannot be disabled.
+- **Operator Review**: Modifying any startup entry requires explicit confirmation.

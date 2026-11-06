@@ -115,7 +115,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 
 | Command | Arguments | Returns | Notes |
 | --- | --- | --- | --- |
-| `list_installed_apps` | — | `AppInventory { apps, warnings }` | Runs on a blocking thread. |
+| `list_installed_apps` | — | `AppInventory { apps, warnings }` | Runs on a blocking thread; cached in AppState for rapid lookups. |
 | `list_volumes` | — | `VolumeInfo[]` | Cheap synchronous Win32 queries. |
 | `list_caches` | — | `CacheInventory` | Blocking thread. Not written to history. |
 | `start_scan` | `jobId`, `path`, `options` | `ScanResult` | Blocking thread; emits `cyron-scan-progress`. `options.method` is `auto`, `mft` or `directory`. |
@@ -134,6 +134,31 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `restore_quarantine` | `runId` | `RestoreReport` | Byte-exact restore, never overwrites; retires the batch when everything is back; logged. |
 | `purge_quarantine` | `runId` | `PurgeReport` | Permanently deletes only the files in that batch manifest that are still inside the batch folder; logged. |
 | `get_cleanup_log` | — | `CleanupLogEntry[]` | Newest first, max 100. |
+| `get_system_specs` | — | `SystemSpecs` | Reports CPU, memory, display adapters, OS build, and native architecture. Cached with 5s TTL. |
+| `list_startup_items` | — | `StartupItem[]` | Enumerate HKCU/HKLM Run/RunOnce, WOW6432Node, and Startup folders with StartupApproved states. |
+| `set_startup_item_enabled` | `id`, `enabled` | `bool` | Toggles startup entry via standard Windows `StartupApproved` binary values (0x02 enable, 0x03 disable). Reversible. |
+| `snapshot_app_processes` | `appId` | `ProcessSnapshot` | Captures running processes belonging strictly to the app directory; validates critical process safety. |
+| `terminate_app_processes` | `snapshotId`, `pids[]` | `TerminationReport` | Terminates verified processes; revalidates PID, creation time, and install path immediately before kill. |
+| `prepare_uninstallation` | `appId` | `UninstallPlan` | Resolves uninstaller binary, flags, and creates single-use 10-minute expiring plan. |
+| `launch_uninstaller` | `planId` | `LaunchReport` | Spawns uninstaller executable without shell wrappers; tracks exit code. |
+| `scan_app_leftovers` | `appId` | `LeftoverPreview` | Deep filesystem and multi-type registry leftover scan for uninstalled application. |
+| `clean_app_leftovers` | `planId`, `itemIds[]` | `LeftoverCleanReport` | Moves leftovers to quarantine with write-ahead journal and multi-type `.reg` registry backups. |
+| `prepare_broken_inventory_cleanup` | `appId` | `BrokenEntryPlan` | Prepares single-use 5-minute plan for removing broken/orphaned uninstall registry keys. |
+| `execute_broken_inventory_cleanup` | `planId` | `LeftoverCleanReport` | Revalidates broken status, creates verified `.reg` backup in quarantine, deletes orphaned subkey. |
+| `prepare_batch_uninstallation` | `appIds[]` | `BatchUninstallPlan` | Validates multiple apps and prepares an ordered execution queue. |
+| `inspect_cleanable_directory` | `path` | `CleanableDirectoryInfo` | Inspects arbitrary directory against safety guards and size estimators. |
+| `open_in_terminal` | `path` | — | Launches Windows Terminal or PowerShell at the target folder without shell wrappers. |
+| `copy_to_clipboard` | `text` | — | Copies text to the Windows system clipboard safely. |
+| `scan_index_directory` | `jobId`, `path`, `options` | `ScanIndexDirectoryResult` | Disk-backed indexed exploration removing the in-memory node ceiling. |
+| `search_scan_index` | `jobId`, `query`, `options` | `ScanIndexSearchResult` | Fast indexed query across large directory scans. |
+| `get_scan_index_summary` | `jobId` | `ScanIndexSummary` | High-level summary of disk-indexed scan. |
+| `close_scan_index` | `jobId` | — | Cleans up and releases disk-backed SQLite scan index. |
+| `resolve_cursor_target` | `x`, `y` | `HunterTargetInfo` | Fast Hunter targeting (<1µs) against cached application inventory; creates verified process snapshot. |
+| `get_shell_integration_status` | — | `ShellIntegrationStatus` | Checks per-user Windows Explorer context menu verbs under HKCU. |
+| `set_shell_integration_enabled` | `enabled` | `ShellIntegrationStatus` | Registers/unregisters per-user Explorer context menu verbs without elevation. |
+| `get_app_log` | — | `AppLogEntry[]` | Retrieves buffered in-memory application activity log. |
+| `clear_app_log` | — | — | Clears the application log buffer. |
+| `open_url` | `url` | — | Opens validated safe HTTP/HTTPS URL in default system browser. |
 
 All three registries reject a job id that is already running instead of replacing its cancellation
 flag, so a cancel call cannot target a flag that no longer controls the running task. Cleanup plan
@@ -485,6 +510,8 @@ Windows Store, UWP, and modern packaged applications (MSIX) do not write standar
 | Pending uninstall plans | Rust memory (`AppState::uninstall_plans`) | 10 minutes or until executed |
 | Process snapshots | Rust memory (`AppState::process_snapshots`) | 5 minutes or until refreshed |
 | Pending leftover plans | Rust memory (`AppState::leftover_plans`) | 10 minutes or until executed |
+| Pending broken entry plans | Rust memory (`AppState::broken_entry_plans`) | 5 minutes or until executed |
+| Cached installed apps | Rust memory (`AppState::cached_apps`) | Session / until invalidated |
 
 Disk scans, cleanup runs, restores and purges write history; cache discovery and duplicate runs are
 measurements and are not logged.

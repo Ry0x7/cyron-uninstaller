@@ -19,19 +19,18 @@ Updated: 2026-11-06 (Documentation Consolidation & Verification Phase)
 | Verification Target | Command | Result |
 |---|---|---|
 | TypeScript Typecheck | `npm run typecheck` | Pass (0 diagnostics) |
-| Frontend Unit Tests | `npm test` | 71/71 pass across 7 files |
-| Frontend Production Build | `node scripts/verify-dist.mjs` | `DIST_OK` (458.8 KiB) |
-| Rust Core & Unit Tests | `node scripts/msvc-env.mjs cargo test --lib` | 134/134 pass (2 ignored) |
+| Frontend Unit Tests | `npm test` | 78/78 pass across 8 files |
+| Frontend Production Build | `node scripts/verify-dist.mjs` | `DIST_OK` |
+| Rust Core & Unit Tests | `node scripts/msvc-env.mjs cargo test --lib` | 145/145 pass (2 ignored) |
 | Security Boundaries | `... --test security -- --nocapture` | 25/25 pass |
 | Cleanup Stress Tests | `... --test cleanup_stress -- --nocapture` | 5/5 pass |
 | Isolated Cleanup Fixture | `node scripts/verify-cleanup.mjs` | `CLEANUP_FIXTURE_OK` |
-| End-to-End Fixture | `node scripts/verify-e2e.mjs` | `RC1_E2E_FIXTURE_OK` |
+| End-to-End Fixture (M7.1) | `node scripts/verify-e2e.mjs` | `RC1_E2E_FIXTURE_OK` (8/8 pass) |
 | Scanner Stress Suite | `... --test stress_scan -- --nocapture` | 5/5 pass (1 ignored) |
-| Total Rust Test Suite | `... cargo test --manifest-path src-tauri/Cargo.toml` | 171 passed, 3 ignored |
+| Total Rust Test Suite | `... cargo test --manifest-path src-tauri/Cargo.toml` | 181 passed, 3 ignored |
 | Windows Metadata Audit | `npm run verify:metadata` | `WINDOWS_METADATA_OK` (5/5 pass) |
 | Signature Integrity & Negative Tests | `npm run verify:signatures` | `SIGNATURES_VERIFIED_OK` (3/3 pass, 3/3 negative pass) |
-| Release Bundles Check | `node scripts/verify-release-bundles.mjs` | `RELEASE_BUNDLES_OK` (NSIS: 1.46 MiB, MSI: 2.04 MiB) |
-| Desktop Smoke Test | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` |
+| Documentation Integrity | `npm run docs:check` | `DOCS_CHECK: PASSED` (19 files) |
 
 ## 3. Active Policy Blockers & Required Operator Decisions
 

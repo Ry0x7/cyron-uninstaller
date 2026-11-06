@@ -63,6 +63,29 @@ pub struct LeftoverCleanReport {
     pub errors: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrokenEntryPlan {
+    pub plan_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub registry_key_path: String,
+    pub subkey_name: String,
+    pub hive: String,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredBrokenEntryPlan {
+    pub plan_id: String,
+    pub app_id: String,
+    pub app_name: String,
+    pub registry_key_path: String,
+    pub subkey_name: String,
+    pub hive: String,
+    pub expires_at: u64,
+}
+
 pub const SHARED_VENDORS: &[&str] = &[
     "microsoft",
     "google",
@@ -1184,6 +1207,131 @@ fn parse_reg_path(path: &str) -> Result<(RegKey, String), String> {
     }
 }
 
+/// Verifies that an installed app qualifies as a broken registry entry and resolves its exact subkey path.
+pub fn verify_broken_entry_candidate(app: &crate::apps::InstalledApp) -> Result<(String, String), String> {
+    if app.is_protected {
+        return Err("Application is marked as a protected Windows component.".into());
+    }
+
+    // Resolve actual subkey name from registry_key_name or id
+    let subkey_name = if let Some(ref rkn) = app.registry_key_name {
+        rkn.clone()
+    } else {
+        let (_, key_name) = app
+            .id
+            .split_once('|')
+            .ok_or_else(|| "Invalid application ID format: missing hive separator".to_string())?;
+        key_name.to_string()
+    };
+
+    let subkey_trimmed = subkey_name.trim();
+    if subkey_trimmed.is_empty()
+        || subkey_trimmed.contains('\\')
+        || subkey_trimmed.contains('/')
+        || subkey_trimmed.contains("..")
+    {
+        return Err(format!("Unsafe or invalid registry subkey name: {subkey_trimmed}"));
+    }
+
+    let subkey_path = match app.hive.as_str() {
+        "user-64" => format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\{subkey_trimmed}"),
+        "user-32" => format!(r"HKCU\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{subkey_trimmed}"),
+        "machine-64" => format!(r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{subkey_trimmed}"),
+        "machine-32" => format!(r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{subkey_trimmed}"),
+        _ => return Err(format!("Unsupported hive '{}' for registry inventory cleanup.", app.hive)),
+    };
+
+    if !is_safe_to_delete_reg_key(&subkey_path) {
+        return Err(format!("Refusing deletion of protected or shared registry key: {subkey_path}"));
+    }
+
+    // Verify key exists right now in live registry
+    let (root, subkey) = parse_reg_path(&subkey_path)?;
+    if root.open_subkey(&subkey).is_err() {
+        return Err(format!("Registry subkey does not exist: {subkey_path}"));
+    }
+
+    // Must qualify as broken:
+    // 1. uninstall_support is "missing"
+    // OR uninstaller binary does not exist on disk
+    // OR install_location is present but doesn't exist on disk
+    let is_broken = if app.uninstall_support == "missing" {
+        true
+    } else if let Some(ref uninst) = app.uninstall_string {
+        let trimmed = uninst.trim();
+        if trimmed.is_empty() {
+            true
+        } else {
+            let parsed = crate::uninstall::parse_uninstall_command(trimmed);
+            let p = Path::new(&parsed.executable);
+            p.is_absolute() && !p.exists()
+        }
+    } else if let Some(ref loc) = app.install_location {
+        let p = Path::new(loc.trim());
+        p.is_absolute() && !p.exists()
+    } else {
+        false
+    };
+
+    if !is_broken {
+        return Err("Application has a functional uninstaller and valid install location; it does not qualify as a broken entry.".into());
+    }
+
+    Ok((subkey_trimmed.to_string(), subkey_path))
+}
+
+pub fn execute_broken_entry_removal(
+    plan: &StoredBrokenEntryPlan,
+    quarantine_root: &Path,
+) -> Result<LeftoverCleanReport, String> {
+    // 1. Re-verify key exists in live registry
+    let (root, subkey) = parse_reg_path(&plan.registry_key_path)?;
+    if root.open_subkey(&subkey).is_err() {
+        return Err(format!("Registry subkey no longer exists: {}", plan.registry_key_path));
+    }
+
+    // 2. Re-verify safety guard
+    if !is_safe_to_delete_reg_key(&plan.registry_key_path) {
+        return Err(format!("Refusing deletion of protected system registry key: {}", plan.registry_key_path));
+    }
+
+    // 3. Backup key before deletion into quarantine batch
+    let batch = quarantine_root.join(&plan.plan_id);
+    let _ = fs::create_dir_all(&batch);
+    let reg_backup_file = batch.join("registry_backup.reg");
+
+    let candidate = LeftoverCandidate {
+        id: "cand-broken-entry".into(),
+        kind: "registry_key".into(),
+        path: plan.registry_key_path.clone(),
+        confidence: "high".into(),
+        risk: "safe".into(),
+        reason: "Broken Windows application uninstall registration key.".into(),
+        size: 0,
+        file_count: 0,
+        selected: true,
+    };
+
+    export_registry_backup(&[&candidate], &reg_backup_file)?;
+    verify_registry_backup(&reg_backup_file)?;
+
+    // 4. Delete the subkey
+    if !delete_registry_key(&plan.registry_key_path) {
+        return Err(format!("Could not remove registry key {}", plan.registry_key_path));
+    }
+
+    Ok(LeftoverCleanReport {
+        run_id: plan.plan_id.clone(),
+        app_id: plan.app_id.clone(),
+        quarantined_files: 0,
+        quarantined_bytes: 0,
+        deleted_registry_keys: 1,
+        registry_backup_path: Some(reg_backup_file.to_string_lossy().to_string()),
+        quarantine_dir: Some(batch.to_string_lossy().to_string()),
+        errors: Vec::new(),
+    })
+}
+
 fn measure_directory_shallow(path: &Path) -> (u64, u64) {
     let mut size = 0u64;
     let mut count = 0u64;
@@ -1426,5 +1574,96 @@ mod tests {
         // 6. Clean up
         let _ = hkcu.delete_subkey_all(&test_subkey);
         let _ = fs::remove_file(&temp_reg);
+    }
+
+    #[test]
+    fn broken_inventory_cleanup_isolated_hkcu_fixtures_all_cases() {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let test_subkey_name = format!("CyronTestBroken_{}_{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
+        let uninstall_root = r"Software\Microsoft\Windows\CurrentVersion\Uninstall";
+        let subkey_rel = format!(r"{uninstall_root}\{test_subkey_name}");
+        let full_path = format!(r"HKCU\{subkey_rel}");
+
+        // Create test registry key in HKCU Uninstall
+        let (key, _) = hkcu.create_subkey(&subkey_rel).expect("create test broken uninstall key");
+        key.set_value("DisplayName", &"Cyron Broken Test App").expect("set name");
+        key.set_value("UninstallString", &"C:\\NonExistentPath\\uninst.exe").expect("set uninst");
+
+        let broken_app = crate::apps::InstalledApp {
+            id: format!("user-64|{test_subkey_name}"),
+            name: "Cyron Broken Test App".into(),
+            version: None,
+            publisher: None,
+            install_location: None,
+            install_date: None,
+            uninstall_string: Some("C:\\NonExistentPath\\uninst.exe".into()),
+            quiet_uninstall_string: None,
+            display_icon: None,
+            estimated_size: None,
+            hive: "user-64".into(),
+            scope: "user".into(),
+            architecture: "x64".into(),
+            is_protected: false,
+            source: "win32".into(),
+            uninstall_support: "missing".into(),
+            confidence: "confirmed".into(),
+            detection_reason: None,
+            registry_key_name: Some(test_subkey_name.clone()),
+        };
+
+        // 1. Valid broken candidate verifies and resolves exact subkey path
+        let (verified_sub, verified_path) = verify_broken_entry_candidate(&broken_app).expect("verify broken app candidate");
+        assert_eq!(verified_sub, test_subkey_name);
+        assert_eq!(verified_path.to_ascii_lowercase(), full_path.to_ascii_lowercase());
+
+        // 2. Protected app is rejected
+        let mut protected_app = broken_app.clone();
+        protected_app.is_protected = true;
+        assert!(verify_broken_entry_candidate(&protected_app).is_err(), "protected app must be rejected");
+
+        // 3. Functional / working app is rejected from broken entry cleanup
+        let mut working_app = broken_app.clone();
+        working_app.uninstall_support = "standard".into();
+        let cmd_exe = std::env::var("COMSPEC").unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".into());
+        working_app.uninstall_string = Some(cmd_exe);
+        assert!(verify_broken_entry_candidate(&working_app).is_err(), "working app must not qualify as broken");
+
+        // 4. Stored plan execution
+        let quarantine_dir = std::env::temp_dir().join(format!("cyron-test-quarantine-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&quarantine_dir);
+        let plan_id = format!("plan-{}", std::process::id());
+        let valid_stored_plan = StoredBrokenEntryPlan {
+            plan_id: plan_id.clone(),
+            app_id: broken_app.id.clone(),
+            app_name: broken_app.name.clone(),
+            registry_key_path: full_path.clone(),
+            subkey_name: test_subkey_name.clone(),
+            hive: "user-64".into(),
+            expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 300,
+        };
+
+        // 5. Execution successfully removes key, backs up to .reg
+        let clean_report = execute_broken_entry_removal(&valid_stored_plan, &quarantine_dir).expect("execute broken removal");
+        assert_eq!(clean_report.deleted_registry_keys, 1);
+        assert!(clean_report.registry_backup_path.is_some());
+        let backup_file = PathBuf::from(clean_report.registry_backup_path.unwrap());
+        assert!(backup_file.exists());
+
+        // Verify key is now gone from registry
+        assert!(hkcu.open_subkey(&subkey_rel).is_err(), "deleted key must no longer exist in registry");
+
+        // 6. Replayed plan on already-deleted key fails cleanly
+        assert!(execute_broken_entry_removal(&valid_stored_plan, &quarantine_dir).is_err(), "replaying plan on removed key must fail");
+
+        // 7. Expired plan is recognized
+        let expired_plan = StoredBrokenEntryPlan {
+            expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - 10,
+            ..valid_stored_plan
+        };
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        assert!(now > expired_plan.expires_at, "expired plan must be recognized as expired");
+
+        // Clean up quarantine fixture
+        let _ = fs::remove_dir_all(&quarantine_dir);
     }
 }

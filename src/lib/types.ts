@@ -43,6 +43,7 @@ export interface InstalledApp {
   uninstallSupport: UninstallSupport;
   confidence: DetectionConfidence;
   detectionReason?: string | null;
+  registryKeyName?: string | null;
 }
 
 export interface AppInventory {
@@ -604,6 +605,19 @@ export interface HunterTargetInfo {
   matchedAppId: string | null;
   matchedAppName: string | null;
   isCritical: boolean;
+  hunterTargetId: string;
+  canTerminate: boolean;
+  creationTime: number;
+}
+
+export interface BrokenEntryPlan {
+  planId: string;
+  appId: string;
+  appName: string;
+  registryKeyPath: string;
+  subkeyName: string;
+  hive: string;
+  expiresAt: number;
 }
 
 export interface SystemSpecs {
@@ -626,6 +640,8 @@ export interface StartupItem {
   location: string;
   enabled: boolean;
   publisher: string | null;
+  isProtected: boolean;
+  canToggle: boolean;
 }
 
 

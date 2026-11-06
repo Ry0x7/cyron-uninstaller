@@ -328,6 +328,21 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   EXPECT: `git log --all --name-only` confirms no `.chryypt` files exist in Git history, and `.gitignore` excludes `.chryypt/`.
   EVIDENCE: Verified: 0 `.chryypt` files exist in Git history; `.gitignore` rule active.
 
+## Phase 7.1: Hunter Mode, Startup Manager & Security Repair
+
+- [x] G46: Broken inventory cleanup, Hunter targeting & Startup Manager E2E verification
+  CHECK: `node scripts/verify-e2e.mjs` (`src-tauri/examples/rc1_e2e_fixture.rs`)
+  EXPECT: `RC1_E2E_FIXTURE_OK` across all 8 disposable fixture scenarios:
+  1. Hunter targeting external disposable application window.
+  2. Application identity matching & strict directory boundary protection (`C:\Apps\Foo` vs `C:\Apps\FooBar`).
+  3. Verified process snapshot & safe termination with PID/creation-time checks.
+  4. Unregistered application review-first forced removal with backend-verified snapshots.
+  5. Broken registry entry removal, 2-step single-use plan, multi-type `.reg` backup in quarantine, write-ahead journal, and replay/tamper rejection.
+  6. Startup entry reversible disable (`0x03`) and enable (`0x02`) via Windows standard `StartupApproved` keys, plus system security component protection.
+  7. High-performance repeated targeting without inventory rescans (50 calls in 44.7 µs; avg <1 µs).
+  8. Critical Windows process & shared system directory refusal.
+  EVIDENCE: `RC1_E2E_FIXTURE_OK` (8/8 scenarios passed).
+
 ## Not gated
 
 - [ ] SignPath Foundation external acceptance: Cyron Uninstaller has prepared the technical integration but has not yet received external approval from SignPath Foundation; public releases prior to approval remain `UNSIGNED_RC` (or `DEV_TEST_SIGNED` for isolated test builds).

@@ -36,6 +36,9 @@ pub struct InstalledApp {
     pub confidence: String,
     /// Explanation of why and how this application was identified.
     pub detection_reason: Option<String>,
+    /// Actual registry subkey name under the Uninstall key (for Win32 registry apps).
+    #[serde(default)]
+    pub registry_key_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -236,6 +239,7 @@ fn read_app(
         uninstall_support,
         confidence: "confirmed".to_string(),
         detection_reason: Some(format!("Discovered in Windows Registry ({hive})")),
+        registry_key_name: Some(key_name.to_string()),
     })
 }
 
@@ -364,6 +368,7 @@ fn discover_store_apps(
             uninstall_support: "store_managed".to_string(),
             confidence: "confirmed".to_string(),
             detection_reason: Some("Registered Microsoft Store / MSIX application package".to_string()),
+            registry_key_name: None,
         });
     }
 }
@@ -489,6 +494,7 @@ fn parse_steam_manifest(content: &str, library_dir: &Path) -> Option<InstalledAp
         uninstall_support: "store_managed".to_string(),
         confidence: "confirmed".to_string(),
         detection_reason: Some(format!("Steam game library manifest (AppID {app_id})")),
+        registry_key_name: None,
     })
 }
 
@@ -575,6 +581,7 @@ fn discover_portable_apps(
                                     uninstall_support: "manual_only".to_string(),
                                     confidence: "heuristic".to_string(),
                                     detection_reason: Some("Standalone executable detected in user programs directory without Windows uninstaller registration".to_string()),
+                                    registry_key_name: None,
                                 });
                                 break;
                             }
@@ -897,6 +904,7 @@ mod tests {
             uninstall_support: "standard".to_string(),
             confidence: "confirmed".to_string(),
             detection_reason: None,
+            registry_key_name: Some(name.to_string()),
         }
     }
 
