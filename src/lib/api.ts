@@ -4,6 +4,7 @@ import type {
   AppProcess,
   BatchUninstallPlan,
   BatchUninstallReport,
+  BrokenEntryPlan,
   CacheInventory,
   CleanupLogEntry,
   CleanupPreview,
@@ -121,8 +122,10 @@ export const api = {
     call<LeftoverCleanReport>("clean_app_leftovers", { appId, planId, candidateIds }),
   snapshotAppIdentity: (appId: string) =>
     call<InstalledApp>("snapshot_app_identity", { appId }),
-  cleanBrokenInventoryEntry: (appId: string) =>
-    call<LeftoverCleanReport>("clean_broken_inventory_entry", { appId }),
+  prepareBrokenInventoryCleanup: (appId: string) =>
+    call<BrokenEntryPlan>("prepare_broken_inventory_cleanup", { appId }),
+  executeBrokenInventoryCleanup: (planId: string, confirmedKeyPath: string) =>
+    call<LeftoverCleanReport>("execute_broken_inventory_cleanup", { planId, confirmedKeyPath }),
   prepareBatchUninstall: (appIds: string[], quiet = false) =>
     call<BatchUninstallPlan>("prepare_batch_uninstall", { appIds, quiet }),
   executeBatchUninstall: (planId: string) =>
@@ -145,6 +148,8 @@ export const api = {
   resolveCursorTarget: () => call<HunterTargetInfo | null>("resolve_cursor_target"),
   getSystemSpecs: () => call<SystemSpecs>("get_system_specs"),
   listStartupItems: () => call<StartupItem[]>("list_startup_items"),
+  setStartupItemEnabled: (id: string, enabled: boolean) =>
+    call<StartupItem>("set_startup_item_enabled", { id, enabled }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

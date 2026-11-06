@@ -902,6 +902,7 @@ fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
         uninstall_support: "standard".into(),
         confidence: "confirmed".into(),
         detection_reason: None,
+        registry_key_name: None,
     }).collect();
     assert!(uninstall::create_batch_uninstall_plan(&many_apps, false).is_err());
 
@@ -925,6 +926,7 @@ fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
         uninstall_support: "standard".into(),
         confidence: "confirmed".into(),
         detection_reason: None,
+        registry_key_name: None,
     }];
     assert!(uninstall::create_batch_uninstall_plan(&shell_app, false).is_err());
 }

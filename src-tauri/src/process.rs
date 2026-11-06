@@ -152,7 +152,7 @@ pub fn is_candidate_root_safe(path: &Path) -> bool {
 
     // Refuse direct system folders
     let lower = key.to_ascii_lowercase();
-    if lower == "c:" || lower == "c:\\" {
+    if lower == "c:" || lower == "c:\\" || lower == "c:\\users" || lower == "c:\\programdata" {
         return false;
     }
     if let Ok(prog) = std::env::var("ProgramFiles") {
@@ -735,7 +735,7 @@ fn find_window_title(pid: u32) -> Option<String> {
     finder.title
 }
 
-fn normalize_key(path: &Path) -> String {
+pub(crate) fn normalize_key(path: &Path) -> String {
     path.to_string_lossy()
         .replace('/', "\\")
         .trim_end_matches('\\')

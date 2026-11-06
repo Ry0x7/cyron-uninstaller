@@ -20,15 +20,19 @@ export function HunterMode({
 }) {
   const [isActive, setIsActive] = useState(false);
   const [isTargeting, setIsTargeting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [target, setTarget] = useState<HunterTargetInfo | null>(null);
   const [targetApp, setTargetApp] = useState<InstalledApp | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [terminating, setTerminating] = useState(false);
+  const [confirmKill, setConfirmKill] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const pollIntervalRef = useRef<number | null>(null);
+  const inFlightRef = useRef(false);
+  const reqSeqRef = useRef(0);
 
-  // Poll cursor target while targeting is active
+  // Poll cursor target while targeting is active without overlapping calls
   useEffect(() => {
     if (!isTargeting) {
       if (pollIntervalRef.current) {
@@ -39,8 +43,13 @@ export function HunterMode({
     }
 
     const poll = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      const curSeq = ++reqSeqRef.current;
       try {
         const info = await api.resolveCursorTarget();
+        if (curSeq !== reqSeqRef.current) return; // Discard stale response
+
         if (info && info.pid > 4 && info.processName.toLowerCase() !== "cyron.exe") {
           setTarget(info);
           // Match installed app
@@ -52,11 +61,16 @@ export function HunterMode({
           }
         }
       } catch {
-        // Ignore cursor query errors
+        // Fail silent on cursor resolution errors
+      } finally {
+        inFlightRef.current = false;
       }
     };
 
-    pollIntervalRef.current = window.setInterval(poll, 180);
+    // 250ms polling interval for minimal CPU overhead
+    pollIntervalRef.current = window.setInterval(poll, 250);
+    poll(); // Trigger immediate first check
+
     return () => {
       if (pollIntervalRef.current) {
         window.clearInterval(pollIntervalRef.current);
@@ -65,36 +79,72 @@ export function HunterMode({
     };
   }, [isTargeting, installedApps]);
 
+  // Keyboard navigation: Space/Enter locks target, Escape cancels
+  useEffect(() => {
+    if (!isTargeting) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsTargeting(false);
+        setIsActive(false);
+        setTarget(null);
+        setActionMessage(null);
+      } else if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        handleLockTarget();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isTargeting]);
+
   const handleStartTargeting = () => {
     setIsActive(true);
     setIsTargeting(true);
-    setActionMessage("Move cursor over any desktop window or tray icon to target it...");
+    setConfirmKill(false);
+    setActionMessage("Move cursor over any desktop window or drag the crosshair icon to lock target (Space/Enter to lock, Esc to cancel)...");
   };
 
   const handleLockTarget = () => {
     setIsTargeting(false);
+    setConfirmKill(false);
     setActionMessage(null);
   };
 
   const handleTerminateProcess = async () => {
     if (!target || terminating) return;
     setTerminating(true);
+    setActionMessage(null);
     try {
       const results = await api.terminateAppProcesses(
-        target.matchedAppId || target.processName,
+        target.hunterTargetId,
         [target.pid],
         true,
       );
-      if (results[0]?.success) {
+      const res = results[0];
+      if (res?.success) {
         setActionMessage(`Process ${target.processName} (PID ${target.pid}) terminated.`);
         setTarget(null);
+        setConfirmKill(false);
       } else {
-        setActionMessage(`Could not terminate process: ${results[0]?.error ?? "Access denied"}`);
+        setActionMessage(`Could not terminate: ${res?.error ?? "Access denied or process already exited"}`);
       }
     } catch (err) {
       setActionMessage(`Termination error: ${errorMessage(err)}`);
     } finally {
       setTerminating(false);
+      setConfirmKill(false);
+    }
+  };
+
+  const handleForcedRemovalOfTarget = async () => {
+    if (!target) return;
+    try {
+      // Resolve backend-registered identity snapshot
+      const app = await api.snapshotAppIdentity(target.hunterTargetId);
+      setTargetApp(app);
+      setWizardOpen(true);
+    } catch (err) {
+      setActionMessage(`Could not prepare target for removal: ${errorMessage(err)}`);
     }
   };
 
@@ -130,6 +180,7 @@ export function HunterMode({
                 onClick={() => {
                   setTarget(null);
                   setIsTargeting(false);
+                  setConfirmKill(false);
                 }}
                 title="Dismiss"
               >
@@ -161,6 +212,7 @@ export function HunterMode({
                 ) : (
                   <Badge tone="neutral">Unregistered Application</Badge>
                 )}
+                {isTargeting && <Badge tone="caution">Targeting Active</Badge>}
               </div>
 
               {actionMessage && (
@@ -185,46 +237,42 @@ export function HunterMode({
                   size="sm"
                   variant="secondary"
                   icon={<IconTrash size={13} />}
-                  onClick={() => {
-                    // Create ad-hoc app representation for forced removal
-                    const adHocApp: InstalledApp = {
-                      id: `hunter-${target.pid}`,
-                      name: target.windowTitle || target.processName,
-                      version: null,
-                      publisher: null,
-                      installLocation: target.processPath ? target.processPath.substring(0, target.processPath.lastIndexOf("\\")) : null,
-                      installDate: null,
-                      uninstallString: null,
-                      quietUninstallString: null,
-                      displayIcon: target.processPath,
-                      estimatedSize: null,
-                      hive: "user-64",
-                      scope: "user",
-                      architecture: "x64",
-                      isProtected: target.isCritical,
-                      source: "portable",
-                      uninstallSupport: "missing",
-                      confidence: "heuristic",
-                      detectionReason: "Targeted via Hunter Mode",
-                    };
-                    setTargetApp(adHocApp);
-                    setWizardOpen(true);
-                  }}
+                  onClick={handleForcedRemovalOfTarget}
                 >
                   Forced Removal of Application…
                 </Button>
               ) : null}
 
-              {!target.isCritical && (
-                <Button
-                  size="sm"
-                  variant="danger"
-                  icon={<IconStop size={13} />}
-                  loading={terminating}
-                  onClick={handleTerminateProcess}
-                >
-                  Kill Process
-                </Button>
+              {!target.isCritical && target.canTerminate && (
+                confirmKill ? (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon={<IconStop size={13} />}
+                      loading={terminating}
+                      onClick={handleTerminateProcess}
+                    >
+                      Confirm Kill PID {target.pid}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setConfirmKill(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    icon={<IconStop size={13} />}
+                    onClick={() => setConfirmKill(true)}
+                  >
+                    Kill Process
+                  </Button>
+                )
               )}
 
               {target.processPath && (
@@ -253,25 +301,49 @@ export function HunterMode({
           </div>
         )}
 
-        {/* Floating Toggle Button */}
+        {/* Floating Crosshair Button supporting Click or Drag-and-Drop Targeting */}
         <button
           type="button"
-          className={`hunter-trigger-btn ${isTargeting ? "hunter-trigger-btn--active" : ""}`}
-          onClick={() => {
-            if (isTargeting) {
-              handleLockTarget();
-            } else {
-              handleStartTargeting();
+          className={`hunter-trigger-btn ${isTargeting ? "hunter-trigger-btn--active" : ""} ${isDragging ? "hunter-trigger-btn--dragging" : ""}`}
+          onPointerDown={(e) => {
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              setIsDragging(true);
+              setIsActive(true);
+              setIsTargeting(true);
+              setActionMessage("Drag cursor over any desktop window, then release to lock target…");
+            } catch {
+              // Ignore pointer capture errors
             }
           }}
-          title={isTargeting ? "Click to lock target window" : "Enter Hunter Mode"}
+          onPointerUp={(e) => {
+            if (isDragging) {
+              try {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+              } catch {
+                // Ignore
+              }
+              setIsDragging(false);
+              handleLockTarget();
+            }
+          }}
+          onClick={() => {
+            if (!isDragging) {
+              if (isTargeting) {
+                handleLockTarget();
+              } else {
+                handleStartTargeting();
+              }
+            }
+          }}
+          title={isTargeting ? "Click to lock target window (or press Space/Enter)" : "Click or drag crosshair over any desktop window"}
         >
           <IconCrosshair size={16} />
           <span>{isTargeting ? "Lock Target" : "Hunter Mode"}</span>
         </button>
       </div>
 
-      {/* Guided Uninstall Wizard if target app is uninstalled */}
+      {/* Guided Uninstall Wizard if target app is selected for uninstall/forced removal */}
       {targetApp && (
         <UninstallWizard
           app={targetApp}

@@ -190,6 +190,18 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
    - Providers are forbidden from targeting entire system roots, user profiles, or Windows system folders.
    - Providers cannot override or demote protected catalog targets (source repositories, virtual environments, Docker/WSL, model weights, browser profiles) to safe or caution risks.
 
+9. **Broken Inventory Cleanup, Hunter Mode & Startup Safety Hardening (Phase 7.1)**:
+   - Broken inventory cleanup resolves the actual subkey name from discovered application metadata (`registry_key_name`), strictly rejecting frontend-supplied arbitrary paths.
+   - Server-held, single-use, 5-minute expiring confirmation plan (`BrokenEntryPlan`) requires explicit operator confirmation displaying the exact registry path.
+   - Validates that the entry qualifies as broken (missing uninstaller or invalid path) at preparation and execution time.
+   - Re-verifies live registry key existence immediately before deletion, creates a verified multi-type `.reg` backup in quarantine, logs a durable write-ahead recovery journal, and respects backend read-only mode.
+   - System-protected entries, root uninstall keys, altered paths, and replay attacks are refused.
+   - Hunter Mode separates cursor targeting from application discovery; targets match against cached in-memory apps in under 1 µs, eliminating repeating disk/registry scans.
+   - Target acquisition registers verified process snapshot (`StoredProcessSnapshot`) and app identity in backend state; termination revalidates PID, path, and creation time immediately before kill.
+   - Strict directory boundary matching (`is_path_in_directory`) prevents prefix collisions (`C:\Apps\Foo` vs `C:\Apps\FooBar`).
+   - Unregistered application forced removal creates a backend-verified app snapshot, protecting system roots and requiring operator confirmation.
+   - Startup Manager toggling uses Windows standard `StartupApproved` registry keys (`0x02` enable, `0x03` disable), preserving original commands and protecting Windows Defender, SecurityHealthSystray, and SmartScreen.
+
 ---
 
 ## Code Signing & Release Security

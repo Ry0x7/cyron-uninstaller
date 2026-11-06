@@ -86,9 +86,28 @@ where
 
 /* ---------------------------------------------------------------- commands */
 
+pub(crate) fn get_or_discover_cached_apps(state: &AppState) -> Vec<apps::InstalledApp> {
+    if let Ok(cache) = state.cached_apps.lock() {
+        if let Some((ts, ref inv)) = *cache {
+            if ts.elapsed().as_secs() < 60 {
+                return inv.apps.clone();
+            }
+        }
+    }
+    let inv = apps::discover_apps();
+    if let Ok(mut cache) = state.cached_apps.lock() {
+        *cache = Some((std::time::Instant::now(), inv.clone()));
+    }
+    inv.apps
+}
+
 #[tauri::command]
-pub async fn list_installed_apps() -> Result<apps::AppInventory, String> {
-    run_blocking("Application discovery", apps::discover_apps).await
+pub async fn list_installed_apps(state: State<'_, AppState>) -> Result<apps::AppInventory, String> {
+    let inv = run_blocking("Application discovery", apps::discover_apps).await?;
+    if let Ok(mut cache) = state.cached_apps.lock() {
+        *cache = Some((std::time::Instant::now(), inv.clone()));
+    }
+    Ok(inv)
 }
 
 #[tauri::command]
@@ -931,11 +950,10 @@ pub async fn scan_app_leftovers(
 }
 
 #[tauri::command]
-pub async fn clean_broken_inventory_entry(
-    app: tauri::AppHandle,
+pub async fn prepare_broken_inventory_cleanup(
     state: State<'_, AppState>,
     app_id: String,
-) -> Result<leftovers::LeftoverCleanReport, String> {
+) -> Result<leftovers::BrokenEntryPlan, String> {
     let app_id_trimmed = app_id.trim().to_string();
     if app_id_trimmed.is_empty() {
         return Err("Application ID is required.".into());
@@ -952,42 +970,76 @@ pub async fn clean_broken_inventory_entry(
         })
         .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
 
-    let subkey_path = match found_app.hive.as_str() {
-        "machine-64" => format!("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
-        "machine-32" => format!("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
-        "user-64" => format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
-        "user-32" => format!("HKCU\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
-        _ => return Err("Unsupported application registry hive for inventory entry cleanup.".into()),
-    };
-
-    if !leftovers::is_safe_to_delete_reg_key(&subkey_path) {
-        return Err("Refusing deletion of protected system registry key.".into());
-    }
-
-    let candidate = leftovers::LeftoverCandidate {
-        id: "cand-0".into(),
-        kind: "registry_key".into(),
-        path: subkey_path,
-        confidence: "high".into(),
-        risk: "safe".into(),
-        reason: "Broken Windows application uninstall registration key.".into(),
-        size: 0,
-        file_count: 0,
-        selected: true,
-    };
+    let (subkey_name, registry_key_path) = leftovers::verify_broken_entry_candidate(&found_app)?;
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    let plan = leftovers::StoredLeftoverPlan {
-        plan_id: format!("broken-entry-{now}-{}", std::process::id()),
+    let plan_id = format!("broken-plan-{now}-{}", std::process::id());
+    let stored_plan = leftovers::StoredBrokenEntryPlan {
+        plan_id: plan_id.clone(),
         app_id: app_id_trimmed.clone(),
         app_name: found_app.name.clone(),
-        candidates: vec![candidate],
+        registry_key_path: registry_key_path.clone(),
+        subkey_name: subkey_name.clone(),
+        hive: found_app.hive.clone(),
         expires_at: now + 300,
     };
 
+    let public_plan = leftovers::BrokenEntryPlan {
+        plan_id: plan_id.clone(),
+        app_id: app_id_trimmed,
+        app_name: found_app.name,
+        registry_key_path,
+        subkey_name,
+        hive: found_app.hive,
+        expires_at: now + 300,
+    };
+
+    let mut plans = state
+        .broken_entry_plans
+        .lock()
+        .map_err(|_| "Broken entry plan registry is unavailable.".to_string())?;
+    plans.retain(|_, p| p.expires_at > now);
+    plans.insert(plan_id, stored_plan);
+
+    Ok(public_plan)
+}
+
+#[tauri::command]
+pub async fn execute_broken_inventory_cleanup(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+    confirmed_key_path: String,
+) -> Result<leftovers::LeftoverCleanReport, String> {
+    ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
     let quarantine_root = cleanup_quarantine_root(&app)?;
+
+    let plan = {
+        let mut plans = state
+            .broken_entry_plans
+            .lock()
+            .map_err(|_| "Broken entry plan registry is unavailable.".to_string())?;
+        plans
+            .remove(plan_id.trim())
+            .ok_or_else(|| "Broken inventory cleanup plan expired or not found. Please prepare again.".to_string())?
+    };
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    if now > plan.expires_at {
+        return Err("Broken inventory cleanup plan has expired. Please prepare again.".into());
+    }
+
+    if plan.registry_key_path.to_ascii_lowercase() != confirmed_key_path.trim().to_ascii_lowercase() {
+        return Err("Confirmed registry key path does not match the prepared cleanup plan.".into());
+    }
+
+    // Invalidate app cache on successful cleanup
+    if let Ok(mut cache) = state.cached_apps.lock() {
+        *cache = None;
+    }
+
     run_blocking("Clean broken inventory entry", move || {
-        leftovers::clean_leftovers(&plan, &["cand-0".to_string()], &quarantine_root)
+        leftovers::execute_broken_entry_removal(&plan, &quarantine_root)
     })
     .await?
 }
@@ -1433,8 +1485,21 @@ pub fn get_scan_index_stats(
 }
 
 #[tauri::command]
-pub fn resolve_cursor_target() -> Result<Option<crate::hunter::HunterTargetInfo>, String> {
-    crate::hunter::resolve_cursor_target()
+pub fn resolve_cursor_target(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::hunter::HunterTargetInfo>, String> {
+    let cached_apps = get_or_discover_cached_apps(&state);
+    let target = crate::hunter::resolve_cursor_target(&cached_apps)?;
+
+    if let Some(ref t) = target {
+        if let (Ok(mut proc_snaps), Ok(mut app_snaps)) =
+            (state.process_snapshots.lock(), state.app_snapshots.lock())
+        {
+            crate::hunter::register_target_in_state(t, &mut proc_snaps, &mut app_snaps);
+        }
+    }
+
+    Ok(target)
 }
 
 #[tauri::command]
@@ -1445,6 +1510,14 @@ pub fn get_system_specs() -> crate::system::SystemSpecs {
 #[tauri::command]
 pub fn list_startup_items() -> Vec<crate::system::StartupItem> {
     crate::system::list_startup_items()
+}
+
+#[tauri::command]
+pub fn set_startup_item_enabled(
+    id: String,
+    enabled: bool,
+) -> Result<crate::system::StartupItem, String> {
+    crate::system::set_startup_item_enabled(id.trim(), enabled)
 }
 
 #[cfg(test)]

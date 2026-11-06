@@ -71,6 +71,17 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | SignPath Foundation Integration | Prepared | Prepared `.github/workflows/signpath-release.yml` and `docs/CODE_SIGNING_POLICY.md` pending open-source onboarding. |
 | Installer Bundling | Done | NSIS setup (`.exe`) and WiX MSI (`.msi`) generated and verified (`RELEASE_BUNDLES_OK`). |
 
+### 5. Hunter Mode, Startup Manager & Security Repair (Milestone 7.1)
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Broken Inventory Entry Cleanup | Done | `leftovers.rs`: resolves actual subkey name from discovered application metadata (`registry_key_name`); requires 2-step single-use 5-minute plan (`BrokenEntryPlan`); validates broken status at prep and execution time; creates verified multi-type `.reg` backup in quarantine with durable recovery journal; rejects protected, working, altered, replayed, or expired plans. Tested in `rc1_e2e_fixture.rs` [E2E 5/8] and unit tests. |
+| Hunter Mode Process Termination | Done | `hunter.rs` & `process.rs`: registers verified process snapshot (`StoredProcessSnapshot`) upon target acquisition; termination revalidates PID, path, and creation time immediately before kill; requires explicit operator confirmation; preserves critical system process protection. Tested in `rc1_e2e_fixture.rs` [E2E 3/8]. |
+| Hunter Mode High-Performance Targeting | Done | Separates cursor targeting from application discovery; queries cached in-memory apps (`state.cached_apps`) in <1 µs per call (eliminating 200 ms repeated scan overhead); non-overlapping polling with sequence counter. Tested in `rc1_e2e_fixture.rs` [E2E 7/8] (50 calls in 44.7 µs). |
+| External Window Drag & Lock Targeting | Done | `HunterMode.tsx`: pointer capture drag-and-drop targeting (`setPointerCapture`) across external windows; keyboard locking (Space/Enter to lock, Esc to cancel); strict directory boundary matching (`is_path_in_directory`) preventing prefix collisions. Tested in `rc1_e2e_fixture.rs` [E2E 1/8, 2/8]. |
+| Unregistered Application Forced Removal | Done | `hunter.rs`: registers backend-verified `InstalledApp` snapshot for unregistered executables; protects system and user roots; reviews files and leftovers before removal. Tested in `rc1_e2e_fixture.rs` [E2E 4/8, 8/8]. |
+| Startup Manager Toggling & Safety | Done | `system.rs`: enumerates HKCU/HKLM Run/RunOnce, WOW6432Node, and Startup folders; reads and writes Windows standard `StartupApproved` binary values (`0x02` enabled, `0x03` disabled); reversible per-user toggling; protects Windows Defender, SecurityHealthSystray, and SmartScreen. Tested in `rc1_e2e_fixture.rs` [E2E 6/8] and unit tests. |
+| Hardware Diagnostics Improvements | Done | `system.rs`: native Windows architecture detection via `GetNativeSystemInfo`; discrete GPU preference and virtual adapter filtering; 5-second TTL specs cache. |
+
 ---
 
 ## Known Limitations & Design Boundaries

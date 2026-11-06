@@ -107,7 +107,8 @@ describe("Tauri IPC contract", () => {
       { run: () => api.scanAppLeftovers("app-1"), command: "scan_app_leftovers", args: { appId: "app-1" } },
       { run: () => api.cleanAppLeftovers("app-1", "plan-1", ["c1"]), command: "clean_app_leftovers", args: { appId: "app-1", planId: "plan-1", candidateIds: ["c1"] } },
       { run: () => api.snapshotAppIdentity("app-1"), command: "snapshot_app_identity", args: { appId: "app-1" } },
-      { run: () => api.cleanBrokenInventoryEntry("app-1"), command: "clean_broken_inventory_entry", args: { appId: "app-1" } },
+      { run: () => api.prepareBrokenInventoryCleanup("app-1"), command: "prepare_broken_inventory_cleanup", args: { appId: "app-1" } },
+      { run: () => api.executeBrokenInventoryCleanup("plan-1", "HKCU\\test"), command: "execute_broken_inventory_cleanup", args: { planId: "plan-1", confirmedKeyPath: "HKCU\\test" } },
       { run: () => api.prepareBatchUninstall(["app-1", "app-2"], false), command: "prepare_batch_uninstall", args: { appIds: ["app-1", "app-2"], quiet: false } },
       { run: () => api.executeBatchUninstall("batch-plan-1"), command: "execute_batch_uninstall", args: { planId: "batch-plan-1" } },
       { run: () => api.getStartupRoute(), command: "get_startup_route", args: undefined },
@@ -134,6 +135,7 @@ describe("Tauri IPC contract", () => {
       { run: () => api.resolveCursorTarget(), command: "resolve_cursor_target", args: undefined },
       { run: () => api.getSystemSpecs(), command: "get_system_specs", args: undefined },
       { run: () => api.listStartupItems(), command: "list_startup_items", args: undefined },
+      { run: () => api.setStartupItemEnabled("startup-1", false), command: "set_startup_item_enabled", args: { id: "startup-1", enabled: false } },
     ];
 
     for (const { run, command, args } of calls) {

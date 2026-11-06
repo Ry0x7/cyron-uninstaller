@@ -34,7 +34,14 @@
 .hunter-trigger-btn--active {
   background: var(--accent, #6366f1);
   color: #fff;
+  cursor: crosshair;
   animation: hunter-pulse 2s infinite ease-in-out;
+}
+
+.hunter-trigger-btn--dragging {
+  cursor: crosshair;
+  background: var(--accent, #6366f1);
+  color: #fff;
 }
 
 @keyframes hunter-pulse {

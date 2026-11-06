@@ -205,15 +205,43 @@ export function Settings() {
 
   const [startupItems, setStartupItems] = useState<StartupItem[]>([]);
   const [startupLoading, setStartupLoading] = useState(false);
+  const [startupError, setStartupError] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const loadStartup = () => {
     setStartupLoading(true);
+    setStartupError(null);
     api.listStartupItems()
       .then((items) => {
         setStartupItems(items);
         setStartupLoading(false);
       })
-      .catch(() => setStartupLoading(false));
+      .catch((err) => {
+        setStartupError(errorMessage(err));
+        setStartupLoading(false);
+      });
+  };
+
+  const handleToggleStartup = async (item: StartupItem) => {
+    if (item.isProtected || !item.canToggle) return;
+    const targetState = !item.enabled;
+    const actionLabel = targetState ? "enable" : "disable";
+    if (!window.confirm(`Are you sure you want to ${actionLabel} "${item.name}" from starting automatically?`)) {
+      return;
+    }
+
+    setTogglingId(item.id);
+    setStartupError(null);
+    try {
+      const updated = await api.setStartupItemEnabled(item.id, targetState);
+      setStartupItems((prev) =>
+        prev.map((i) => (i.id === updated.id ? updated : i)),
+      );
+    } catch (err) {
+      setStartupError(errorMessage(err));
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   useEffect(() => {
@@ -482,6 +510,11 @@ export function Settings() {
                 </Button>
               }
             >
+              {startupError && (
+                <Banner tone="caution">
+                  {startupError}
+                </Banner>
+              )}
               {startupItems.length === 0 ? (
                 <p className="set-note">
                   {startupLoading ? "Reading startup entries…" : "No startup applications detected."}
@@ -494,20 +527,36 @@ export function Settings() {
                         <span className="set-startup-name">
                           {item.name}
                           <Badge tone="neutral">{item.location}</Badge>
+                          <Badge tone={item.enabled ? "safe" : "neutral"}>
+                            {item.enabled ? "Enabled" : "Disabled"}
+                          </Badge>
+                          {item.isProtected && <Badge tone="caution">System Protected</Badge>}
                         </span>
                         <span className="set-startup-cmd" title={item.command}>
                           {item.command}
                         </span>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<IconCopy size={12} />}
-                        title="Copy command line"
-                        onClick={() => navigator.clipboard.writeText(item.command)}
-                      >
-                        Copy
-                      </Button>
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        {item.canToggle && (
+                          <Button
+                            size="sm"
+                            variant={item.enabled ? "secondary" : "primary"}
+                            loading={togglingId === item.id}
+                            onClick={() => handleToggleStartup(item)}
+                          >
+                            {item.enabled ? "Disable" : "Enable"}
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<IconCopy size={12} />}
+                          title="Copy command line"
+                          onClick={() => navigator.clipboard.writeText(item.command)}
+                        >
+                          Copy
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
