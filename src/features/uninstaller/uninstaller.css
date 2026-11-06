@@ -42,6 +42,35 @@
   min-width: 820px;
 }
 
+.un-th--sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+
+.un-th--sortable:hover {
+  color: var(--text-strong);
+  background: var(--surface-hover);
+}
+
+.un-th__content {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.un-th__content--numeric {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.un-sort-icon {
+  display: inline-flex;
+  font-size: 9px;
+  color: var(--accent);
+  line-height: 1;
+}
+
 .un-row:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -2px;

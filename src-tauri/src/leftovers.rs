@@ -684,11 +684,16 @@ fn check_uninstall_key_candidate(
     if app_id.is_empty() {
         return;
     }
+    let key_name = if let Some((_, kn)) = app_id.split_once('|') {
+        kn
+    } else {
+        app_id
+    };
     let subkey_path = match hive {
-        "machine-64" => format!("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
-        "machine-32" => format!("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
-        "user-64" => format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
-        "user-32" => format!("HKCU\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
+        "machine-64" => format!("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{key_name}"),
+        "machine-32" => format!("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{key_name}"),
+        "user-64" => format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{key_name}"),
+        "user-32" => format!("HKCU\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{key_name}"),
         _ => return,
     };
 

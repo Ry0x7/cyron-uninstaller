@@ -258,25 +258,20 @@ fn determine_win32_uninstall_support(
         return "missing".to_string();
     }
 
-    // If it's an MSI installer GUID call, it's supported by Windows Installer
-    let lower = trimmed.to_lowercase();
-    if lower.contains("msiexec") || lower.contains("/x{") || lower.contains("/i{") {
+    let parsed = crate::uninstall::parse_uninstall_command(trimmed);
+    if parsed.is_msi {
         if quiet_uninstall_string.is_some() && uninstall_string.is_none() {
             return "silent_only".to_string();
         }
         return "standard".to_string();
     }
 
-    // Extract executable target from command line
-    let exe_candidate = if let Some(stripped) = trimmed.strip_prefix('"') {
-        stripped.split('"').next().unwrap_or(trimmed)
+    if !parsed.executable.is_empty() {
+        let path = Path::new(&parsed.executable);
+        if path.is_absolute() && !path.exists() {
+            return "missing".to_string();
+        }
     } else {
-        trimmed.split_whitespace().next().unwrap_or(trimmed)
-    };
-
-    let path = Path::new(exe_candidate);
-    // If the path is absolute and clearly does not exist on disk, mark as missing
-    if path.is_absolute() && !path.exists() {
         return "missing".to_string();
     }
 

@@ -229,14 +229,12 @@ fn extract_parent_from_command(cmd: &str) -> Option<PathBuf> {
         return None;
     }
 
-    let exe_str = if trimmed.starts_with('"') {
-        let end_idx = trimmed[1..].find('"')?;
-        &trimmed[1..=end_idx]
-    } else {
-        trimmed.split_whitespace().next()?
-    };
+    let parsed = crate::uninstall::parse_uninstall_command(trimmed);
+    if parsed.executable.is_empty() {
+        return None;
+    }
 
-    let p = Path::new(exe_str);
+    let p = Path::new(&parsed.executable);
     let file_name = p.file_name()?.to_string_lossy().to_ascii_lowercase();
     let ps_name = concat!("power", "shell.exe");
     let cmd_name = concat!("cm", "d.exe");

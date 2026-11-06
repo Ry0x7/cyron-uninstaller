@@ -33,13 +33,16 @@ import "./uninstaller.css";
 
 type ScopeFilter = "all" | "machine" | "user";
 type SourceFilter = "all" | "win32" | "store" | "steam" | "portable" | "broken";
-type SortKey = "name" | "publisher" | "installed" | "size";
+type SortKey = "name" | "publisher" | "version" | "installed" | "size" | "scope";
+type SortDirection = "asc" | "desc";
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "name", label: "Name (A–Z)" },
   { value: "publisher", label: "Publisher (A–Z)" },
-  { value: "installed", label: "Newest install" },
   { value: "size", label: "Largest estimate" },
+  { value: "installed", label: "Newest install" },
+  { value: "version", label: "Version" },
+  { value: "scope", label: "Scope" },
 ];
 
 function compareNullableText(a: string | null, b: string | null): number {
@@ -49,11 +52,11 @@ function compareNullableText(a: string | null, b: string | null): number {
   return a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
 }
 
-function compareNullableNumber(a: number | null, b: number | null): number {
+function compareNullableNumber(a: number | null, b: number | null, dir: SortDirection): number {
   if (a === null && b === null) return 0;
   if (a === null) return 1;
   if (b === null) return -1;
-  return b - a;
+  return dir === "asc" ? a - b : b - a;
 }
 
 function installDateSortValue(value: string | null): number | null {
@@ -63,6 +66,15 @@ function installDateSortValue(value: string | null): number | null {
     : value;
   const timestamp = Date.parse(normalized);
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function compareNullableDate(a: string | null, b: string | null, dir: SortDirection): number {
+  const aDate = installDateSortValue(a);
+  const bDate = installDateSortValue(b);
+  if (aDate === null && bDate === null) return 0;
+  if (aDate === null) return 1;
+  if (bDate === null) return -1;
+  return dir === "asc" ? aDate - bDate : bDate - aDate;
 }
 
 function normalizeSearch(value: string): string {
@@ -82,6 +94,7 @@ export function Uninstaller({
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sort, setSort] = useState<SortKey>("name");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [selected, setSelected] = useState<InstalledApp | null>(null);
   const [wizardApp, setWizardApp] = useState<InstalledApp | null>(null);
 
@@ -139,7 +152,16 @@ export function Uninstaller({
       else win32 += 1;
     }
     return { all: matching.length, machine, user, win32, store, steam, portable, broken };
-  }, [apps, query]);
+  }, [apps, debouncedQuery]);
+
+  const handleSortHeader = (key: SortKey) => {
+    if (sort === key) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSort(key);
+      setSortDirection(key === "size" || key === "installed" ? "desc" : "asc");
+    }
+  };
 
   const visible = useMemo(() => {
     const needle = normalizeSearch(debouncedQuery);
@@ -155,24 +177,25 @@ export function Uninstaller({
         .some((value) => value !== null && normalizeSearch(value).includes(needle));
     });
 
+    const dir = sortDirection === "asc" ? 1 : -1;
     return filtered.sort((a, b) => {
       switch (sort) {
         case "publisher":
-          return compareNullableText(a.publisher, b.publisher) || compareNullableText(a.name, b.name);
-        case "installed": {
-          const aDate = installDateSortValue(a.installDate);
-          const bDate = installDateSortValue(b.installDate);
-          if (aDate === null && bDate !== null) return 1;
-          if (bDate === null && aDate !== null) return -1;
-          return (aDate === null || bDate === null ? 0 : bDate - aDate) || compareNullableText(a.name, b.name);
-        }
+          return (compareNullableText(a.publisher, b.publisher) || compareNullableText(a.name, b.name)) * dir;
+        case "version":
+          return (compareNullableText(a.version, b.version) || compareNullableText(a.name, b.name)) * dir;
+        case "scope":
+          return (compareNullableText(a.scope, b.scope) || compareNullableText(a.name, b.name)) * dir;
+        case "installed":
+          return compareNullableDate(a.installDate, b.installDate, sortDirection) || (compareNullableText(a.name, b.name) * dir);
         case "size":
-          return compareNullableNumber(a.estimatedSize, b.estimatedSize) || compareNullableText(a.name, b.name);
+          return compareNullableNumber(a.estimatedSize, b.estimatedSize, sortDirection) || (compareNullableText(a.name, b.name) * dir);
+        case "name":
         default:
-          return compareNullableText(a.name, b.name);
+          return compareNullableText(a.name, b.name) * dir;
       }
     });
-  }, [apps, debouncedQuery, scope, sort]);
+  }, [apps, debouncedQuery, scope, sourceFilter, sort, sortDirection]);
 
   const loading = inventory.status === "loading" && apps.length === 0;
 
@@ -343,7 +366,11 @@ export function Uninstaller({
               <Select
                 ariaLabel="Sort applications"
                 value={sort}
-                onChange={(value) => setSort(value as SortKey)}
+                onChange={(value) => {
+                  const k = value as SortKey;
+                  setSort(k);
+                  setSortDirection(k === "size" || k === "installed" ? "desc" : "asc");
+                }}
                 options={SORT_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
               />
             </div>
@@ -419,14 +446,90 @@ export function Uninstaller({
                         onChange={toggleSelectAll}
                       />
                     </th>
-                    <th scope="col">Application</th>
-                    <th scope="col">Publisher</th>
-                    <th scope="col">Version</th>
-                    <th scope="col">Installed</th>
-                    <th scope="col" className="numeric">
-                      Size
+                    <th
+                      scope="col"
+                      className="un-th--sortable"
+                      onClick={() => handleSortHeader("name")}
+                      aria-sort={sort === "name" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                      title="Sort by application name"
+                    >
+                      <span className="un-th__content">
+                        Application
+                        {sort === "name" && (
+                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                        )}
+                      </span>
                     </th>
-                    <th scope="col">Scope</th>
+                    <th
+                      scope="col"
+                      className="un-th--sortable"
+                      onClick={() => handleSortHeader("publisher")}
+                      aria-sort={sort === "publisher" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                      title="Sort by publisher"
+                    >
+                      <span className="un-th__content">
+                        Publisher
+                        {sort === "publisher" && (
+                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                        )}
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      className="un-th--sortable"
+                      onClick={() => handleSortHeader("version")}
+                      aria-sort={sort === "version" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                      title="Sort by version"
+                    >
+                      <span className="un-th__content">
+                        Version
+                        {sort === "version" && (
+                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                        )}
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      className="un-th--sortable"
+                      onClick={() => handleSortHeader("installed")}
+                      aria-sort={sort === "installed" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                      title="Sort by installation date"
+                    >
+                      <span className="un-th__content">
+                        Installed
+                        {sort === "installed" && (
+                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                        )}
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      className="numeric un-th--sortable"
+                      onClick={() => handleSortHeader("size")}
+                      aria-sort={sort === "size" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                      title="Sort by estimated size"
+                    >
+                      <span className="un-th__content un-th__content--numeric">
+                        Size
+                        {sort === "size" && (
+                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                        )}
+                      </span>
+                    </th>
+                    <th
+                      scope="col"
+                      className="un-th--sortable"
+                      onClick={() => handleSortHeader("scope")}
+                      aria-sort={sort === "scope" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+                      title="Sort by scope"
+                    >
+                      <span className="un-th__content">
+                        Scope
+                        {sort === "scope" && (
+                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                        )}
+                      </span>
+                    </th>
                     <th scope="col" style={{ textAlign: "right", paddingRight: 12 }}>
                       Actions
                     </th>

@@ -524,19 +524,21 @@ export function Settings() {
                   {startupItems.map((item) => (
                     <div className="set-startup-item" key={item.id}>
                       <div className="set-startup-info">
-                        <span className="set-startup-name">
-                          {item.name}
-                          <Badge tone="neutral">{item.location}</Badge>
-                          <Badge tone={item.enabled ? "safe" : "neutral"}>
-                            {item.enabled ? "Enabled" : "Disabled"}
-                          </Badge>
-                          {item.isProtected && <Badge tone="caution">System Protected</Badge>}
-                        </span>
+                        <div className="set-startup-name">
+                          <span className="set-startup-title">{item.name}</span>
+                          <span className="set-startup-badges">
+                            <Badge tone="neutral">{item.location}</Badge>
+                            <Badge tone={item.enabled ? "safe" : "neutral"}>
+                              {item.enabled ? "Enabled" : "Disabled"}
+                            </Badge>
+                            {item.isProtected && <Badge tone="caution">System Protected</Badge>}
+                          </span>
+                        </div>
                         <span className="set-startup-cmd" title={item.command}>
                           {item.command}
                         </span>
                       </div>
-                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <div className="set-startup-actions">
                         {item.canToggle && (
                           <Button
                             size="sm"
