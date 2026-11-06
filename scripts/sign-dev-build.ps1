@@ -109,9 +109,9 @@ $signed = @()
 
 foreach ($target in $targets) {
     Write-Host "`nSigning: $target..." -ForegroundColor Cyan
-    $proc = Start-Process -FilePath $signtool -ArgumentList "sign", "/fd", "SHA256", "/sha1", $thumbprint, "/d", "Cyron Uninstaller [DEV-TEST-SIGNED]", "`"$target`"" -NoNewWindow -PassThru -Wait
-    if ($proc.ExitCode -ne 0) {
-        $failed += "$target (signtool exit code $($proc.ExitCode))"
+    & $signtool sign /fd SHA256 /sha1 $thumbprint /d "Cyron Uninstaller [DEV-TEST-SIGNED]" $target
+    if ($LASTEXITCODE -ne 0) {
+        $failed += "$target (signtool exit code $LASTEXITCODE)"
     } else {
         $signed += $target
         Write-Host "Signed successfully." -ForegroundColor Green
