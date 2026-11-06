@@ -67,6 +67,40 @@ describe("Tauri IPC contract", () => {
     expect(SCAN_EVENT).toBe("cyron-scan-progress");
   });
 
+  it("uses the cleanup command names and payloads", async () => {
+    const calls = [
+      { run: () => api.previewCleanup(["user-temp", "npm-cache"]), command: "preview_cleanup", args: { targetIds: ["user-temp", "npm-cache"], exclusions: [] } },
+      { run: () => api.startCleanup("plan-1", ["user-temp"]), command: "start_cleanup", args: { planId: "plan-1", targetIds: ["user-temp"] } },
+      { run: () => api.getCleanupMode(), command: "get_cleanup_mode", args: undefined },
+      { run: () => api.setCleanupMode(true), command: "set_cleanup_mode", args: { readOnly: true } },
+      { run: () => api.listQuarantine(), command: "list_quarantine", args: undefined },
+      { run: () => api.restoreQuarantine("run-1"), command: "restore_quarantine", args: { runId: "run-1" } },
+      { run: () => api.purgeQuarantine("run-1"), command: "purge_quarantine", args: { runId: "run-1" } },
+      { run: () => api.getCleanupLog(), command: "get_cleanup_log", args: undefined },
+    ];
+
+    for (const { run, command, args } of calls) {
+      invoke.mockClear();
+      invoke.mockResolvedValue(undefined);
+      await run();
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(command, args);
+    }
+  });
+
+  it("sends Settings exclusions with a preview so the backend can enforce them", async () => {
+    invoke.mockResolvedValue(undefined);
+    await api.previewCleanup(["user-temp"], ["C:\\keep"]);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("preview_cleanup", {
+      targetIds: ["user-temp"],
+      exclusions: ["C:\\keep"],
+    });
+  });
+
+  it("surfaces the backend refusal message for a cleanup execution", async () => {
+    invoke.mockRejectedValue("Read-only mode is on. Enable cleaning in Settings first.");
+    await expect(api.startCleanup("plan-1", ["user-temp"])).rejects.toMatch(/read-only/i);
+  });
+
   it("rejects calls outside Tauri with the actionable offline message", async () => {
     setDesktop(false);
     expect(isDesktop()).toBe(false);

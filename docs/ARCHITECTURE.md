@@ -2,14 +2,16 @@
 
 ## Purpose and boundary
 
-Cyron is a Tauri v2 desktop application for Windows. It is read-only with respect to scanned/user
-data: the backend enumerates applications, measures folders, scans a disk tree, verifies duplicate
-files and reports storage categories and volumes. It does not clean scanned files, uninstall
-software, terminate processes or write registry values. `clear_history` removes only Cyron's own
-`history.json`, and history replacement can remove only a Cyron-created temporary file.
+Cyron is a Tauri v2 desktop application for Windows. Scanning is read-only: the backend enumerates
+applications, measures folders, scans a disk tree, verifies duplicate files and reports storage
+categories and volumes. Cleaning is a separate, deliberately narrow path: the backend can move
+**catalog cache files only** into a recoverable quarantine after a preview and an explicit plan
+confirmation. It does not uninstall software, terminate processes or write registry values.
+`clear_history` removes only Cyron's own `history.json`, and history replacement can remove only a
+Cyron-created temporary file.
 
 The product target is a Revo Uninstaller + BleachBit + WinDirStat replacement with better risk
-communication for non-technical users. Phase 3 adds cleaning, Phase 4 the uninstall engine.
+communication for non-technical users. Phase 4 adds the uninstall engine.
 
 ## Runtime stack
 
@@ -18,8 +20,8 @@ communication for non-technical users. Phase 3 adds cleaning, Phase 4 the uninst
 | Window/shell | Tauri v2, one native window (`main`), 1320×860, minimum 1000×680 |
 | Frontend | React 19 + TypeScript, Vite 7, no router |
 | Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
-| Storage | localStorage (preferences, tree width), `history.json` in the Tauri app-data dir |
-| Frontend tests | Vitest, 51 tests in 6 files |
+| Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json` and `quarantine/` in the Tauri app-data dir |
+| Frontend tests | Vitest, 70 tests in 7 files |
 | Backend tests | `cargo test`: 84 passed (73 unit, 5 read-only, 1 real-system, 5 stress), 3 ignored |
 
 Native APIs used by the backend:
@@ -63,14 +65,17 @@ src-tauri/
   src/duplicates.rs           size buckets, partial + full hashing
   src/storage.rs              categories, age buckets, insights
   src/caches.rs               cache catalog, env expansion, measurement
+  src/cleanup.rs              cleanup guard, preview, quarantine, restore, purge, log
   src/volumes.rs              local volume capacity
   src/history.rs              app-data history persistence
-  src/commands.rs             validated Tauri command layer and scan registry
+  src/commands.rs             validated Tauri command layer, scan and plan registries
   src/lib.rs                  state, dialog plugin, command registration
   tests/real_system.rs        live registry/cache/scan integration test
-  tests/read_only.rs          destructive-API audit and safety tests
+  tests/security.rs           permission boundaries, protected paths, links, fixtures
+  tests/cleanup_stress.rs     locked files, cancellation, wide cleanup fixtures
   tests/stress_scan.rs        wide/deep/denied/cancellation stress tests
   examples/scan_bench.rs      benchmark binary used by scripts/bench-scan.mjs
+  examples/cleanup_fixture.rs isolated end-to-end cleanup verification
 scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark checks
 ```
 
@@ -84,11 +89,12 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `scan.rs` | Chooses the scan method, then runs the streaming directory walk: depth/error/stat-output/tree caps, exclusions, hidden/system filtering, reparse skipping, totals, extension stats, largest files, hard-link tracking, throttled progress and cancellation. Builds `StorageReport` alongside the tree. `measure_path` reuses the walker without a tree or cancellation. |
 | `duplicates.rs` | Walks a root for files at or above `minSize`, groups by size, confirms groups with 4 KiB head/tail SHA-256, then full streaming SHA-256. Tracks hard links by file id, polls cancellation, emits `cyron-duplicate-progress`, caps candidates/groups/files and reports truncation. |
 | `storage.rs` | Classifies bytes into ten categories by known root and extension, marks known vs inferred confidence, buckets files by age, and derives up to six explained insights (large, old, developer-heavy). |
-| `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. |
+| `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. Also carries the per-entry impact text the Cleaner shows. |
+| `cleanup.rs` | The only destructive module. Resolves catalog ids to specs, enforces `guard_path`, plans and measures a preview, executes a server-held plan by moving files into a quarantine batch, and implements list/restore/purge plus the capped cleanup log. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `commands.rs` | Path/job validation, background execution, the scan and duplicate-scan cancel registries, event emission, history recording, Explorer reveal and measurement commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState { scans, duplicate_scans }` and the eleven commands. |
+| `commands.rs` | Path/job/plan validation, background execution, the scan, duplicate-scan and cleanup-cancel registries, the single-use plan registry, event emission, history and log recording, Explorer reveal and measurement commands. |
+| `lib.rs` | Registers the dialog plugin, `AppState { scans, duplicate_scans, plans, cleanup_jobs, read_only }` and the nineteen commands. `read_only` starts `true`. |
 
 ## IPC surface
 
@@ -107,10 +113,19 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `measure_path` | `path` | `Measured` | Directory only; no tree and no progress events. |
 | `reveal_path` | `path` | — | Requires an existing path; opens `explorer.exe` with `/select,` for files. |
 | `get_history` | — | `HistoryEntry[]` | Newest first. |
-| `clear_history` | — | — | Removes `history.json`; a missing file is not an error. The only user-visible deletion in the current command surface, limited to Cyron's own history file. |
+| `clear_history` | — | — | Removes `history.json`; a missing file is not an error. Limited to Cyron's own history file. |
+| `get_cleanup_mode` | — | `bool` | `true` means read-only. |
+| `set_cleanup_mode` | `readOnly` | `bool` | Flips the backend switch; the UI persists the same value in settings. |
+| `preview_cleanup` | `targetIds[]`, `exclusions[]?` | `CleanupPreview` | Blocking thread. Ids only; protected/unknown ids are refused; exclusions are validated as absolute non-root paths and stored in the plan. |
+| `start_cleanup` | `planId`, `targetIds[]` | `CleanupReport` | Consumes the plan once, re-checks the selection, the 10-minute TTL and read-only mode; emits `cyron-cleanup-progress`; logs the run and appends an Activity entry. |
+| `list_quarantine` | — | `QuarantineBatch[]` | Batches that still hold restorable files, newest first. |
+| `restore_quarantine` | `runId` | `RestoreReport` | Byte-exact restore, never overwrites; retires the batch when everything is back; logged. |
+| `purge_quarantine` | `runId` | `PurgeReport` | Permanently deletes only the files in that batch manifest that are still inside the batch folder; logged. |
+| `get_cleanup_log` | — | `CleanupLogEntry[]` | Newest first, max 100. |
 
-Both scan registries reject a job id that is already running instead of replacing its cancellation
-flag, so a cancel call cannot target a flag that no longer controls the running task.
+All three registries reject a job id that is already running instead of replacing its cancellation
+flag, so a cancel call cannot target a flag that no longer controls the running task. Cleanup plan
+ids are opaque, single-use and swept when expired.
 
 Progress event payloads:
 
@@ -155,6 +170,24 @@ CacheInventory     targets[], totalSize, totalSafe, totalCaution, totalProtected
 
 HistoryEntry       id, kind, title, detail, at, bytes, items,
                    status(completed|cancelled|failed)
+
+CleanupSpec        id, tool, label, risk, category, note, impact, path      (backend only)
+CleanupPlan        planId, specs[], expiresAt, readOnly, exclusions[], expectedFiles,
+                   expectedBytes                                          (backend only)
+CleanupPreview     planId, generatedAt, expiresAt, targets[], files[], skipped[],
+                   fileCount, bytes, totalFiles, readOnly, hiddenCount, warnings[],
+                   truncated
+CleanupTarget      id, tool, label, path, note, impact, risk, category, exists,
+                   size, fileCount, dirCount, includable
+CleanupReport      runId, planId, bytes, files, dirsRemoved, quarantined, skipped,
+                   failed, items[], errors[], elapsedMs, cancelled, quarantineDir,
+                   purgeAt
+CleanupProgress    runId, files, totalFiles, bytes, currentPath
+QuarantineBatch    runId, createdAt, expiresAt, bytes, fileCount, dir, targetIds[]
+RestoreReport      runId, restored, skipped, failed, errors[]
+PurgeReport        runId, removedFiles, freedBytes
+CleanupLogEntry    id, at, title, targets[], bytes, files, quarantined, skipped,
+                   failed, status(completed|cancelled|failed), detail
 ```
 
 `size` is logical file length. `allocated` is the allocation from the native directory record or
@@ -246,7 +279,64 @@ construction, progress or cancellation and backs *Measure folder* plus every cac
 6. Caps: 200 groups and 50 files per group in the report, with `truncated: true`. Cancellation
    returns what was proven so far and `cancelled: true`.
 
-The feature is read-only; there is no delete, move or quarantine command.
+The duplicate report is read-only; duplicate management is deferred to a later phase.
+
+## Cleanup engine
+
+The Cleaner is the only feature that modifies user files, and it is deliberately narrow.
+
+### Eligibility
+
+1. `preview_cleanup` accepts catalog **ids**. `catalog_specs` looks each one up in
+   `caches::CATALOG`, de-duplicates, refuses unknown ids, refuses `protected` ids and resolves the
+   templated path. Frontend-provided paths are never accepted.
+2. `plan_specs_with_exclusions` refuses an empty selection, runs `guard_path` on every spec, and
+   validates the caller's exclusions (absolute, non-root, at most 128, de-duplicated).
+3. `guard_path` refuses a relative path, anything with fewer than three path components (drive roots
+   and top-level folders), any of the environment roots themselves (`USERPROFILE`, `LOCALAPPDATA`,
+   `APPDATA`, `WINDIR`, `SystemDrive`, `ProgramFiles`, `ProgramFiles(x86)`) and any path that
+   **contains** a protected catalog location. It is a floor, not the whole model: the real allow
+   list is the catalog itself, and the guard runs again for each target at execution time.
+
+### Preview
+
+`walk_target(path, 100_000, remaining, None, exclusions)` measures the location with the same
+streaming walker the analyzer uses, so preview totals and the measured inventory agree. It returns
+exact file counts and bytes, up to 400 listed paths, up to 100 skip reasons (link, junction, excluded
+in Settings, unreadable metadata), bounded errors, and a warning when statistics are partial. The
+preview is stored alongside a `CleanupPlan` in `AppState::plans` under an opaque id and expires after
+600 s.
+
+### Execution
+
+1. `start_cleanup` validates the plan id, pops the plan exactly once (expired plans are swept),
+   re-checks that the selection is a subset of the plan, and re-checks read-only mode.
+2. For each spec: re-run `guard_path`, walk the location again, and create the batch folder only if
+   there is something to move.
+3. For each file: `symlink_metadata` (must be a regular file, no reparse attribute), canonicalize the
+   parent and require it to be inside the target root, then `fs::rename` into
+   `<quarantine>\<run-id>\<index>-<name>`. Rename means a file on another volume or held without
+   delete sharing fails instead of being copied and truncated.
+4. The manifest is appended per move and flushed every 256 items, so an interrupted run is still
+   restorable. Progress is emitted at most every 120 ms and once at the end.
+5. Empty directories are removed one at a time with `remove_dir` (never recursive), deepest first.
+6. Cancellation is polled per target and per file; the report says `cancelled: true` and accounts
+   only for what actually moved.
+
+### Quarantine
+
+A batch is `<app_data_dir>\quarantine\<run-id>\` with `manifest.json` (run id, timestamps, target
+ids, items with original path, stored path and size). `restore_batch` moves each item back, refuses
+to overwrite an existing file, recreates missing parents, keeps failed items in the manifest and
+deletes the batch when everything is restored. `purge_batch` deletes only manifest items whose
+canonical path is still inside the batch, then removes the manifest and the (now empty) folder. The
+7-day `expiresAt` is informational: nothing expires automatically.
+
+### Log
+
+`cleanup-log.json` keeps the newest 100 run/restore/purge entries (id, time, title, target ids,
+bytes, files, counts, status, one-line detail). Each cleanup run also appends an Activity history
+entry. File contents and paths of individual files are not logged.
 
 ## Storage intelligence
 
@@ -308,12 +398,13 @@ offers a system/light/dark theme switch.
 
 `SettingsProvider` reads `cyron.settings.v1`, writes changes back to localStorage, resolves
 `system` through `prefers-color-scheme`, and sets `data-theme` on `<html>`. Settings are:
-`theme`, `includeHidden`, `exclusions[]`. They are consumed by the analyzer when it builds
-`ScanOptions` and by the Settings page.
+`theme`, `includeHidden`, `exclusions[]`, `readOnly`. Exclusions feed both `ScanOptions` and the
+cleanup preview; `readOnly` is pushed to the backend with `set_cleanup_mode` so the UI and the
+backend switch always agree (the backend also defaults to read-only on its own).
 
 `lib/api.ts` is the single IPC boundary. It rejects with a clear message when the app runs outside
 Tauri, normalizes errors, and memoizes `list_caches` so Overview and Cleaner share one measurement
-pass; `invalidateCaches()` forces the next request to run again.
+pass; `invalidateCaches()` forces the next request to run again after a cleanup changes files.
 
 ### Views
 
@@ -339,8 +430,12 @@ pass; `invalidateCaches()` forces the next request to run again.
   report cannot be shown as the new folder's result.
 - **Storage panel** presents categories, confidence, age buckets and insights, and states that
   observations are not removal guidance.
-- **Cleaner** groups existing cache targets by category, filters by risk/search, expands rows for
-  the full path and consequence note, and separates protected data. There is no removal control.
+- **Cleaner** groups cache targets into Windows / Applications / Developer tools / AI tools,
+  filters by risk, category and search, expands rows for path, impact and dates, and separates
+  protected data into a read-only section. Selecting targets opens a preview drawer that lists the
+  planned files (capped at 400 with an explicit note), skipped items, warnings and the quarantine
+  promise; a confirmation checkbox enables the run. Progress comes from `cyron-cleanup-progress`,
+  results are per item, and the Quarantine and History tabs drive restore, purge and the run log.
 - **Activity** lists persisted disk scans, with a two-step clear confirmation that Escape cancels.
 - **Settings** validates exclusions (drive-letter or UNC paths, no wildcards), debounces saving by
   450 ms, and resets to defaults.
@@ -356,15 +451,20 @@ colors and labels live in `lib/categories.ts`.
 | Sidebar collapsed | `localStorage["cyron.sidebar.collapsed"]` | Same |
 | Tree column width | `localStorage["cyron.analyzer.treeWidth"]` | Same |
 | Scan history | `<app_data_dir>/history.json` | Until cleared from Activity or the profile is removed |
+| Quarantine batches | `<app_data_dir>/quarantine/<run-id>/` | Until restored and retired or purged by the user |
+| Cleanup log | `<app_data_dir>/cleanup-log.json` | Newest 100 entries |
 | Scan and duplicate results | Rust memory / React state | Session only |
+| Pending cleanup plans | Rust memory (`AppState::plans`) | 10 minutes or until executed |
 
-Only disk scans write history. Cache discovery and duplicate runs are measurements and are not
-logged.
+Disk scans, cleanup runs, restores and purges write history; cache discovery and duplicate runs are
+measurements and are not logged.
 
 ## Security and safety constraints
 
-- No command deletes scanned/cache/user files, uninstalls applications, terminates processes or
-  writes registry values. `clear_history` deletes only Cyron's own history log.
+- Only `cleanup.rs` may modify user files, and only through the catalog/plan/quarantine flow. No
+  command accepts a path to delete, and there is no recursive delete. No command uninstalls
+  applications, terminates processes or writes registry values. `clear_history` deletes only
+  Cyron's own history log; still the only file removal outside quarantine.
 - Command inputs are validated before use: job ids are 1–64 characters of `[A-Za-z0-9_-]`; paths
   must be non-empty, absolute, existing, canonicalized and (for scans) directories. Explorer
   arguments are passed as separate arguments, not interpolated into a shell string.
@@ -375,8 +475,11 @@ logged.
 - The WebView runs with a strict CSP (`default-src 'self'`, IPC allowed, no remote scripts) and
   only the dialog-open capability is granted beyond Tauri core defaults.
 - No network API, telemetry, analytics or auto-update code is present.
-- The app does not request elevation. Without it, MFT is unavailable and the walk reports unreadable
-  folders instead of crashing.
+- The app does not request elevation. Without it, MFT is unavailable, the walk reports unreadable
+  folders, and locked cache files are skipped instead of forced.
+- Cleanup starts in read-only mode. Preview stays available because it only reads sizes and paths;
+  `start_cleanup` refuses until the switch is off, and every run also needs a single-use server-held
+  plan id plus the confirmation checkbox.
 
 ## Performance characteristics and limits
 
@@ -397,20 +500,27 @@ but slower; neither is a WizTree comparison. Details and caveats are in
 ## Testing and CI
 
 - `src/lib/*.test.ts` — treemap geometry (area, bounds, overlap), formatting, category mapping,
-  risk vocabulary and analyzer filters: 51 tests.
+  risk vocabulary, analyzer filters, cleanup grouping/selection/confirmation rules and the cleanup
+  IPC contract: 70 tests in 7 files.
 - Rust unit tests — registry filtering/deduplication/date and size parsing, native enumeration,
   hard-link dedupe, exclusions, depth, cancellation, progress, stats, output caps, MFT record
-  parsing/fixups/budget, duplicate verification (same/different content, equal edges, hard links,
-  minimum size, exclusions, cancellation, missing root), storage classification/age buckets/
-  insights, cache catalog validity and protection rules, volume sanity, history ordering, command
-  validation and duplicate-job registration.
+  parsing/fixups/budget, duplicate verification, storage classification/age buckets/insights, cache
+  catalog validity and protection rules, volume sanity, history ordering, command validation,
+  duplicate-job registration, and the cleanup engine (guard, exclusions, preview accounting and
+  truncation, quarantine round trip, restore/purge boundaries, log ordering and cap, plan helpers).
 - `tests/real_system.rs` — live registry count, live cache targets, a temporary fixture tree with
   exact byte assertions.
-- `tests/read_only.rs` — source audit for destructive APIs, junction skipping, hard-link dedupe,
-  missing path handling and protected catalog entries.
+- `tests/security.rs` — module boundaries for destructive APIs, protected-path and ancestor refusal,
+  hostile ids and run ids, junction and link handling, restore/purge boundaries, read-only refusal,
+  a fixture round trip and hard-link accounting.
+- `tests/cleanup_stress.rs` — wide cleanup fixture with a bounded preview, locked file, cancelled
+  run, consecutive batches and empty/missing targets.
+- `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` — end-to-end plan → quarantine →
+  restore → purge against `%TEMP%\cyron-cleanup-<pid>`, printing `CLEANUP_FIXTURE_OK`.
 - `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep
   nesting, access-denied folders, exclusion subtree and cancellation.
-- `.github/workflows/ci.yml` — Windows CI for typecheck, Vitest, frontend build and `cargo test`.
+- `.github/workflows/ci.yml` — Windows CI for typecheck, Vitest, frontend build, `cargo test`, the
+  security and cleanup-stress suites and the cleanup fixture.
 - `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, `bench-scan.mjs` —
   artefact checks and the benchmark harness.
 
@@ -420,6 +530,8 @@ but slower; neither is a WizTree comparison. Details and caveats are in
   records).
 - Store/MSIX application inventory and application icons.
 - Cold-cache benchmark methodology and multi-run statistics published from CI hardware.
-- Cleanup previews, deletion, rollback and operation logs (Phase 3).
-- Standard/advanced/force uninstall, uninstall queues, leftover file/registry detection and process
-  control (Phase 4).
+- Uninstall engine: process discovery with a critical-process deny list, registry export/backup
+  and restore, a plan model for non-file operations, leftover detection and batch queues
+  (Phase 4).
+- Standard/advanced/force uninstall, uninstall queues, process control and critical-process
+  protection (Phase 4); registry backup/restore before any registry removal (Phase 4).

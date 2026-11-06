@@ -205,6 +205,16 @@
   flex-direction: column;
 }
 
+.ov-warning-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
 .ov-row {
   display: flex;
   align-items: center;

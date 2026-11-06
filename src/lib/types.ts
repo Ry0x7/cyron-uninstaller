@@ -243,3 +243,132 @@ export interface DuplicateProgress {
   bytesHashed: number;
   currentPath: string;
 }
+
+/* ---------------------------------------------------------------- cleanup */
+
+/** A single catalog location as the cleanup planner reports it. */
+export interface CleanupTarget {
+  id: string;
+  tool: string;
+  label: string;
+  path: string;
+  note: string;
+  /** Plain-language consequence of moving these files. */
+  impact: string;
+  risk: Risk;
+  /** ai, ide, packages, containers or windows. */
+  category: string;
+  exists: boolean;
+  size: number;
+  fileCount: number;
+  dirCount: number;
+  /** False for protected data, which the backend refuses to plan. */
+  includable: boolean;
+}
+
+export interface CleanupPreviewFile {
+  path: string;
+  size: number;
+  targetId: string;
+}
+
+export interface CleanupPreviewSkip {
+  path: string;
+  reason: string;
+}
+
+/** Result of a dry run. The plan id is the only thing execution accepts. */
+export interface CleanupPreview {
+  planId: string;
+  generatedAt: number;
+  /** Unix seconds; an expired plan cannot be executed. */
+  expiresAt: number;
+  targets: CleanupTarget[];
+  files: CleanupPreviewFile[];
+  skipped: CleanupPreviewSkip[];
+  /** Exact count and byte total over every planned file, not just the listed ones. */
+  fileCount: number;
+  bytes: number;
+  totalFiles: number;
+  /** True while the backend read-only switch is on. */
+  readOnly: boolean;
+  /** Files omitted from `files` because of the display cap. */
+  hiddenCount: number;
+  warnings: string[];
+  truncated: boolean;
+}
+
+export interface CleanupItemResult {
+  targetId: string;
+  path: string;
+  bytes: number;
+  status: "quarantined" | "skipped" | "failed";
+  reason: string | null;
+  quarantinePath: string | null;
+}
+
+export interface CleanupReport {
+  runId: string;
+  planId: string;
+  bytes: number;
+  files: number;
+  dirsRemoved: number;
+  quarantined: number;
+  skipped: number;
+  failed: number;
+  items: CleanupItemResult[];
+  errors: string[];
+  elapsedMs: number;
+  cancelled: boolean;
+  quarantineDir: string | null;
+  /** Unix seconds when the quarantine batch becomes purgeable. */
+  purgeAt: number;
+}
+
+export interface CleanupProgress {
+  runId: string;
+  files: number;
+  totalFiles: number;
+  bytes: number;
+  currentPath: string;
+}
+
+export interface QuarantineBatch {
+  runId: string;
+  createdAt: number;
+  expiresAt: number;
+  bytes: number;
+  fileCount: number;
+  dir: string;
+  targetIds: string[];
+}
+
+export interface RestoreReport {
+  runId: string;
+  restored: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+export interface PurgeReport {
+  runId: string;
+  removedFiles: number;
+  freedBytes: number;
+}
+
+export interface CleanupLogEntry {
+  id: string;
+  at: number;
+  title: string;
+  targets: string[];
+  bytes: number;
+  files: number;
+  quarantined: number;
+  skipped: number;
+  failed: number;
+  status: "completed" | "cancelled" | "failed" | "blocked";
+  detail: string;
+}
+
+export const CLEANUP_EVENT = "cyron-cleanup-progress";

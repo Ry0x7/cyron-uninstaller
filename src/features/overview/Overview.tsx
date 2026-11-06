@@ -84,7 +84,7 @@ function LoadError({ message, onRetry }: { message: string; onRetry: () => void 
 }
 
 function historyIcon(kind: string): (props: IconProps) => ReactNode {
-  if (kind === "cache-scan") return IconCleaner;
+  if (kind === "cleanup" || kind === "cache-scan") return IconCleaner;
   if (kind === "app-scan") return IconApps;
   return IconAnalyzer;
 }
@@ -197,8 +197,8 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
     <div>
       <ViewHeader
         title="Overview"
-        meta={<span className="badge badge--neutral">Read-only</span>}
-        description="What is installed, where the space went, and which known cache locations are classified as regenerable. This view is read-only."
+        meta={<span className="badge badge--neutral">Review-first</span>}
+        description="What is installed, where the space went, and what the known cache locations could give back. Cleaning is previewed before anything moves."
         actions={
           <>
             <Button
@@ -451,7 +451,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
                   icon={<IconArrowUpRight size={13} />}
                   onClick={() => onNavigate("cleaner")}
                 >
-                  Review caches
+                  Review &amp; clean
                 </Button>
               </>
             }
@@ -477,7 +477,14 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
 
             {inventory && inventory.warnings.length > 0 && (
               <div style={{ paddingTop: 10 }}>
-                <Banner tone="caution"><strong>Some cache locations could not be measured.</strong> {[...new Set(inventory.warnings)].join(" ")}</Banner>
+                <Banner tone="caution">
+                  <strong>Some cache locations could not be measured.</strong>
+                  <ul className="ov-warning-list">
+                    {[...new Set(inventory.warnings)].map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </Banner>
               </div>
             )}
 
@@ -570,9 +577,9 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
                 </ul>
 
                 <p className="ov-note">
-                  Measured {relativeTime(inventory.scannedAt).toLowerCase()}. Protected locations
-                  (history, models, volumes) are shown for transparency and never offered for
-                  removal.
+                  Measured {relativeTime(inventory.scannedAt).toLowerCase()}. Cleaning is previewed
+                  first, then kept in a 7-day quarantine you can restore. Protected locations
+                  (histories, models, volumes) are never offered.
                 </p>
               </>
             )}
@@ -581,7 +588,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
           <Panel
             className="ov-activity"
             title="Recent activity"
-            subtitle="Local scan history from this computer"
+            subtitle="Scan and cleanup history from this computer"
             actions={
               <>
                 {history.status === "loading" && historyData && (
@@ -615,8 +622,8 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
               <EmptyState
                 compact
                 icon={IconClock}
-                title="No scans yet"
-                description="Run a disk analysis and Cyron records what was scanned, how long it took and what it found."
+                title="No activity yet"
+                description="Run a disk analysis or a cleanup and Cyron records what happened, how long it took and what changed."
                 action={
                   <Button
                     size="sm"

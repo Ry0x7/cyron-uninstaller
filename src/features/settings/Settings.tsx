@@ -86,7 +86,8 @@ function parseExclusions(raw: string): ParsedExclusions {
 }
 
 export function Settings() {
-  const { settings, setTheme, setIncludeHidden, setExclusions, reset } = useSettings();
+  const { settings, setTheme, setIncludeHidden, setExclusions, setReadOnly, reset } =
+    useSettings();
 
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
@@ -265,8 +266,8 @@ export function Settings() {
 
               <div className="set-actions">
                 <p className="set-note">
-                  Reset restores the system theme, hidden-file scanning and an empty exclusion
-                  list.
+                  Reset restores the system theme, hidden-file scanning, an empty exclusion list
+                  and read-only cleaning.
                 </p>
                 <Button variant="secondary" size="sm" onClick={handleReset}>
                   Reset to defaults
@@ -278,12 +279,25 @@ export function Settings() {
           <div className="set-col">
             <Panel title="Safety">
               <div className="set-status">
-                <Badge tone="accent">
+                <Badge tone={settings.readOnly ? "accent" : "caution"}>
                   <IconLock size={11} />
-                  Read-only
+                  {settings.readOnly ? "Read-only" : "Cleaning enabled"}
                 </Badge>
-                <span className="set-note">This build has no delete, uninstall or kill action.</span>
+                <span className="set-note">
+                  {settings.readOnly
+                    ? "Cyron can measure and preview, but the backend refuses to move any file."
+                    : "Cyron may move eligible cache files to quarantine after you confirm a preview."}
+                </span>
               </div>
+
+              <Toggle
+                checked={!settings.readOnly}
+                onChange={(enabled) => setReadOnly(!enabled)}
+                label="Cleaning enabled"
+                description="Off by default. Cyron still previews every cleanup and asks you to confirm. Eligible files move to a 7-day quarantine you can restore; protected data is refused by the backend, not merely hidden. Cyron never asks for administrator rights."
+              />
+
+              <hr className="hairline" />
 
               <h3 className="set-subhead">Cyron never touches</h3>
               <ul className="set-guards">
@@ -303,8 +317,10 @@ export function Settings() {
               </ul>
 
               <p className="set-note set-note--spaced">
-                The Cleaner shows what a future cleaning phase could remove, with risk levels. It
-                does not remove anything in this build.
+                The Cleaner previews every cleanup before anything moves, quarantines what it does
+                move, and refuses protected locations in the backend even if a request asks for
+                them. Nothing is uninstalled, no process is terminated and no registry value is
+                written.
               </p>
             </Panel>
 
@@ -327,7 +343,7 @@ export function Settings() {
                 items={[
                   { label: "Name", value: "Cyron" },
                   { label: "Version", value: "0.1.0" },
-                  { label: "Stage", value: "Phase 2 · disk intelligence, read-only" },
+                  { label: "Stage", value: "Phase 3 · disk intelligence and safe cleaning" },
                   { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },
                   {
                     label: "Repository",

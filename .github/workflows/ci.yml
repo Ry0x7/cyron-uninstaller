@@ -43,3 +43,12 @@ jobs:
         with:
           workspaces: src-tauri
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      # Phase 3 safety gates. Each suite is separate so a cleanup failure is
+      # attributed to the boundary it broke, not hidden in the unit run.
+      - name: Permission boundary and protected-path tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture
+      - name: Cleanup stress and cancellation tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
+      - name: Isolated cleanup fixture (plan, quarantine, restore, purge)
+        run: node scripts/verify-cleanup.mjs

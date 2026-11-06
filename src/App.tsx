@@ -105,7 +105,7 @@ function Sidebar({
         </span>
         <span className="brand-text">
           <span className="brand-name">Cyron</span>
-          <span className="brand-sub">Read-only analysis</span>
+          <span className="brand-sub">Review-first cleaning</span>
         </span>
       </button>
 
@@ -135,8 +135,8 @@ function Sidebar({
         <div className="sidebar__note">
           <IconShield size={14} />
           <span>
-            <strong>No deletions</strong>
-Read-only scans. Files stay untouched.
+            <strong>Review first</strong>
+Preview, then 7-day quarantine.
           </span>
         </div>
 

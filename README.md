@@ -1,12 +1,15 @@
 # Cyron
 
 Cyron is a Windows desktop utility that combines an application inventory, a disk-space analyzer
-and a developer/AI cache inspector. It is the foundation for a Revo Uninstaller + BleachBit +
+and a developer/AI cache cleaner. It is the foundation for a Revo Uninstaller + BleachBit +
 WinDirStat replacement with plain-language risk labels, built for people who are not sysadmins.
 
-> **Read-only for scanned data.** Cyron scans, measures and explains. It does not clean user files,
-> uninstall programs, stop processes or edit the registry. The Activity screen can clear Cyron's own
-> history log.
+> **Review-first cleaning.** Cyron measures caches, shows you every file it plans to touch, and
+> only after an explicit confirmation moves them into a recoverable quarantine. Protected data —
+> conversation histories, AI models, settings, credentials, Docker/WSL data and browser profiles —
+> is refused by the backend, not merely hidden in the interface. Cleaning is off by default:
+> Cyron starts in read-only mode until you enable it. It still does not uninstall programs, stop
+> processes or edit the registry; those remain Phase 4.
 
 ## What works today
 
@@ -33,27 +36,35 @@ WinDirStat replacement with plain-language risk labels, built for people who are
 - **Two scanners** — an NTFS MFT reader for drive roots and a streaming directory walk everywhere
   else. The chosen method and any fallback reason are shown after a scan. MFT requires administrator
   rights; without them the walk runs and the reason is reported.
-- **Developer & AI cache inspector** — a catalog of 48 known locations covering Claude Code,
-  Codex CLI, Gemini CLI, Cursor, Antigravity, VS Code, Ollama, LM Studio, npm, pnpm, Yarn, pip,
-  Cargo, NuGet, Docker, WSL, Windows temporary files and browser caches. Every location is
-  measured for real and classified as **Safe** (regenerates), **Review** (re-download or reset
-  cost) or **Protected** (history, models, settings, volumes — never offered for removal).
+- **Cleaner** — a catalog of 48 known locations covering Claude Code, Codex CLI, Gemini CLI,
+  Cursor, Antigravity, VS Code, Ollama, LM Studio, npm, pnpm, Yarn, pip, Cargo, NuGet, Docker,
+  WSL, Windows temporary files and browser caches. 36 are cleanable (27 **Safe**, 9 **Review**)
+  and 12 are **Protected** (histories, models, settings, Docker/WSL data, Firefox profiles, the
+  Windows Update download cache) — measured, explained and refused by the backend. Cleaning is a five-step workflow: preview the exact paths, confirm, watch
+  progress, read per-item results, then restore from quarantine / purge.
+- **Recoverable quarantine** — every cleaned file is moved, not deleted, into
+  `<app_data>\quarantine\<run-id>\` with a manifest. A batch stays restorable for 7 days; restoring
+  never overwrites an existing file, and purging is the only permanent step.
+- **Read-only mode and cleanup log** — cleaning starts disabled and is enabled explicitly in the
+  Cleaner or Settings. Each run, restore and purge is appended to a local cleanup log (max 100
+  entries) and to the Activity history.
 - **Overview** — real volume capacity/free space, installed application counts, total cleanup
   potential and recent scan activity.
 - **Activity** — local history of completed and cancelled disk scans (up to 100 entries).
 - **Settings** — system/light/dark theme, include-hidden-files toggle, and an exclusion list that
   is sent to both scanners.
 
-Cyron does not clean user files, uninstall programs, terminate processes or write registry values.
-The `clear_history` command removes only Cyron's own activity log; history temp-file maintenance
-also removes only Cyron-created temporary files. See [Safety guarantees](#safety-guarantees).
+Cleaning never touches anything outside the catalog, and no command accepts a free-form path to
+delete. Cyron does not uninstall programs, terminate processes or write registry values; the
+`clear_history` command removes only Cyron's own activity log, and history temp-file maintenance
+removes only Cyron-created temporary files. See [Safety guarantees](#safety-guarantees).
 
 ## Not implemented yet
 
-Uninstalling, leftover-file removal, cache deletion, process termination, registry backup and
-rollback, duplicate management (Phase 2 reports duplicates but does not act on them), Windows
-Store/MSIX enumeration, and a standalone release installer. The **Cleaner** page is explicitly a
-preview.
+Uninstalling, leftover-file and registry detection, process termination, registry backup/restore,
+duplicate management (the analyzer reports duplicates but does not act on them), Windows Store/MSIX
+enumeration, and a standalone release installer. Cleaning is limited to the fixed catalog: Cyron
+does not delete arbitrary files or user-chosen paths.
 
 ## Stack
 
@@ -101,12 +112,14 @@ verified in this pass.
 
 ```powershell
 npm run typecheck                                      # TypeScript, project references
-npm test                                               # 51 Vitest tests
+npm test                                               # 70 Vitest tests
 npm run build                                          # production frontend bundle
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test real_system -- --nocapture
-node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test read_only -- --nocapture
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test stress_scan -- --nocapture
+node scripts/verify-cleanup.mjs                        # isolated cleanup fixture: plan → quarantine → restore → purge
 node scripts/verify-dist.mjs                           # build + bundle assertions
 node scripts/verify-desktop-binary.mjs                 # debug binary exists
 node scripts/smoke-desktop.mjs                         # launches the app, checks its window, exits
@@ -125,8 +138,12 @@ directory walk, warm cache, single machine — not a WizTree comparison.
 
 The Rust suite includes unit tests for every backend module, a real-system integration test that
 reads the live registry, measures real cache folders and scans a temporary fixture tree, a
-read-only safety suite that audits the backend for destructive APIs and proves junction skipping
-and hard-link dedupe, and a stress suite for wide/deep trees and access-denied folders.
+permission-boundary suite (`tests/security.rs`) that proves which modules may call which
+destructive APIs, protected-path and exclusion enforcement, junction skipping and hard-link
+dedupe, a cleanup stress suite (locked files, cancellation, wide fixtures), and a scanner stress
+suite for wide/deep trees and access-denied folders. `scripts/verify-cleanup.mjs` runs the engine
+end to end against an isolated `%TEMP%\cyron-cleanup-<pid>` fixture and prints
+`CLEANUP_FIXTURE_OK`; it never touches a real cache.
 Current status, known gaps and the latest verification results are tracked in
 [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
 
@@ -139,7 +156,7 @@ src/                       React application
     overview/              storage, apps and cleanup summary
     uninstaller/           read-only application inventory + detail drawer
     analyzer/              scan controls, treemap, tree, filters, duplicates, storage
-    cleaner/               cache/risk inspector (preview only)
+    cleaner/               catalog browser, preview/confirm, quarantine, cleanup history
     activity/              local scan history
     settings/              appearance, scan scope, exclusions
   lib/                     typed IPC client, formatting, treemap math, filters, risk model
@@ -152,24 +169,43 @@ src-tauri/                 Tauri + Rust backend
   src/duplicates.rs        size buckets, partial + full SHA-256 verification
   src/storage.rs           category, age-bucket and insight classification
   src/caches.rs            developer/AI/Windows cache catalog and measurement
+  src/cleanup.rs           cleanup engine: guard, preview, quarantine, restore, purge, log
   src/volumes.rs           local volume capacity
   src/history.rs           app-data scan history (max 100 entries)
   src/commands.rs          validated Tauri command layer
   src/lib.rs               app state, dialog plugin, command registration
   tests/real_system.rs     real registry/cache/scan integration test
-  tests/read_only.rs       destructive-API audit, junction and hard-link safety tests
+  tests/security.rs        permission boundaries, protected paths, links, fixtures
+  tests/cleanup_stress.rs  locked files, cancellation and wide cleanup fixtures
   tests/stress_scan.rs     wide/deep/denied/cancellation stress tests
   examples/scan_bench.rs   benchmark binary
+  examples/cleanup_fixture.rs  isolated end-to-end cleanup verification
 scripts/                   MSVC environment shim, build/smoke/benchmark checks
 docs/                      architecture, status and benchmark documents
 ```
 
 ## Safety guarantees
 
-- **No user-data cleanup or uninstall path.** There is no command to delete arbitrary files,
-  uninstall software, terminate processes or write registry values. `clear_history` removes only
-  Cyron's own `history.json`; temp-file cleanup is limited to files created by Cyron. The Cleaner
-  renders findings without a removal action.
+- **Catalog-only cleaning.** `preview_cleanup` accepts target *ids*, never paths. The backend
+  resolves them against the fixed 48-entry catalog, refuses `protected` ids outright, and keeps the
+  resulting plan server-side; `start_cleanup` executes a plan id it still holds and re-checks the
+  selection, the TTL (10 minutes) and read-only mode. There is no command that deletes a
+  caller-supplied path.
+- **Moves, not deletes.** Execution renames each eligible file into that run's quarantine batch and
+  writes a manifest as it goes. The only permanent removal is `purge_quarantine`, which deletes
+  files recorded in one batch manifest and still inside that batch folder. No recursive delete
+  exists; empty folders are removed one at a time with `remove_dir`.
+- **Protected by construction.** Histories, model weights, settings, credentials, Docker/WSL data
+  and browser profiles are `protected` catalog entries and are also refused as path ancestors by a
+  guard that runs before planning and again before execution. Hard-linked and reparse-point files
+  are skipped; files that change identity between preview and execution fail the revalidation.
+- **Off by default.** The backend starts read-only. Previewing still works there because it only
+  reads sizes and paths — that is the dry run — while `start_cleanup` refuses until cleaning is
+  enabled. Enabling it is an explicit action in the Cleaner or Settings, and every run still needs
+  the confirmation checkbox in the preview drawer.
+- **User exclusions are enforced server-side.** The exclusion folders from Settings are validated
+  as absolute, non-root paths by `preview_cleanup` and stored in the plan; the preview and the
+  execution both skip them, so a preview never shows a file that will be left behind.
 - **No arbitrary paths.** Scan, duplicate-scan and reveal commands require a non-empty absolute
   path that exists (and is a directory for scans), then canonicalize it before use. Job ids are
   restricted to `[A-Za-z0-9_-]` and a running id cannot be replaced.
@@ -186,8 +222,9 @@ docs/                      architecture, status and benchmark documents
   whole walk.
 - **Local only.** No network calls, no telemetry, no uploads. Scan results stay in memory;
   activity history and settings stay in this Windows profile.
-- **No elevation requested.** Launching without administrator rights is supported and uses the
-  directory walk; unreadable folders are reported rather than crashing the scan.
+- **No elevation requested, ever.** Launching without administrator rights is supported and uses
+  the directory walk; unreadable folders and locked cache files are reported rather than crashing
+  the scan or the cleanup. Cyron never asks for administrator rights to clean.
 
 ## Known limitations
 
@@ -214,8 +251,21 @@ docs/                      architecture, status and benchmark documents
   cannot freeze the overview.
 - **Fixed cache catalog.** Locations are discovered only from the built-in catalog; it does not
   learn new tool paths. Individual projects and custom install locations are not scanned.
-- **No duplicate management or user-data cleanup.** Phase 2 reports; it does not act. The current
-  `clear_history` action only removes Cyron's own log.
+- **Cleaning is catalog-scoped and catalogue-only.** Only the 48 known locations are cleaned;
+  individual projects, custom install paths and files outside those folders are never touched. A
+  tool that moves its cache breaks the entry until the catalog is updated.
+- **A locked or partially readable location is left behind, not forced.** In-use files are reported
+  as skipped. No restart-manager trick, VSS snapshot or process termination is used.
+- **No registry cleaning, no service stop, no Windows component servicing.** Update-download and
+  temporary-file entries are ordinary files under the catalog paths; `SoftwareDistribution` is
+  never manipulated directly.
+- **Quarantine is per profile and has no size cap.** Restoring an old batch after a run's 7-day
+  retention window is still possible until the batch is purged; purged files are gone.
+- **Preview listings are capped at 400 files** (the totals and the move cover every eligible file).
+  A target is walked up to 100,000 files; beyond that the rest of that target is left alone and the
+  preview says so.
+- **Duplicates are still read-only.** Duplicate management belongs to a later phase; only the
+  Cleaner acts, and only on catalog caches.
 - **Activity history covers disk scans only.** App, cache and duplicate inventory lookups are not
   logged; the per-profile file is `<Tauri app_data_dir>/history.json`, capped at 100 entries.
   Settings use `localStorage["cyron.settings.v1"]`.
@@ -225,21 +275,22 @@ docs/                      architecture, status and benchmark documents
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components, scanner pipeline, IPC surface and
   data flows.
-- [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) — Phase 1 and Phase 2 acceptance
-  status, evidence and limits.
+- [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) — Phase 1–3 acceptance status,
+  evidence and limits.
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md) — measured scan results and caveats.
 - [DESIGN.md](DESIGN.md) — tokens, themes, component anatomy, treemap palette, motion and
   accessibility rules.
-- [docs/SECURITY.md](docs/SECURITY.md) — threat model, scanner guarantees and the gates required
-  before destructive features.
+- [docs/SECURITY.md](docs/SECURITY.md) — threat model, scanner guarantees, cleanup boundaries and
+  the gates still required before uninstall/process features.
 - [docs/BUNDLE.md](docs/BUNDLE.md) — build, installer targets, signing status and app-data paths.
 - [ROADMAP.md](ROADMAP.md) — phased plan to a complete uninstaller/cleaner.
 - [AGENTS.md](AGENTS.md) — canonical repository memory for contributors and agents.
 
 ## Project status
 
-Phase 1 and Phase 2 are implemented. The debug desktop build and launch are verified; a native
-visual pass across all six views in both themes has been performed against the dev-server-backed
-window. Release packaging and a standalone (non-dev-server) build are unverified. Phase 3 adds safe
-cleaning, Phase 4 the uninstall engine and Phase 5 packaging and hardening. No license file has
-been added to the repository yet.
+Phase 1, Phase 2 and Phase 3 are implemented. The debug desktop build and launch are verified; the
+native visual pass across all six views in both themes was performed against the dev-server-backed
+window in the Phase 2 pass, and the Phase 3 Cleaner states were reviewed in code and through the
+fixture-backed workflow rather than a new screen capture. Release packaging and a standalone
+(non-dev-server) build are unverified. Phase 4 adds the uninstall engine, Phase 5 packaging and
+hardening. No license file has been added to the repository yet.

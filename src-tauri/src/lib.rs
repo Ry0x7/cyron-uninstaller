@@ -1,5 +1,6 @@
 pub mod apps;
 pub mod caches;
+pub mod cleanup;
 pub mod commands;
 pub mod duplicates;
 pub mod fs;
@@ -13,11 +14,27 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-/// Tracks in-flight scans so the UI can cancel them.
-#[derive(Default)]
+/// Tracks in-flight scans so the UI can cancel them, plus the single-use
+/// cleanup plans a preview hands back and the backend read-only switch.
 pub struct AppState {
     pub scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub duplicate_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub plans: Arc<Mutex<HashMap<String, cleanup::CleanupPlan>>>,
+    pub cleanup_jobs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    /// True until the user deliberately enables cleaning.
+    pub read_only: Arc<AtomicBool>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            scans: Arc::default(),
+            duplicate_scans: Arc::default(),
+            plans: Arc::default(),
+            cleanup_jobs: Arc::default(),
+            read_only: Arc::new(AtomicBool::new(true)),
+        }
+    }
 }
 
 pub fn run() {
@@ -36,6 +53,14 @@ pub fn run() {
             commands::reveal_path,
             commands::get_history,
             commands::clear_history,
+            commands::get_cleanup_mode,
+            commands::set_cleanup_mode,
+            commands::preview_cleanup,
+            commands::start_cleanup,
+            commands::list_quarantine,
+            commands::restore_quarantine,
+            commands::purge_quarantine,
+            commands::get_cleanup_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");

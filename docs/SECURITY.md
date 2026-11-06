@@ -2,43 +2,122 @@
 
 ## Scope and assets
 
-Cyron (Phases 1–2) is a local Windows desktop scanner. It reads installed-application metadata, enumerates filesystem metadata with either an NTFS MFT reader or a directory walk, verifies duplicate file content by hashing, classifies storage, measures a fixed catalog of cache locations, and stores scan history in the current user's Tauri application-data directory. The protected assets include user files, repositories, credentials, application settings and histories, AI model weights, container/WSL data, registry contents, and the integrity of the scan results.
+Cyron (Phases 1–3) is a local Windows desktop scanner and cache cleaner. It reads
+installed-application metadata, enumerates filesystem metadata with either an NTFS MFT reader or a
+directory walk, verifies duplicate file content by hashing, classifies storage, measures a fixed
+catalog of 48 cache locations, and can move 36 of them into a per-user quarantine with restore.
 
-The current backend does not uninstall applications, clean scanned files, terminate processes, write registry values, or invoke a shell. The only launched child process is `explorer.exe`, used to reveal a validated existing path on explicit user action. Clearing the Activity history is limited to Cyron's own `history.json`; it does not clear scan targets.
+Protected assets: repositories and source code, credentials, SSH keys and tokens, application
+settings, AI conversation histories and memories, AI model weights, Docker images/volumes/containers,
+WSL distributions, browser profiles/history/cookies/passwords, the registry, Windows servicing state,
+and the integrity of the scan and cleanup results.
+
+Cyron does not uninstall applications, terminate processes, write registry values, stop services or
+invoke a shell. The only launched child process is `explorer.exe`, used to reveal a validated
+existing path on explicit user action. `clear_history` removes only Cyron's own `history.json`.
 
 ## Trust boundaries
 
-- **Frontend to Rust IPC:** The webview is treated as an untrusted caller. Commands validate scan job IDs and validate user paths as absolute, existing paths; scan roots are canonicalized and required to be directories. Exclusions and depth are bounded at the command boundary. No user-provided value is interpolated into a shell command.
-- **Windows filesystem and registry:** Filesystem metadata and registry values are external input and may be missing, malformed, inaccessible, or concurrently changed. Enumeration reports bounded errors rather than assuming access or completeness. Application discovery reads uninstall registry keys only.
-- **Reparse points and links:** Directory entries marked as reparse points are skipped; junctions and symbolic links are not followed. Stable file IDs deduplicate hard-linked file allocations in the walk (subject to the tracking cap below); the MFT reader counts each file record once, and duplicate verification lists hard links without counting them as recoverable space.
-- **Tauri webview/plugins:** The dialog plugin can request a folder selection. This does not grant the backend delete or registry-write operations. Keep Tauri capabilities minimal and review new plugins and permissions before adding them.
-- **Local history/settings:** Settings are stored by the frontend in local storage. Scan history is written under Tauri's per-user app-data directory, capped at 100 entries. It can include scanned root paths and summary counts; users should treat the local history as private profile data.
+- **Frontend to Rust IPC (now partially destructive):** the webview is still treated as untrusted.
+  Cleanup commands accept **catalog target ids**, never paths: `preview_cleanup` resolves ids through
+  `caches::CATALOG`, refuses unknown and `protected` ids, and returns only a preview; the executable
+  plan stays in backend state keyed by an opaque plan id. `start_cleanup` consumes that plan exactly
+  once, rejects a selection the plan does not contain, enforces the 10-minute TTL and the backend
+  read-only switch, and then re-runs the path guard for every target. Exclusions coming from Settings
+  are validated (absolute, non-root, at most 128) before use and stored in the plan so preview and
+  execution skip the same folders.
+- **Windows filesystem and registry:** filesystem metadata and registry values are external input
+  and may be missing, malformed, inaccessible or concurrently changed. Enumeration reports bounded
+  errors rather than assuming access or completeness. Application discovery reads uninstall registry
+  keys only.
+- **Reparse points and links:** directory entries marked as reparse points are skipped and never
+  followed. Before a file is moved, its `symlink_metadata` must report a regular file without a
+  reparse attribute, and the canonicalized parent must still be inside the target root — so a
+  junction swapped in after the preview cannot redirect the move. Quarantined files are stored in a
+  flat per-run folder with an index prefix, so a crafted file name cannot escape it.
+- **Quarantine and log storage:** quarantine batches and `cleanup-log.json` live in the per-user
+  Tauri app-data directory. Restoration and purge take a `run-id` validated against
+  `[A-Za-z0-9_-]`, and purge deletes only files recorded in that batch's manifest whose canonical
+  path is still inside the batch folder.
+- **Tauri webview/plugins:** the dialog plugin can request a folder selection. It does not grant
+  delete or registry-write operations. Keep capabilities minimal and review new plugins before
+  adding them.
 
 ## Scanner guarantees and limits
 
-- The filesystem scanner is read-only: it enumerates directories and metadata and does not modify scan targets.
-- Junctions, symbolic links, mount points, and other reparse points are not traversed.
-- Hard links are counted once for allocated bytes while logical bytes reflect file names. Tracking is capped at one million file IDs to limit memory. After that limit, the scanner reports that later links may count twice; it does not claim perfect deduplication for larger walks.
-- Per-directory file nodes, retained nodes, extension keys and summaries, largest-file results, recursion depth, error messages and IPC tree size are bounded. The directory walk processes entries as they are read rather than collecting them into per-directory vectors. The MFT reader rejects a volume above its derived 768 MiB record budget before allocating and parses through one fixed 1,024-byte buffer.
-- Duplicate hashing is read-only. It opens files for reading with sharing that tolerates concurrent writers, streams in 1 MiB chunks, caps candidates/groups/files, and reports files that change while being hashed instead of trusting them.
-- Permission failures and missing paths can produce incomplete results; absence from a result is not proof that a location is empty. Cache discovery may be unable to inspect system-protected folders without elevation and does not request elevation automatically.
-- The MFT reader opens a raw volume handle (`\\.\X:`) and therefore needs administrator rights; without them it reports the reason and the directory walk runs. Raw-volume access is read-only. No WizTree-level performance claim is made; see `docs/BENCHMARKS.md` for the one machine that was measured.
-- Windows Store/MSIX applications are not currently discovered. Duplicate management (deleting, moving or quarantining a duplicate), cleanup, uninstall, process termination, and registry modification are not implemented.
-- A source-inspection integration test blocks known destructive filesystem, registry, process, and shell API patterns in the backend. Source inspection is a regression tripwire, not a complete security proof; review dependencies and changes to the test itself.
+- The filesystem scanner is read-only: it enumerates directories and metadata and does not modify
+  scan targets.
+- Junctions, symbolic links, mount points and other reparse points are not traversed.
+- Hard links are counted once for allocated bytes while logical bytes reflect file names. Tracking is
+  capped at one million file IDs; after that the scanner reports that later links may count twice.
+- Per-directory file nodes, retained nodes, extension keys and summaries, largest-file results,
+  recursion depth, error messages and IPC tree size are bounded. The walker streams entries rather
+  than collecting per-directory vectors. The MFT reader rejects a volume above its derived 768 MiB
+  record budget before allocating and parses through one fixed 1,024-byte buffer.
+- Duplicate hashing is read-only and reports files that change while being hashed instead of
+  trusting them.
+- The MFT reader opens a raw volume handle (`\\.\X:`) and therefore needs administrator rights;
+  without them it reports the reason and the directory walk runs. No WizTree-level performance claim
+  is made.
+
+## Cleanup guarantees and limits
+
+- **Catalog-only.** There is no command that deletes a caller-supplied path. Eligibility comes from
+  the fixed catalog and a guard that refuses protected locations and their ancestors.
+- **Moves, not deletes.** Execution renames each eligible file into the run's quarantine batch and
+  writes a manifest during the run. The only permanent removal is `purge_quarantine`, which deletes
+  the files of one manifest that are still inside that batch folder. There is no recursive delete;
+  empty directories are removed one at a time with `remove_dir`.
+- **Off by default.** `AppState::read_only` starts `true`. Previewing still works there because it
+  only reads sizes and paths (that is the dry run); `start_cleanup` refuses while the switch is set.
+  Enabling cleaning is an explicit user action, and every run still needs the confirmation checkbox.
+- **Protected data.** 12 catalog entries are `protected` (Claude Code projects, Codex sessions,
+  Gemini history, Ollama and LM Studio models, VS Code/Cursor workspace storage and local history,
+  Docker data, WSL distros, Firefox profiles, the Windows Update download cache). They are measured
+  and explained but never planned. Hard-linked and reparse-point files are skipped.
+- **Locked and system-owned files are left alone.** No elevation request, no restart manager, no VSS
+  snapshot, no service stop, no process termination. Failures are reported per item.
+- **User exclusions are enforced server-side**, so a preview cannot show a file that will be left
+  behind, and an execution cannot touch an excluded folder even if the UI is wrong.
+- **Quarantine retention is metadata, not a timer.** The 7-day `expiresAt` is recorded and shown;
+  nothing is deleted automatically, and purging is always an explicit user action.
+- **Residual risk:** a malicious local process running as the same user can read the quarantine and
+  the cleanup log, or modify the plan registry through the same privileges it already has. Cyron
+  does not defend against an attacker who already controls the user's session; it defends against
+  its own mistakes, hostile inputs through IPC, and UI-level accidents.
 
 ## Network and data handling
 
-There is no application network or telemetry code. Scanned paths, duplicate hashes and result metadata remain local. The scanner does not upload data. Normal Windows services and the application's dependencies are outside this statement; Cyron itself contains no network feature.
+There is no application network or telemetry code. Scanned paths, duplicate hashes, quarantine
+manifests and the cleanup log remain local. Cyron contains no network feature.
 
-## Gates before destructive capabilities
+## Gates before further destructive capabilities
 
-No delete, cleaner, uninstaller, process termination, or registry-write path may be added as a hidden shortcut. Before Phase 3/4 destructive work is enabled, each operation must have all applicable safeguards:
+Phase 3 implements items 1–8 below for **file cleanup over a fixed catalog**. Phase 4 (uninstall,
+process handling, leftover registry removal) must satisfy them again for each new capability, and
+must not reuse the file-cleanup plan as a shortcut:
 
-1. A narrowly scoped provider that derives eligible targets from a reviewed catalog or verified application metadata, never from a user-controlled arbitrary path or name alone.
-2. A dry-run preview that shows exact paths/registry values/processes, expected impact, risk, and reasons; protected locations must be excluded in backend enforcement, not merely hidden in the UI.
-3. Explicit, contextual confirmation immediately before execution, with revalidation of identity and scope to mitigate time-of-check/time-of-use changes.
-4. Path canonicalization, boundary checks, reparse-point checks, and safeguards against root, profile, repository, credential, model, Docker/WSL, and shared-dependency removal.
-5. Registry export/backup before registry modifications, plus rollback/recovery for supported file operations and clear reporting when rollback is not possible.
-6. Process identity checks and critical-process protection before termination; never use shell interpolation for process control or uninstall execution.
-7. An append-only or otherwise tamper-aware operation record with outcome, timing, and recovery details; do not log secrets or file contents.
-8. Tests against temporary fixtures and mocked/faulted conditions, including permissions, races, locked files, reparse points, and rollback failure. Run security review and explicit acceptance checks before enabling the feature in a release.
+1. A narrowly scoped provider that derives eligible targets from a reviewed catalog or verified
+   application metadata, never from a user-controlled arbitrary path or name alone. *(Phase 3:
+   satisfied — ids only.)*
+2. A dry-run preview showing exact paths/registry values/processes, expected impact, risk and
+   reasons, with protected locations excluded by backend enforcement. *(Phase 3: satisfied for
+   files.)*
+3. Explicit, contextual confirmation immediately before execution, with revalidation of identity and
+   scope to defeat time-of-check/time-of-use changes. *(Phase 3: satisfied — plan TTL, selection
+   re-check, per-file metadata and parent revalidation.)*
+4. Path canonicalization, boundary checks, reparse-point checks, and safeguards against root, profile,
+   repository, credential, model, Docker/WSL and shared-dependency removal. *(Phase 3: satisfied for
+   the catalog; shared dependencies are Phase 4.)*
+5. Registry export/backup before registry modifications, plus rollback/recovery for supported file
+   operations and clear reporting when rollback is impossible. *(Phase 3: quarantine satisfies the
+   file half; no registry path exists.)*
+6. Process identity checks and critical-process protection before termination; never use shell
+   interpolation for process control or uninstall execution. *(Phase 4 — not implemented.)*
+7. An append-only or otherwise tamper-aware operation record with outcome, timing and recovery
+   details, never logging secrets or file contents. *(Phase 3: `cleanup-log.json` plus Activity
+   entries; it is a local capped file, not tamper-proof.)*
+8. Tests against temporary fixtures and faulted conditions, including permissions, races, locked
+   files, reparse points and rollback failure, plus a security review before release. *(Phase 3:
+   `tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`; review pending a
+   release build.)*

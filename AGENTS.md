@@ -8,15 +8,18 @@ safe to remove but also have the ability to force uninstall and kill process. In
 Revo uninstaller, bleachbit, and windirstat but better indications, material UI, clean simple
 usable for non-tech people.
 
-**Current state: Phases 1 and 2 are implemented and read-only for scanned/user data.**
-Application inventory, disk analysis with a treemap plus persistent synchronized folder tree,
-MFT/directory scanning, duplicate verification, storage categorization and developer/AI cache
-inspection work. There is no user-data cleanup, uninstall, process termination or registry write
-path. `clear_history` deletes only Cyron's own history file; history temp-file maintenance removes
-only Cyron-created temporary files. The debug desktop build and launch are verified on this
-machine (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`), and all six views were captured in both themes
-against the dev-server-backed window; release installers, signing and a standalone release build
-are not.
+**Current state: Phases 1, 2 and 3 are implemented.** Application inventory, disk analysis with a
+treemap plus persistent synchronized folder tree, MFT/directory scanning, duplicate verification,
+storage categorization, developer/AI cache inspection and **review-first cache cleaning with a
+recoverable quarantine** work. Scanning remains read-only; the only destructive path is the
+cleanup engine in `cleanup.rs`, which accepts catalog ids (never paths), moves files into
+`<app_data>\quarantine\<run-id>\`, and can restore or purge a batch. There is still no uninstall,
+process termination or registry write. `clear_history` deletes only Cyron's own history file. The
+debug desktop build and launch are verified on this machine (`DESKTOP_BINARY_OK`,
+`DESKTOP_SMOKE_OK`), as are the isolated cleanup fixture (`CLEANUP_FIXTURE_OK`) and every suite;
+release installers, signing and a standalone release build are not. The Cleaner was driven live in
+both themes, which found and fixed two defects: preview was blocked by read-only mode, and
+Overview's cache warnings rendered as one run-on sentence.
 
 ## Stack
 
@@ -28,11 +31,24 @@ are not.
 
 ## How it works (the non-obvious parts)
 
-- **IPC surface** is eleven commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
-  discovery/scan/duplicate/measurement/reveal commands plus `clear_history`, which only removes
-  Cyron's own `history.json`. A running job id is rejected rather than silently re-registered.
-  Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the data contract.
-  Change both together.
+- **IPC surface** is nineteen commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
+  discovery/scan/duplicate/measurement/reveal, `clear_history`, and eight cleanup commands
+  (`get_cleanup_mode`, `set_cleanup_mode`, `preview_cleanup`, `start_cleanup`, `list_quarantine`,
+  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`). A running job id is rejected rather
+  than silently re-registered. Payloads use `#[serde(rename_all = "camelCase")]`;
+  `src/lib/types.ts` mirrors the data contract. Change both together.
+- **Cleanup engine** (`cleanup.rs`) is the only module that modifies user files. `preview_cleanup`
+  resolves catalog ids, guards each path, walks it for exact totals (400 listed paths, 100,000
+  files per target) and stores a `CleanupPlan` server-side for 10 minutes. `start_cleanup` consumes
+  that plan once, re-checks its selection, the TTL and the read-only switch, re-guards every target,
+  re-validates each file (regular file, no reparse attribute, canonical parent inside the target)
+  and renames it into the run's quarantine batch. Nothing is deleted except by `purge_quarantine`,
+  which only removes manifest items still inside that batch. Restore never overwrites. The backend
+  starts read-only; Settings exclusions are validated and enforced in the backend.
+- **Cleanup catalog** is the 48-entry `caches::CATALOG`: 27 safe, 9 caution, 12 protected. Protected
+  entries (histories, models, settings, Docker/WSL data, Firefox profiles, Windows Update
+  downloads) are measured and never planned; the Windows Update cache is explicitly not
+  manipulated. Per-entry `impact` text explains whether data regenerates or is re-downloaded.
 - **Application discovery** (`apps.rs`) reads HKLM/HKCU uninstall keys in the 64-bit view plus
   `WOW6432Node`, drops updates/patches/system components, deduplicates by name+version+location
   (preferring machine-64), and reports `estimatedSize: null` when the installer recorded nothing.
@@ -82,10 +98,15 @@ are not.
 
 ## Conventions
 
-- Keep Phases 1–2 free of scanned/user-data cleanup, uninstall, process termination and registry
-  writes. The only deletion is clearing Cyron's own history file. Any future destructive capability
-  belongs to Phase 3/4 with preview, confirmation, protected-data enforcement and rollback — never
-  add a hidden user-data deletion path.
+- Scanning, duplicates and storage stay read-only. The only file-modifying path is the cleanup
+  engine; do not add a second one or a command that accepts a free-form path. Uninstall, process
+  termination and registry writes belong to Phase 4 and must reuse the plan → confirmation →
+  quarantine/recovery pattern, with their own security tests.
+- Never widen cleanup eligibility outside `caches::CATALOG` without a reviewed catalog entry, and
+  never let the frontend supply a path to clean. Protected entries and ancestors of protected data
+  must be refused in the backend.
+- Files are moved into quarantine, never deleted in place. `purge_quarantine` is the only permanent
+  removal, and it must stay manifest-scoped.
 - Match the existing UI language: paper/graphite surfaces, mono micro-labels, square risk badges,
   no gradients or decorative card slop. Reuse `components/ui.tsx` and tokens.
 - View-specific CSS uses a scoped prefix (`ov-`, `un-`, `az-`, `treemap-`, `cl-`, `act-`, `set-`).
@@ -108,8 +129,10 @@ npm run build
 npm run tauri -- build     # release MSI/NSIS (needs bundler download; unverified)
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test real_system -- --nocapture
-node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test read_only -- --nocapture
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test stress_scan -- --nocapture
+node scripts/verify-cleanup.mjs
 node scripts/verify-dist.mjs
 node scripts/verify-desktop-binary.mjs
 node scripts/smoke-desktop.mjs
@@ -133,8 +156,11 @@ node scripts/smoke-desktop.mjs
 - **No network code exists.** Keep it that way unless a feature explicitly requires it, and never
   add telemetry by default.
 - **Store apps are missing** from the uninstaller. This is known, not a regression.
-- `history.json` and settings are per Windows profile; clearing history removes only Cyron's own
-  log and does not touch scanned or cache files.
+- Quarantine and `cleanup-log.json` are per Windows profile. A sole restored batch retires itself,
+  so purging it afterwards is refused with "No quarantine batch named …" — an emptied batch is not
+  an error state. Tests and docs must keep that contract.
+- Cleanup test fixtures live under `%TEMP%\cyron-cleanup-<pid>` and are deleted on drop. Never point
+  a cleanup test, benchmark or manual check at a real cache or the user profile.
 
 ## Docs map
 

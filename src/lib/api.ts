@@ -2,10 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppInventory,
   CacheInventory,
+  CleanupLogEntry,
+  CleanupPreview,
+  CleanupReport,
   DuplicateOptions,
   DuplicateReport,
   HistoryEntry,
   Measured,
+  PurgeReport,
+  QuarantineBatch,
+  RestoreReport,
   ScanOptions,
   ScanResult,
   VolumeInfo,
@@ -64,6 +70,19 @@ export const api = {
   startDuplicateScan: (jobId: string, path: string, options: DuplicateOptions) =>
     call<DuplicateReport>("start_duplicate_scan", { jobId, path, options }),
   cancelDuplicateScan: (jobId: string) => call<void>("cancel_duplicate_scan", { jobId }),
+  /** Exclusions are absolute folder paths; the backend refuses anything else. */
+  previewCleanup: (targetIds: string[], exclusions: string[] = []) =>
+    call<CleanupPreview>("preview_cleanup", { targetIds, exclusions }),
+  startCleanup: (planId: string, targetIds: string[]) =>
+    call<CleanupReport>("start_cleanup", { planId, targetIds }),
+  /** true means the backend is in read-only mode and refuses to execute. */
+  getCleanupMode: () => call<boolean>("get_cleanup_mode"),
+  setCleanupMode: (readOnly: boolean) => call<boolean>("set_cleanup_mode", { readOnly }),
+  listQuarantine: () => call<QuarantineBatch[]>("list_quarantine"),
+  restoreQuarantine: (runId: string) =>
+    call<RestoreReport>("restore_quarantine", { runId }),
+  purgeQuarantine: (runId: string) => call<PurgeReport>("purge_quarantine", { runId }),
+  getCleanupLog: () => call<CleanupLogEntry[]>("get_cleanup_log"),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;
@@ -87,5 +106,10 @@ export function loadCaches(force = false): Promise<CacheInventory> {
 }
 
 export function invalidateCaches(): void {
+  cacheRequest = null;
+}
+
+/** A cleanup run changed cache folders on disk, so measured sizes are stale. */
+export function cachesChanged(): void {
   cacheRequest = null;
 }

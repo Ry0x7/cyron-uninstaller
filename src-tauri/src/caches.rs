@@ -43,15 +43,15 @@ pub struct CacheInventory {
     pub warnings: Vec<String>,
 }
 
-struct TargetDef {
-    id: &'static str,
-    tool: &'static str,
-    label: &'static str,
+pub struct TargetDef {
+    pub id: &'static str,
+    pub tool: &'static str,
+    pub label: &'static str,
     /// Supports %VARIABLE% segments. Every entry must be a real Windows location.
-    path: &'static str,
-    risk: &'static str,
-    category: &'static str,
-    note: &'static str,
+    pub path: &'static str,
+    pub risk: &'static str,
+    pub category: &'static str,
+    pub note: &'static str,
 }
 
 const SAFE: &str = "safe";
@@ -68,7 +68,7 @@ const MAX_WARNINGS: usize = 12;
 
 /// Locations are intentionally non-overlapping so that summing every target
 /// does not double count bytes.
-const CATALOG: &[TargetDef] = &[
+pub const CATALOG: &[TargetDef] = &[
     // ---------------------------------------------------------------- AI tools
     TargetDef {
         id: "claude-code-projects",
@@ -502,11 +502,40 @@ const CATALOG: &[TargetDef] = &[
         tool: "Windows Update",
         label: "Update download cache",
         path: "%WINDIR%\\SoftwareDistribution\\Download",
-        risk: CAUTION,
+        risk: PROTECTED,
         category: WINDOWS,
-        note: "Downloaded update payloads. Windows re-downloads them, but a pending update may restart.",
+        note: "Downloaded update payloads owned by Windows Update. Cyron measures this folder but does not move or delete it; use Windows Storage Sense or Disk Cleanup, which coordinate with the update service.",
     },
 ];
+
+/// Looks up a catalog entry by its stable id.
+pub fn find(id: &str) -> Option<&'static TargetDef> {
+    CATALOG.iter().find(|entry| entry.id == id)
+}
+
+/// Resolves an environment-templated catalog path to an absolute path.
+pub fn resolve_template(template: &str) -> Result<String, String> {
+    expand_env(template)
+}
+
+/// Plain-language consequence of removing this location, used by the cleanup
+/// planner and preview so the UI never invents its own wording.
+pub fn impact_for(definition: &TargetDef) -> String {
+    match definition.risk {
+        PROTECTED => format!(
+            "{} is protected data. Cyron measures it but never cleans it.",
+            definition.label
+        ),
+        CAUTION => format!(
+            "{} may re-download or rebuild these files, and recently cached state can be affected until it does.",
+            definition.tool
+        ),
+        _ => format!(
+            "{} recreates these files the next time it runs. Projects, settings and conversation history are not touched.",
+            definition.tool
+        ),
+    }
+}
 
 /// Measures every known developer, AI and Windows cache location.
 pub fn discover_caches() -> CacheInventory {

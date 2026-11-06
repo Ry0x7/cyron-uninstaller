@@ -20,14 +20,52 @@ import {
   ViewHeader,
   type BadgeTone,
 } from "../../components/ui";
-import { IconActivity, IconRefresh, IconTrash } from "../../components/Icons";
+import {
+  IconActivity,
+  IconCleaner,
+  IconRefresh,
+  IconTrash,
+} from "../../components/Icons";
 import "./activity.css";
 
 const KIND_LABEL: Record<string, string> = {
   scan: "Disk scan",
+  cleanup: "Cleanup",
   "cache-scan": "Cache scan",
   "app-scan": "Application scan",
 };
+
+const KIND_TONE: Record<string, BadgeTone> = {
+  scan: "neutral",
+  cleanup: "accent",
+};
+
+const KIND_ICON: Record<string, typeof IconActivity> = {
+  scan: IconActivity,
+  cleanup: IconCleaner,
+};
+
+function kindLabel(kind: string): string {
+  return KIND_LABEL[kind] ?? "Operation";
+}
+
+/**
+ * Older entries may carry an empty detail. Cleanup runs still explain
+ * themselves, and a failed or cancelled run never claims files were moved.
+ */
+function describeEntry(entry: HistoryEntry): string {
+  if (entry.detail) return entry.detail;
+  if (entry.kind === "cleanup") {
+    if (entry.status === "completed") {
+      return `${formatCount(entry.items)} files moved to quarantine · ${formatBytes(entry.bytes)} · restorable for 7 days`;
+    }
+    if (entry.status === "cancelled") {
+      return `Stopped early. Files moved before the stop stay in quarantine for 7 days`;
+    }
+    return "No files were moved. Cyron reported the failure instead of retrying blindly";
+  }
+  return kindLabel(entry.kind);
+}
 
 const STATUS_TONE: Record<HistoryEntry["status"], BadgeTone> = {
   completed: "safe",
@@ -142,7 +180,7 @@ export function Activity() {
     <>
       <ViewHeader
         title="Activity"
-        description="Every disk scan this app has recorded. Scans are read-only, and the history stays on this machine."
+        description="Every scan and cleanup this app has recorded. Scans only read metadata; cleanup moves files into a restorable quarantine. The history stays on this machine."
         actions={
           <Button
             variant="secondary"
@@ -192,29 +230,29 @@ export function Activity() {
         {cleared && (
           <div role="status">
             <Banner tone="safe">
-              History cleared. New scans will appear here as you run them.
+              History cleared. New scans and cleanups will appear here as you run them.
             </Banner>
           </div>
         )}
 
         <Panel bodyClassName="act-summary">
           <Stat
-            label="Scans recorded"
+            label="Operations recorded"
             value={loading ? <Skeleton width={44} height={24} /> : formatCount(entries.length)}
-            meta={entries.length === 0 ? "No scans yet" : "Newest first"}
+            meta={entries.length === 0 ? "Nothing yet" : "Newest first"}
           />
           <Stat
-            label="Data scanned"
+            label="Data processed"
             value={loading ? <Skeleton width={72} height={24} /> : formatBytes(totals.bytes)}
-            meta="Logical file size"
+            meta="Scanned plus quarantined bytes"
           />
           <Stat
-            label="Items indexed"
+            label="Items counted"
             value={loading ? <Skeleton width={60} height={24} /> : formatCount(totals.items)}
-            meta="Files counted"
+            meta="Files either way"
           />
           <Stat
-            label="Last scan"
+            label="Last operation"
             value={loading ? <Skeleton width={70} height={24} /> : relativeTime(lastScan?.at)}
             meta={lastScan ? formatDateTime(lastScan.at) : "Nothing recorded"}
           />
@@ -222,7 +260,7 @@ export function Activity() {
 
         <Panel
           title="Operation history"
-          subtitle="Recorded only when a scan finishes or is cancelled. Nothing else is logged."
+          subtitle="Recorded when a scan or cleanup finishes, is cancelled or fails. Cyron logs outcomes, never file contents."
           flush
           actions={
             entries.length > 0 &&
@@ -279,8 +317,8 @@ export function Activity() {
           ) : entries.length === 0 ? (
             <EmptyState
               icon={IconActivity}
-              title="No scans recorded yet"
-              description="Run a disk scan from Disk Analyzer. Cyron records the path, how much data it read, how long it took and whether it finished or was cancelled."
+              title="No operations recorded yet"
+              description="Run a disk scan from Disk Analyzer, or move a cache into quarantine from Cleaner. Cyron records the target, how much data was involved, the outcome and whether files can still be restored."
             />
           ) : (
             <div className="table-wrap">
@@ -288,6 +326,7 @@ export function Activity() {
                 <thead>
                   <tr>
                     <th scope="col">Result</th>
+                    <th scope="col">Type</th>
                     <th scope="col">Operation</th>
                     <th scope="col" className="numeric">
                       Data
@@ -306,16 +345,16 @@ export function Activity() {
                       <td>
                         <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
                       </td>
+                      <td>
+                        <KindBadge kind={entry.kind} />
+                      </td>
                       <td className="act-op">
                         <div className="cell-name">
                           <span className="cell-name__title" title={entry.title}>
                             {entry.title}
                           </span>
-                          <span
-                            className="cell-name__meta"
-                            title={entry.detail || KIND_LABEL[entry.kind] || entry.kind}
-                          >
-                            {entry.detail || KIND_LABEL[entry.kind] || entry.kind}
+                          <span className="cell-name__meta" title={describeEntry(entry)}>
+                            {describeEntry(entry)}
                           </span>
                         </div>
                       </td>
@@ -338,10 +377,22 @@ export function Activity() {
         {entries.length > 0 && (
           <p className="act-footnote">
             {plural(entries.length, "entry", "entries")} kept in this profile. Clearing the
-            history removes these records only; it does not touch any file on disk.
+            history removes these records only; it does not touch any file on disk and does not
+            empty the quarantine.
           </p>
         )}
       </div>
     </>
+  );
+}
+
+/** Unknown kinds keep rendering instead of leaving an empty cell. */
+function KindBadge({ kind }: { kind: string }) {
+  const Icon = KIND_ICON[kind] ?? IconActivity;
+  return (
+    <Badge tone={KIND_TONE[kind] ?? "neutral"}>
+      <Icon size={11} />
+      {kindLabel(kind)}
+    </Badge>
   );
 }

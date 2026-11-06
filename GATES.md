@@ -1,127 +1,143 @@
-# Gates: Cyron Uninstaller Phase 2
+# Gates: Cyron Uninstaller Phase 3 — Safe cleaning
 
-OWNS: src/**, src-tauri/**, scripts/**, .github/**, package.json, package-lock.json, tsconfig*.json,
-vite.config.ts, index.html, README.md, ROADMAP.md, HANDOFF.md, docs/**, GATES.md
+OWNS: src/**, src-tauri/**, scripts/**, .github/**, package.json, package-lock.json, GATES.md,
+README.md, ROADMAP.md, HANDOFF.md, AGENTS.md, docs/**
 
-Scope: Phase 1 remediation plus Phase 2 disk intelligence — MFT scanning with a directory-walk
-fallback, benchmark harness, persistent synchronized tree, filters, duplicate verification, storage
-categorization and stress hardening — while preserving the read-only safety boundary.
+Scope: a review-first cleanup engine over the fixed 48-location cache catalog — backend-enforced
+eligibility, protected-path refusal, user exclusions enforced server-side, recoverable quarantine
+with restore/purge, a local cleanup log, a backend read-only switch, per-item results, cancellation,
+and the Cleaner UI that drives it. No uninstall, process termination, registry write, or
+administrator escalation.
 
-## Foundation and tests
+Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
+`scripts/msvc-env.mjs`.
 
-- [x] G1: Rust backend compiles for the Windows target, all targets, no warnings
+## Build and suites
+
+- [x] G1: Rust backend compiles for every target without warnings
   CHECK: node scripts/msvc-env.mjs cargo check --manifest-path src-tauri/Cargo.toml --all-targets
   EXPECT: exit 0
-  EVIDENCE: `Finished dev profile` exit 0 (2026-11-06); no warning lines.
+  EVIDENCE: exit 0, `Finished dev profile … in 4.90s`, no warnings emitted.
 
-- [x] G2: Rust unit, integration and safety tests pass
+- [x] G2: the complete Rust suite passes
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
   EXPECT: exit 0
-  EVIDENCE: 75 lib tests → 73 passed, 2 ignored; read_only 5 passed; real_system 1 passed;
-  stress_scan 5 passed, 1 ignored. 0 failed.
+  EVIDENCE: exit 0. 105 lib tests (2 ignored), 15 security, 5 cleanup_stress, 1 real_system,
+  5 stress_scan (1 ignored) → 131 passed, 3 ignored, 0 failed.
 
-- [x] G3: live registry, cache and filesystem integration
-  CHECK: ... --test real_system -- --nocapture
-  EXPECT: exit 0 with discovered apps and a scanned fixture
-  EVIDENCE: passed; live registry and cache discovery plus exact byte assertions.
-
-- [x] G4: frontend typecheck
+- [x] G3: frontend typecheck
   CHECK: npm run typecheck
   EXPECT: exit 0
-  EVIDENCE: pass.
+  EVIDENCE: exit 0, no diagnostics.
 
-- [x] G5: frontend unit tests
+- [x] G4: frontend unit tests
   CHECK: npm test
   EXPECT: exit 0
-  EVIDENCE: 6 files, 51/51 passed.
+  EVIDENCE: exit 0. 70 tests in 7 files, including `cleanup.test.ts` (16) and the cleanup IPC
+  contract in `api.test.ts` (9).
 
-- [x] G6: production bundle
+- [x] G5: frontend production bundle
   CHECK: node scripts/verify-dist.mjs
   EXPECT: DIST_OK
-  EVIDENCE: `DIST_OK` — 2 assets, 408.6 KiB.
+  EVIDENCE: `DIST_OK`, 2 assets, 434.3 KiB, index.html 444 B.
 
-## Phase 2 features
+## Cleanup safety
 
-- [x] G7: NTFS MFT scanning works on a real volume and returns real totals
-  CHECK: elevated `examples/scan_bench.exe --target 'C:\' --method mft`
-  EXPECT: `"method":"mft"`, non-zero files and bytes
-  EVIDENCE: `C:\` → 2,211,292 files, 604,557 dirs, 356,801,993,820 bytes, 14,515 ms, 687,366,144 B
-  peak working set. Elevated shell required; unelevated runs report a reason and fall back.
-
-- [x] G8: method selection and fallback reasons are honest
-  CHECK: analyzer method badge + `ScanResult.methodNote`; MFT-on-subfolder measurement
-  EXPECT: `auto` uses MFT only at drive roots; fallback carries a reason
-  EVIDENCE: System32 MFT 3.91 s vs walk 0.28 s; unelevated MFT request reports the elevation
-  requirement and the walk runs; `methodNote` rendered in the analyzer after scans.
-
-- [x] G9: duplicate detection verifies content and handles hard links
-  CHECK: `cargo test --lib duplicates::`
+- [x] G6: permission-boundary and protected-path tests pass
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security
   EXPECT: exit 0
-  EVIDENCE: 8 duplicate tests pass (identical files grouped, equal-size different content
-  rejected, equal-edge partial-hash collision separated by full hash, minimum size, hard links,
-  cancellation, missing root, exclusions).
+  EVIDENCE: exit 0, 15/15. Covers: destructive calls only in reviewed modules; every catalog
+  cleanup path passes the guard; protected/ancestor paths refused; hostile ids and run ids refused;
+  junction not followed; links and directories never moved; restore never overwrites; purge removes
+  only batch files; read-only blocks execution; hard links counted once; fixture round trip.
+  NOTE: read-only gates execution only. `preview_cleanup` no longer calls `ensure_cleanup_enabled`
+  because a preview reads sizes and paths and never modifies anything; `start_cleanup` still calls
+  it first, and the embedded read-only visual pass in G13 exercised the preview path live.
 
-- [x] G10: storage categories, age buckets and insights are real
-  CHECK: `cargo test --lib storage::`
+- [x] G7: preview, execution, quarantine, restore and purge work on isolated fixtures
+  CHECK: node scripts/verify-cleanup.mjs
+  EXPECT: CLEANUP_FIXTURE_OK
+  EVIDENCE: `CLEANUP_FIXTURE_OK`. Fixture at `%TEMP%\cyron-cleanup-<pid>`: exact preview counts and
+  bytes, quarantine of 4 files, outside-file untouched, manifest written, batch listed, byte-exact
+  restore, batch retired on full restore, locked file skipped while the rest move, purge accounting,
+  read-only refusal.
+
+- [x] G8: large fixtures stay bounded, cancellable and partial-failure tolerant
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress
   EXPECT: exit 0
-  EVIDENCE: 9 storage tests pass, including known/inferred confidence, category order, age
-  boundaries, mixed-confidence handling and insight thresholds.
+  EVIDENCE: exit 0, 5/5 (wide fixture preview bounded while execution moves everything, locked file,
+  cancelled run claims nothing it did not move, consecutive batches independent, empty/missing
+  targets).
 
-- [x] G11: scanner memory/output bounds and stress cases
-  CHECK: ... --test stress_scan -- --nocapture
+- [x] G9: protected catalog entries can never be planned or executed
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib cleanup::
   EXPECT: exit 0
-  EVIDENCE: 5/5 pass: 20,000-file wide directory with exact totals and bounded children, deep
-  nesting within the depth cap, access-denied folders report errors, cancellation, exclusions.
-  (The separate 20k-file `#[ignore]`d measurement test is not part of this gate.)
+  EVIDENCE: exit 0, 22/22 cleanup unit tests, including protected refusal, exclusion enforcement,
+  truncated-listing reporting and both exclusion validators.
 
-- [x] G12: duplicate scanning is cancellable and scope-safe in the UI
-  CHECK: `npm run typecheck`, `npm test`, code review of `DuplicatesPanel.tsx`
-  EXPECT: no stale report after a root change
-  EVIDENCE: panel cancels and resets on scope change, ignores late events from an old job id, and
-  guards reveal after unmount. No automated test covers scope-change cancellation; native
-  duplicate run was exercised in the analyzer.
+## Native behaviour
 
-## Native and visual
+- [x] G10: debug desktop binary builds
+  CHECK: npm run build:desktop
+  EXPECT: exit 0
+  EVIDENCE: exit 0, `Built application at: src-tauri\target\debug\cyron.exe`.
 
-- [x] G13: debug desktop binary builds
-  CHECK: npm run build:desktop && node scripts/verify-desktop-binary.mjs
+- [x] G11: built executable is recognizable as the Cyron desktop app
+  CHECK: node scripts/verify-desktop-binary.mjs
   EXPECT: DESKTOP_BINARY_OK
-  EVIDENCE: `DESKTOP_BINARY_OK`.
+  EVIDENCE: `DESKTOP_BINARY_OK`, 15.21 MiB.
 
-- [x] G14: built app launches
+- [x] G12: the built app launches a window
   CHECK: node scripts/smoke-desktop.mjs
   EXPECT: DESKTOP_SMOKE_OK
-  EVIDENCE: `DESKTOP_SMOKE_OK`. Limitation: the smoke check verifies the window exists; the debug
-  build loads the Vite dev server, so this check cannot prove the UI rendered without it.
+  EVIDENCE: `DESKTOP_SMOKE_OK`, window title "Cyron".
 
-- [x] G15: all six views reviewed in both themes with real data
-  CHECK: native window captures with a running Vite dev server
-  EXPECT: no overflow, clipped controls, invisible text or blank states
-  EVIDENCE: Overview, Uninstaller, Analyzer (Map/Storage/Duplicates), Cleaner, Activity and Settings
-  captured in light and dark; a real `C:\Windows\System32` scan was loaded for the analyzer views.
-  Contrast and table-width defects found in the pass were fixed.
+## Frontend integration
 
-## Documentation and hygiene
+- [x] G13: the Cleaner drives real preview, confirmation, progress, results, quarantine and history
+  CHECK: the compiled desktop window against the running Vite dev server, screenshots captured with
+  `scripts/capture-window.ps1`
+  EXPECT: every state renders; protected rows are unselectable; confirmation is required; no
+  destructive action runs without a preview
+  EVIDENCE: passed in both themes on 2026-11-06. Measured data from this machine (28 of 48 catalog
+  locations exist, 24.8 GB detected, 13.4 GB safe / 121 MB review / 11.3 GB protected, 8 protected
+  rows with a lock instead of a checkbox). Selecting *User temporary files* showed the sticky
+  "1 location selected · 4.46 GB measured · moved to quarantine, not deleted" bar; **Preview
+  cleanup** opened the drawer with "4.14 GB in 100,000 files will move to quarantine", the
+  read-only banner, target path plus impact copy, group/files/size/expiry rows, the planned-file
+  list with per-file sizes, and a dimmed **Move to quarantine** (disabled while unconfirmed and
+  read-only). Dark-theme Cleaner page captured before the fix, light-theme page and preview drawer
+  after it.
+  NOTE: two defects were found and fixed by this pass. `preview_cleanup` refused while read-only,
+  which made the whole review-first workflow unreachable until cleaning was enabled; previewing only
+  reads, so the guard now applies to execution alone (see G6). Overview joined its cache warnings
+  into one run-on sentence; it now renders them as a list (`ov-warning-list`). Execution against a
+  real user cache was **not** performed — that remains fixture-only evidence in G7/G8.
 
-- [x] G16: Phase 2 documentation is accurate and does not overclaim
-  CHECK: manual review of README, ROADMAP, HANDOFF, ARCHITECTURE, IMPLEMENTATION_STATUS, BENCHMARKS
-  EXPECT: measured numbers carry method, elevation, cache state and machine caveats
-  EVIDENCE: numbers above appear with warm-cache/single-machine/one-run labels; no WizTree
-  comparison; MFT record-vs-path counting difference documented.
+- [x] G14: no earlier feature claims that cleaning is impossible
+  CHECK: manual copy review of Overview, Cleaner, Settings, Analyzer and README
+  EXPECT: no "Phase 3 arrives later" or read-only-only claims left in shipped copy
+  EVIDENCE: README banner/status, Settings stage label and the Cleaner copy now describe
+  review-first cleaning with quarantine. Remaining "read-only" strings describe the Analyzer's
+  duplicate/storage reports and the backend read-only *mode*, both accurate.
 
-- [x] G17: internal runtime data is untracked
-  CHECK: git ls-files .chryypt | wc -l
-  EXPECT: 0
-  EVIDENCE: `0`; `.chryypt/`, `/screenshots/` and `src-tauri/*-bench.txt` are gitignored. No
-  credentials were found in the inspected session/checkpoint files. History rewrite to purge them
-  from the initial commit has **not** been done and requires approval.
+## Documentation
 
-## Not gated / unverified
+- [x] G15: milestone docs describe exactly what shipped
+  CHECK: manual review of ROADMAP, HANDOFF, docs/IMPLEMENTATION_STATUS, docs/SECURITY,
+  docs/ARCHITECTURE, README and AGENTS
+  EXPECT: provider list, safety limits and verification evidence match the code; no unverified
+  cleanup claim, no executed-run claim against personal data
+  EVIDENCE: updated in the same commit. Numbers quoted (48 catalog locations, 27 safe / 9 caution /
+  12 protected, 19 commands, preview cap 400, 100,000 files per target, 10-minute plan TTL, 7-day
+  retention, 100-entry log) are read from `caches.rs`, `cleanup.rs`, `commands.rs` and `lib.rs`.
 
-- [ ] Windows CI remote run: `.github/workflows/ci.yml` exists and the same commands pass locally,
-  but no GitHub Actions run was observed from this machine.
+## Not gated
+
+- [ ] Windows CI remote run: workflow now runs the security, cleanup-stress and fixture steps;
+  no GitHub Actions run has been observed from this machine.
 - [ ] Release MSI/NSIS packaging and signing: not produced.
-- [ ] Standalone debug build without the Vite dev server: the debug executable loads `devUrl`.
-- [ ] MFT on a volume above the 4,910,404-record budget: falls back by design; fallback timing is
-  unmeasured.
-- [ ] Cold-cache benchmark: not measured.
+- [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;
+  the engine was exercised only against isolated fixtures.
+- [ ] Elevation: Cyron never requests administrator rights for cleaning; locked or system-owned
+  files are reported and skipped.

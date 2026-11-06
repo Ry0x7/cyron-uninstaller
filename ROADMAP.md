@@ -70,16 +70,36 @@ Still deferred: MFT measurement on volumes above the record budget, Store/MSIX i
 cold-cache benchmark methodology.
 
 
-## Phase 3 — Safe cleaning
+## Phase 3 — Safe cleaning (implemented, see docs/IMPLEMENTATION_STATUS.md)
 
-- [ ] Cleanup previews for every operation, grouped by provider and risk.
-- [ ] Windows cleanup provider (temporary files, update cache, crash dumps, browser caches).
-- [ ] Application cache providers for supported tools.
-- [ ] Developer/AI cleanup providers for the Phase 1 catalog, including re-download cost warnings.
-- [ ] Explicit confirmation, exclusion lists and protected-data enforcement.
-- [ ] Registry backup before any registry modification (if introduced).
-- [ ] Rollback for supported file operations and a detailed operation log.
-- [ ] Dry-run mode and a read-only switch.
+- [x] Cleanup previews for every operation, grouped as Windows / Applications / Developer tools /
+      AI tools and by risk, listing the exact planned file paths with totals.
+- [x] Cleanup engine (`src-tauri/src/cleanup.rs`): catalog-resolved targets only, backend guard,
+      per-file revalidation, quarantine instead of deletion, per-item results, progress and
+      cancellation. Plan ids are single-use, held server-side, and expire after 10 minutes.
+- [x] Windows cleanup provider: user temporary files, Windows temporary files, crash dumps and
+      the INetCache folder. The Windows Update download cache is measured but protected — Cyron
+      does not manipulate servicing state; Storage Sense/Disk Cleanup remain the supported route.
+- [x] Browser cache providers: Chrome and Edge caches are cleanable; Firefox profiles are
+      protected. Browser profiles, history, cookies and passwords are never offered.
+- [x] Application cache providers: VS Code, Cursor and Antigravity caches keep only cache, GPU
+      cache and log entries cleanable; workspace storage and local history stay protected.
+- [x] Developer/AI providers for the catalog, with an explicit impact note per entry describing
+      whether the data regenerates, is re-downloaded, or costs a reset.
+- [x] Explicit confirmation (checkbox + backend plan), backend-enforced user exclusions from
+      Settings, and protected-data enforcement in the backend rather than the UI.
+- [x] Recoverable quarantine (`<app_data>\quarantine\<run-id>`) with a manifest, byte-exact
+      restore that never overwrites, purge of a single batch, and 7-day retention metadata.
+- [x] Cleanup operation log (`<app_data>\cleanup-log.json`, max 100) plus Activity entries; restore
+      and purge are logged too. No registry writes exist, so no registry backup is required yet.
+- [x] Dry-run preview (available in read-only mode, since it only reads) and a backend read-only
+      switch that is on by default and blocks execution.
+- [x] Permission-boundary security suite (`tests/security.rs`) replacing the blanket read-only
+      source audit, cleanup stress suite, an isolated end-to-end cleanup fixture, and updated CI.
+
+Deferred to Phase 4: registry cleaning and therefore registry backup, process termination and
+locked-file forcing, uninstall commands, and duplicate management. Quarantine has no automatic
+size cap or expiry sweep; batches stay until purged.
 
 ## Phase 4 — Uninstall engine
 
