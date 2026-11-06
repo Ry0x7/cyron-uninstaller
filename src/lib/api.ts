@@ -126,6 +126,28 @@ export const api = {
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;
+let appsRequest: Promise<AppInventory> | null = null;
+
+/**
+ * Application discovery walks multiple registry hives and package inventories.
+ * Concurrent callers share a single request. Pass force=true to reload.
+ */
+export function loadInstalledApps(force = false): Promise<AppInventory> {
+  if (force) appsRequest = null;
+  if (!appsRequest) {
+    let request: Promise<AppInventory>;
+    request = api.listInstalledApps().catch((error: unknown) => {
+      if (appsRequest === request) appsRequest = null;
+      throw error;
+    });
+    appsRequest = request;
+  }
+  return appsRequest;
+}
+
+export function invalidateInstalledApps(): void {
+  appsRequest = null;
+}
 
 /**
  * Cache discovery walks every known tool location, so concurrent pages share a

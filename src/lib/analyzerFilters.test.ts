@@ -97,6 +97,15 @@ describe("filterTree", () => {
     const result = filterTree(root, filters({ extension: "does-not-exist" }), NOW);
     expect(result.children).toEqual([]);
     expect(result.size).toBe(root.size);
+    expect(result.name).toBe(root.name);
+    expect(result.path).toBe(root.path);
+  });
+
+  it("preserves root node and totals when filtering deep hierarchies", () => {
+    const result = filterTree(root, filters({ minSize: 2000 }), NOW);
+    expect(result.name).toBe(root.name);
+    expect(result.children).toHaveLength(0);
+    expect(result.size).toBe(root.size);
   });
 });
 

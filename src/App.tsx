@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { api } from "./lib/api";
 import { IconButton } from "./components/ui";
 import {
@@ -188,6 +188,25 @@ Preview, then 7-day quarantine.
   );
 }
 
+interface ViewSlotProps {
+  id: ViewId;
+  active: boolean;
+  label: string;
+  children: ReactNode;
+}
+
+const ViewSlot = memo(function ViewSlot({ active, label, children }: ViewSlotProps) {
+  return (
+    <section
+      className="view-slot"
+      hidden={!active}
+      aria-label={label}
+    >
+      {children}
+    </section>
+  );
+});
+
 export default function App() {
   const [view, setView] = useState<ViewId>("overview");
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -231,36 +250,47 @@ export default function App() {
     [navigate],
   );
 
-  const renderView = (id: ViewId): ReactNode => {
+  const overviewView = useMemo(() => <Overview onNavigate={navigate} />, [navigate]);
+  const uninstallerInitialAppId = startupRoute?.view === "uninstaller" ? startupRoute.targetAppId : undefined;
+  const uninstallerInitialQuery = startupRoute?.view === "uninstaller" ? startupRoute.path : undefined;
+  const uninstallerView = useMemo(
+    () => <Uninstaller initialAppId={uninstallerInitialAppId} initialQuery={uninstallerInitialQuery} />,
+    [uninstallerInitialAppId, uninstallerInitialQuery],
+  );
+  const analyzerInitialPath = startupRoute?.view === "analyzer" ? startupRoute.path : undefined;
+  const analyzerInitialMode =
+    startupRoute?.view === "analyzer" &&
+    (startupRoute.subview === "map" || startupRoute.subview === "duplicates" || startupRoute.subview === "storage")
+      ? startupRoute.subview
+      : undefined;
+  const analyzerView = useMemo(
+    () => (
+      <Analyzer
+        initialPath={analyzerInitialPath}
+        initialMode={analyzerInitialMode}
+        onNavigateToCleaner={navigateToCleanerWithTarget}
+      />
+    ),
+    [analyzerInitialPath, analyzerInitialMode, navigateToCleanerWithTarget],
+  );
+  const cleanerView = useMemo(() => <Cleaner initialTargetId={cleanerTargetId} />, [cleanerTargetId]);
+  const activityView = useMemo(() => <Activity />, []);
+  const settingsView = useMemo(() => <Settings />, []);
+
+  const getViewElement = (id: ViewId): ReactNode => {
     switch (id) {
       case "overview":
-        return <Overview onNavigate={navigate} />;
+        return overviewView;
       case "uninstaller":
-        return (
-          <Uninstaller
-            initialAppId={startupRoute?.view === "uninstaller" ? startupRoute.targetAppId : undefined}
-            initialQuery={startupRoute?.view === "uninstaller" ? startupRoute.path : undefined}
-          />
-        );
+        return uninstallerView;
       case "analyzer":
-        return (
-          <Analyzer
-            initialPath={startupRoute?.view === "analyzer" ? startupRoute.path : undefined}
-            initialMode={
-              startupRoute?.view === "analyzer" &&
-              (startupRoute.subview === "map" || startupRoute.subview === "duplicates" || startupRoute.subview === "storage")
-                ? startupRoute.subview
-                : undefined
-            }
-            onNavigateToCleaner={navigateToCleanerWithTarget}
-          />
-        );
+        return analyzerView;
       case "cleaner":
-        return <Cleaner initialTargetId={cleanerTargetId} />;
+        return cleanerView;
       case "activity":
-        return <Activity />;
+        return activityView;
       case "settings":
-        return <Settings />;
+        return settingsView;
     }
   };
 
@@ -274,14 +304,14 @@ export default function App() {
       />
       <main className="main" id="main-content" aria-label="Cyron content">
         {visited.map((id) => (
-          <section
+          <ViewSlot
             key={id}
-            className="view-slot"
-            hidden={view !== id}
-            aria-label={viewLabel(id)}
+            id={id}
+            active={view === id}
+            label={viewLabel(id)}
           >
-            {renderView(id)}
-          </section>
+            {getViewElement(id)}
+          </ViewSlot>
         ))}
       </main>
     </div>

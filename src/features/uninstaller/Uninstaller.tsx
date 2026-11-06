@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { api, errorMessage } from "../../lib/api";
+import { api, errorMessage, invalidateInstalledApps, loadInstalledApps } from "../../lib/api";
 import { formatBytes, formatCount, formatDate, formatDateTime, truncateMiddle } from "../../lib/format";
-import { useAsync } from "../../lib/hooks";
+import { useAsync, useDebouncedValue } from "../../lib/hooks";
 import type { BatchUninstallPlan, BatchUninstallReport, InstalledApp } from "../../lib/types";
 import {
   Badge,
@@ -66,8 +66,9 @@ export function Uninstaller({
   initialAppId?: string | null;
   initialQuery?: string | null;
 } = {}) {
-  const inventory = useAsync(() => api.listInstalledApps(), []);
+  const inventory = useAsync(() => loadInstalledApps(), []);
   const [query, setQuery] = useState(initialQuery ?? "");
+  const debouncedQuery = useDebouncedValue(query, 120);
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sort, setSort] = useState<SortKey>("name");
@@ -95,7 +96,7 @@ export function Uninstaller({
   }, [initialAppId, apps]);
 
   const counts = useMemo(() => {
-    const needle = normalizeSearch(query);
+    const needle = normalizeSearch(debouncedQuery);
     const matching = needle
       ? apps.filter((app) =>
           [app.name, app.publisher, app.installLocation, app.version].some(
@@ -123,7 +124,7 @@ export function Uninstaller({
   }, [apps, query]);
 
   const visible = useMemo(() => {
-    const needle = normalizeSearch(query);
+    const needle = normalizeSearch(debouncedQuery);
     const filtered = apps.filter((app) => {
       if (scope !== "all" && app.scope !== scope) return false;
       if (sourceFilter === "win32" && app.source !== "win32") return false;
@@ -153,7 +154,7 @@ export function Uninstaller({
           return compareNullableText(a.name, b.name);
       }
     });
-  }, [apps, query, scope, sort]);
+  }, [apps, debouncedQuery, scope, sort]);
 
   const loading = inventory.status === "loading" && apps.length === 0;
 
@@ -224,6 +225,7 @@ export function Uninstaller({
     try {
       const report = await api.executeBatchUninstall(batchPlan.planId);
       setBatchReport(report);
+      invalidateInstalledApps();
       inventory.reload();
     } catch (err) {
       setBatchError(errorMessage(err));
@@ -243,7 +245,10 @@ export function Uninstaller({
             <Button
               icon={<IconRefresh size={15} />}
               loading={inventory.status === "loading"}
-              onClick={inventory.reload}
+              onClick={() => {
+                invalidateInstalledApps();
+                inventory.reload();
+              }}
             >
               Refresh
             </Button>
@@ -507,7 +512,10 @@ export function Uninstaller({
       <AppDrawer
         app={selected}
         onClose={() => setSelected(null)}
-        onUninstallSuccess={() => inventory.reload()}
+        onUninstallSuccess={() => {
+          invalidateInstalledApps();
+          inventory.reload();
+        }}
       />
 
       {/* Batch Uninstall Drawer */}

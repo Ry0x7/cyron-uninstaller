@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAsync } from "../../lib/hooks";
-import { api, BACKEND_OFFLINE, invalidateCaches, loadCaches } from "../../lib/api";
+import { api, BACKEND_OFFLINE, invalidateCaches, invalidateInstalledApps, loadCaches, loadInstalledApps } from "../../lib/api";
 import {
   formatBytes,
   formatCount,
@@ -99,7 +99,7 @@ function StatusBadge({ entry }: { entry: HistoryEntry }) {
 
 export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void }) {
   const volumes = useAsync(() => api.listVolumes(), []);
-  const applications = useAsync(() => api.listInstalledApps(), []);
+  const applications = useAsync(() => loadInstalledApps(), []);
   const caches = useAsync(() => loadCaches(), []);
   const history = useAsync(() => api.getHistory(), []);
   const [lastVolumes, setLastVolumes] = useState<VolumeInfo[] | null>(null);
@@ -186,6 +186,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
   }, [reloadHistory]);
 
   const refreshAll = () => {
+    invalidateInstalledApps();
     invalidateCaches();
     volumes.reload();
     applications.reload();

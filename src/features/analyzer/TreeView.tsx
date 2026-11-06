@@ -34,11 +34,11 @@ function pathKey(path: string): string {
   return path.replace(/[\\/]+$/, "").toLowerCase();
 }
 
-function nodeKey(node: ScanNode, parentKey: string | null, index: number): string {
+export function nodeKey(node: ScanNode, parentKey: string | null, index: number): string {
   return node.path ? `path:${pathKey(node.path)}` : `${parentKey ?? "root"}/synthetic-${index}-${node.kind}`;
 }
 
-function findAncestors(root: ScanNode, target: ScanNode): string[] {
+export function findAncestors(root: ScanNode, target: ScanNode): string[] {
   const targetPath = target.path ? pathKey(target.path) : "";
   const visit = (
     node: ScanNode,
@@ -50,6 +50,10 @@ function findAncestors(root: ScanNode, target: ScanNode): string[] {
     if (node === target || (targetPath && node.path && pathKey(node.path) === targetPath)) {
       return ancestors;
     }
+    const nodeP = node.path ? pathKey(node.path) : "";
+    if (targetPath && nodeP && !targetPath.startsWith(nodeP)) {
+      return null;
+    }
     for (let childIndex = 0; childIndex < node.children.length; childIndex += 1) {
       const found = visit(node.children[childIndex], key, childIndex, [...ancestors, key]);
       if (found) return found;
@@ -59,7 +63,7 @@ function findAncestors(root: ScanNode, target: ScanNode): string[] {
   return visit(root, null, 0, []) ?? [];
 }
 
-function flattenVisible(
+export function flattenVisible(
   root: ScanNode,
   expanded: Set<string>,
   filters: AnalyzerFilters,
@@ -110,10 +114,13 @@ export function TreeView({
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingReveal = useRef<string | null>(null);
 
+  const filteredRoot = useMemo(() => {
+    return filterTree(root, filters);
+  }, [root, filters]);
+
   const view = useMemo(() => {
-    const filtered = filterTree(root, filters, Date.now());
-    return flattenVisible(filtered, expanded, filters);
-  }, [root, filters, expanded]);
+    return flattenVisible(filteredRoot, expanded, filters);
+  }, [filteredRoot, expanded, filters]);
   const { rows, capped, indexByKey } = view;
 
   const previousRootKey = useRef(rootKey);
@@ -264,8 +271,7 @@ export function TreeView({
   const visible = rows.slice(start, end);
   const activeRow = rows[focusedIndex];
 
-  const noMatches = root.children.length > 0 && rows.length <= 1 && rows[0]?.key === rootKey;
-  if (rows.length === 0 || noMatches) {
+  if (rows.length === 0) {
     return (
       <div className="az-tree-view-wrap">
         <p className="az-tree-view__empty">

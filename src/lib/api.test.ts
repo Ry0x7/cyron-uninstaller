@@ -3,8 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-import { api, BACKEND_OFFLINE, errorMessage, invalidateCaches, isDesktop, loadCaches } from "./api";
-import { SCAN_EVENT, type CacheInventory } from "./types";
+import {
+  api,
+  BACKEND_OFFLINE,
+  errorMessage,
+  invalidateCaches,
+  invalidateInstalledApps,
+  isDesktop,
+  loadCaches,
+  loadInstalledApps,
+} from "./api";
+import { SCAN_EVENT, type AppInventory, type CacheInventory } from "./types";
 
 function setDesktop(enabled: boolean) {
   if (enabled) {
@@ -41,6 +50,7 @@ beforeEach(() => {
   invoke.mockReset();
   setDesktop(true);
   invalidateCaches();
+  invalidateInstalledApps();
 });
 
 describe("Tauri IPC contract", () => {
@@ -182,6 +192,59 @@ describe("cache request sharing", () => {
     await expect(waiting).resolves.toEqual(inventory(30));
     fresh.resolve(inventory(40));
     await expect(afterInvalidation).resolves.toEqual(inventory(40));
+  });
+});
+
+describe("installed apps request sharing and invalidation", () => {
+  const sampleApps = (count: number): AppInventory => ({
+    apps: Array.from({ length: count }, (_, i) => ({
+      id: `app-${i}`,
+      name: `App ${i}`,
+      publisher: "Publisher",
+      version: "1.0",
+      installDate: "2026-01-01",
+      estimatedSize: 1024,
+      installLocation: `C:\\App-${i}`,
+      uninstallString: `C:\\App-${i}\\uninst.exe`,
+      quietUninstallString: null,
+      modifyPath: null,
+      isProtected: false,
+      isSystemComponent: false,
+      source: "win32" as const,
+      scope: "machine" as const,
+      hive: "machine-64" as const,
+      registryKey: `HKLM\\Software\\App-${i}`,
+      uninstallSupport: "standard" as const,
+    })),
+    warnings: [],
+  });
+
+  it("shares concurrent requests and reuses the cached inventory", async () => {
+    const request = deferred<AppInventory>();
+    invoke.mockReturnValue(request.promise);
+    const first = loadInstalledApps();
+    const second = loadInstalledApps();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    request.resolve(sampleApps(3));
+    await expect(first).resolves.toEqual(sampleApps(3));
+    await expect(second).resolves.toEqual(sampleApps(3));
+    await expect(loadInstalledApps()).resolves.toEqual(sampleApps(3));
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("forces a fresh request when force=true or invalidateInstalledApps is called", async () => {
+    const older = deferred<AppInventory>();
+    const fresh = deferred<AppInventory>();
+    invoke.mockReturnValueOnce(older.promise).mockReturnValueOnce(fresh.promise);
+    const oldCall = loadInstalledApps();
+    older.resolve(sampleApps(2));
+    await expect(oldCall).resolves.toEqual(sampleApps(2));
+
+    invalidateInstalledApps();
+    const freshCall = loadInstalledApps();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    fresh.resolve(sampleApps(5));
+    await expect(freshCall).resolves.toEqual(sampleApps(5));
   });
 });
 
