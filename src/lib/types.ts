@@ -595,4 +595,37 @@ export interface IndexStats {
   isComplete: boolean;
 }
 
+export interface HunterTargetInfo {
+  hwnd: number;
+  pid: number;
+  processName: string;
+  processPath: string | null;
+  windowTitle: string | null;
+  matchedAppId: string | null;
+  matchedAppName: string | null;
+  isCritical: boolean;
+}
+
+export interface SystemSpecs {
+  osName: string;
+  osBuild: string;
+  osArchitecture: string;
+  cpuBrand: string;
+  cpuLogicalCores: number;
+  totalMemoryBytes: number;
+  availableMemoryBytes: number;
+  memoryInUsePercent: number;
+  gpuBrand: string | null;
+  uptimeSeconds: number;
+}
+
+export interface StartupItem {
+  id: string;
+  name: string;
+  command: string;
+  location: string;
+  enabled: boolean;
+  publisher: string | null;
+}
+
 

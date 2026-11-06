@@ -18,11 +18,13 @@ import {
 import { Activity } from "./features/activity/Activity";
 import { Analyzer } from "./features/analyzer/Analyzer";
 import { Cleaner } from "./features/cleaner/Cleaner";
+import { HunterMode } from "./features/hunter/HunterMode";
 import { Overview } from "./features/overview/Overview";
 import { Settings } from "./features/settings/Settings";
 import { Uninstaller } from "./features/uninstaller/Uninstaller";
+import { loadInstalledApps } from "./lib/api";
 import { useSettings, type ThemePreference } from "./lib/settings";
-import type { StartupRoute, ViewId } from "./lib/types";
+import type { InstalledApp, StartupRoute, ViewId } from "./lib/types";
 
 const COLLAPSE_KEY = "cyron.sidebar.collapsed";
 
@@ -213,6 +215,13 @@ export default function App() {
   const [visited, setVisited] = useState<ViewId[]>(["overview"]);
   const [startupRoute, setStartupRoute] = useState<StartupRoute | null>(null);
   const [cleanerTargetId, setCleanerTargetId] = useState<string | null>(null);
+  const [apps, setApps] = useState<InstalledApp[]>([]);
+
+  useEffect(() => {
+    loadInstalledApps().then((inv) => {
+      if (inv?.apps) setApps(inv.apps);
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     document.title = view === "overview" ? "Cyron" : `${viewLabel(view)} · Cyron`;
@@ -314,6 +323,7 @@ export default function App() {
           </ViewSlot>
         ))}
       </main>
+      <HunterMode installedApps={apps} />
     </div>
   );
 }

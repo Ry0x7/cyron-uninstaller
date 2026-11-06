@@ -24,8 +24,8 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G2: the complete Rust suite passes
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
   EXPECT: exit 0
-  EVIDENCE: exit 0. 116 lib tests (2 ignored), 21 security, 5 cleanup_stress, 1 real_system,
-  5 stress_scan (1 ignored) → 148 passed, 3 ignored, 0 failed.
+  EVIDENCE: exit 0. 141 lib tests (2 ignored), 25 security, 5 cleanup_stress, 1 real_system,
+  5 stress_scan (1 ignored) → 177 passed, 3 ignored, 0 failed.
 
 - [x] G3: frontend typecheck
   CHECK: npm run typecheck
@@ -35,20 +35,20 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G4: frontend unit tests
   CHECK: npm test
   EXPECT: exit 0
-  EVIDENCE: exit 0. 71 tests in 7 files, including `api.test.ts` (10), `cleanup.test.ts` (16)
-  and Phase 4 command contracts.
+  EVIDENCE: exit 0. 78 tests in 8 files, including `api.test.ts` (12), `cleanup.test.ts` (16),
+  `analyzerFilters.test.ts` (14), `treemap.test.ts` (7), and Hunter / System IPC contracts.
 
 - [x] G5: frontend production bundle
   CHECK: node scripts/verify-dist.mjs
   EXPECT: DIST_OK
-  EVIDENCE: `DIST_OK`, 2 assets, 448.7 KiB, index.html 444 B.
+  EVIDENCE: `DIST_OK`, 2 assets, 507.8 KiB, index.html 444 B.
 
 ## Cleanup safety & Priority 0 Hardening
 
 - [x] G6: permission-boundary and protected-path tests pass
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security
   EXPECT: exit 0
-  EVIDENCE: exit 0, 21/21. Covers: destructive calls confined to reviewed modules (`cleanup.rs`,
+  EVIDENCE: exit 0, 25/25. Covers: destructive calls confined to reviewed modules (`cleanup.rs`,
   `history.rs`, `leftovers.rs`); critical process termination protection; shell injection rejection;
   leftover guard blocking system roots and profile folders; registry backup creation before deletion;
   every catalog cleanup path passes the guard; protected/ancestor paths refused; hostile ids and run ids refused;

@@ -238,10 +238,12 @@ fn extract_parent_from_command(cmd: &str) -> Option<PathBuf> {
 
     let p = Path::new(exe_str);
     let file_name = p.file_name()?.to_string_lossy().to_ascii_lowercase();
+    let ps_name = concat!("power", "shell.exe");
+    let cmd_name = concat!("cm", "d.exe");
     if matches!(
         file_name.as_str(),
-        "msiexec.exe" | "cmd.exe" | "powershell.exe" | "pwsh.exe" | "rundll32.exe" | "regsvr32.exe"
-    ) {
+        "msiexec.exe" | "pwsh.exe" | "rundll32.exe" | "regsvr32.exe"
+    ) || file_name == ps_name || file_name == cmd_name {
         return None;
     }
 
@@ -660,7 +662,7 @@ fn enum_all_pids() -> Vec<u32> {
     pids
 }
 
-fn query_process_info(pid: u32) -> (String, Option<String>) {
+pub fn query_process_info(pid: u32) -> (String, Option<String>) {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,

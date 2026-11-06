@@ -5,6 +5,62 @@
   align-items: start;
 }
 
+.ov-specs {
+  grid-column: span 12;
+}
+
+.ov-specs__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+@media (max-width: 950px) {
+  .ov-specs__grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .ov-specs__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ov-specs__card {
+  padding: 12px 14px;
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ov-specs__card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ov-specs__card-value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1.35;
+}
+
+.ov-specs__card-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .ov-storage,
 .ov-cleanup {
   grid-column: span 7;

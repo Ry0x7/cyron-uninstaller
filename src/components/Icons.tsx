@@ -240,3 +240,18 @@ export const IconCopy = (props: IconProps) => (
     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
   </Svg>
 );
+
+export const IconCrosshair = (props: IconProps) => (
+  <Svg {...props}>
+    <circle cx="12" cy="12" r="8" />
+    <path d="M12 2v4M12 18v4M2 12h4M18 12h4M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+  </Svg>
+);
+
+export const IconCpu = (props: IconProps) => (
+  <Svg {...props}>
+    <rect x="5" y="5" width="14" height="14" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M9 1v4M15 1v4M9 19v4M15 19v4M1 9h4M1 15h4M19 9h4M19 15h4" />
+  </Svg>
+);

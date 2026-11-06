@@ -17,7 +17,16 @@ import {
   Skeleton,
   ViewHeader,
 } from "../../components/ui";
-import { IconApps, IconLock, IconPlay, IconRefresh, IconShield, IconTrash } from "../../components/Icons";
+import {
+  IconApps,
+  IconCopy,
+  IconFolder,
+  IconLock,
+  IconPlay,
+  IconRefresh,
+  IconShield,
+  IconTrash,
+} from "../../components/Icons";
 import { AppDrawer } from "./AppDrawer";
 import { UninstallWizard } from "./UninstallWizard";
 import "./uninstaller.css";
@@ -86,6 +95,13 @@ export function Uninstaller({
   const [batchPreparing, setBatchPreparing] = useState(false);
   const [batchReport, setBatchReport] = useState<BatchUninstallReport | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; app: InstalledApp } | null>(null);
+
+  useEffect(() => {
+    const handleClose = () => setContextMenu(null);
+    window.addEventListener("click", handleClose);
+    return () => window.removeEventListener("click", handleClose);
+  }, []);
 
   const apps = inventory.data?.apps ?? [];
   const warnings = [...new Set(inventory.data?.warnings ?? [])];
@@ -423,6 +439,11 @@ export function Uninstaller({
                       aria-label={`View details for ${app.name}`}
                       onClick={() => openRow(app)}
                       onKeyDown={(event) => onRowKeyDown(event, app)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu({ x: e.clientX, y: e.clientY, app });
+                      }}
                     >
                       <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                         <input
@@ -490,6 +511,72 @@ export function Uninstaller({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {contextMenu && (
+            <div
+              className="un-context-menu"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="un-context-item un-context-item--danger"
+                onClick={() => {
+                  setWizardApp(contextMenu.app);
+                  setContextMenu(null);
+                }}
+              >
+                <IconTrash size={14} />
+                {contextMenu.app.uninstallSupport === "missing" ? "Force Remove Application" : "Uninstall Application"}
+              </button>
+              <button
+                type="button"
+                className="un-context-item"
+                onClick={() => {
+                  setSelected(contextMenu.app);
+                  setContextMenu(null);
+                }}
+              >
+                <IconApps size={14} /> Inspect Details
+              </button>
+              <div className="un-context-divider" />
+              {contextMenu.app.installLocation && (
+                <>
+                  <button
+                    type="button"
+                    className="un-context-item"
+                    onClick={() => {
+                      api.revealPath(contextMenu.app.installLocation!);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <IconFolder size={14} /> Open Install Directory
+                  </button>
+                  <button
+                    type="button"
+                    className="un-context-item"
+                    onClick={() => {
+                      navigator.clipboard.writeText(contextMenu.app.installLocation!);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <IconCopy size={14} /> Copy Install Path
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                className="un-context-item"
+                onClick={() => {
+                  const text = `${contextMenu.app.name}${contextMenu.app.version ? ` (${contextMenu.app.version})` : ""}`;
+                  navigator.clipboard.writeText(text);
+                  setContextMenu(null);
+                }}
+              >
+                <IconCopy size={14} /> Copy Name &amp; Version
+              </button>
             </div>
           )}
         </Panel>

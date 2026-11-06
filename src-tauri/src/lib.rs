@@ -6,6 +6,7 @@ pub mod duplicates;
 pub mod explorer;
 pub mod fs;
 pub mod history;
+pub mod hunter;
 pub mod index;
 pub mod leftovers;
 pub mod mft;
@@ -13,6 +14,7 @@ pub mod process;
 pub mod providers;
 pub mod scan;
 pub mod storage;
+pub mod system;
 pub mod uninstall;
 pub mod volumes;
 
@@ -106,6 +108,9 @@ pub fn run() {
             commands::get_scan_index_stats,
             commands::snapshot_app_identity,
             commands::clean_broken_inventory_entry,
+            commands::resolve_cursor_target,
+            commands::get_system_specs,
+            commands::list_startup_items,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");
