@@ -12,9 +12,11 @@ use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use winreg::enums::*;
 use winreg::{RegKey, RegValue};
-use windows_sys::Win32::Foundation::POINT;
+use windows_sys::Win32::Foundation::{POINT, RECT};
+use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
 use cyron_lib::apps::InstalledApp;
+use cyron_lib::cleanup;
 use cyron_lib::hunter;
 use cyron_lib::leftovers;
 use cyron_lib::process;
@@ -65,7 +67,7 @@ fn main() {
     let (nested_key, _) = hkcu.create_subkey(format!("{test_reg_subkey}\\NestedKey")).expect("create nested");
     nested_key.set_value("NestedVal", &"child data").expect("set child val");
 
-    println!("=== Cyron Milestone 7.2 E2E Verification Suite ===");
+    println!("=== Cyron Milestone 7.3 E2E Verification Suite ===");
     println!("Fixture root: {}", temp_root.display());
 
     // -------------------------------------------------------------------------
@@ -78,40 +80,57 @@ fn main() {
         .unwrap()
         .join("disposable_gui_target.exe");
 
-    let mut gui_child = if target_bin.exists() {
-        Command::new(&target_bin)
-            .stdout(Stdio::piped())
-            .spawn()
-            .ok()
-    } else {
-        None
+    assert!(
+        target_bin.exists(),
+        "Disposable GUI target binary not found at {}. Non-GUI fallback is strictly prohibited for external GUI targeting verification!",
+        target_bin.display()
+    );
+
+    let mut gui_child = Command::new(&target_bin)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn disposable GUI target");
+
+    let stdout = gui_child.stdout.take().expect("capture stdout");
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    reader.read_line(&mut line).expect("read line from disposable GUI stdout");
+    println!("Spawned external disposable GUI window stdout: {line}");
+
+    // Parse TARGET_HWND:0x... PID:...
+    let (hwnd_val, disp_pid) = {
+        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+        let hwnd_part = parts.iter().find(|p| p.starts_with("TARGET_HWND:")).expect("TARGET_HWND in stdout");
+        let pid_part = parts.iter().find(|p| p.starts_with("PID:")).expect("PID in stdout");
+        let hwnd_hex = hwnd_part.strip_prefix("TARGET_HWND:").unwrap();
+        let hwnd_ptr = usize::from_str_radix(hwnd_hex.strip_prefix("0x").unwrap_or(hwnd_hex), 16).expect("parse hwnd hex");
+        let pid: u32 = pid_part.strip_prefix("PID:").unwrap().parse().expect("parse pid");
+        (hwnd_ptr, pid)
+    };
+    assert_eq!(disp_pid, gui_child.id());
+
+    // Allow window to be visible and message loop active
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // Measure window rect and target the window center
+    let mut rect: RECT = unsafe { std::mem::zeroed() };
+    let got_rect = unsafe { GetWindowRect(hwnd_val as _, &mut rect) };
+    assert_ne!(got_rect, 0, "GetWindowRect must succeed on real HWND");
+    let target_point = POINT {
+        x: (rect.left + rect.right) / 2,
+        y: (rect.top + rect.bottom) / 2,
     };
 
-    let (disp_pid, target_point) = if let Some(ref mut child) = gui_child {
-        let stdout = child.stdout.take().expect("capture stdout");
-        let mut reader = std::io::BufReader::new(stdout);
-        let mut line = String::new();
-        let _ = reader.read_line(&mut line);
-        let pid = child.id();
-        println!("Spawned external disposable GUI window: PID {pid}, stdout: {line}");
-        (pid, POINT { x: 200, y: 200 })
-    } else {
-        println!("Disposable GUI binary not found; using fallback external process...");
-        let fallback_child = Command::new(&dummy_exe)
-            .arg("/c")
-            .arg("powershell -Command Start-Sleep -Seconds 60")
-            .spawn()
-            .expect("spawn fallback external process");
-        let pid = fallback_child.id();
-        gui_child = Some(fallback_child);
-        (pid, POINT { x: 0, y: 0 })
-    };
-
-    let (disp_name, disp_path) = process::query_process_info(disp_pid);
-    let disp_creation = process::get_process_creation_time(disp_pid).unwrap_or(0);
-    assert!(disp_creation > 0, "disposable process creation time must be determined");
-    assert!(!process::is_critical_process(disp_pid, &disp_name, disp_path.as_deref()), "disposable process is not critical");
-    println!("Targeted external process: PID {disp_pid}, name {disp_name}");
+    // Assert WindowFromPoint resolves the exact HWND, PID, and title
+    let target_resolved = hunter::resolve_target_from_point(target_point, &[])
+        .expect("resolve_target_from_point succeeds")
+        .expect("target must be found at center point of disposable window");
+    assert_eq!(target_resolved.hwnd, hwnd_val, "Resolved HWND must match expected disposable GUI HWND");
+    assert_eq!(target_resolved.pid, disp_pid, "Resolved PID must match expected disposable GUI PID");
+    assert_eq!(target_resolved.window_title.as_deref(), Some("Cyron External Target App"), "Window title must match");
+    assert!(target_resolved.can_terminate, "Target must be terminable");
+    assert!(!target_resolved.is_critical, "Target must not be critical");
+    println!("Targeted external GUI window successfully: HWND 0x{:x}, PID {disp_pid}", hwnd_val);
 
     // -------------------------------------------------------------------------
     // 2. Correct application identity matching & directory boundaries
@@ -154,20 +173,7 @@ fn main() {
     // 3. Hunter snapshot isolation & verified process termination
     // -------------------------------------------------------------------------
     println!("[E2E 3/8] Testing Hunter snapshot isolation and verified process termination...");
-    let target_token = format!("hunter-target-{now}-1-{disp_pid}");
-    let target_info = hunter::HunterTargetInfo {
-        hwnd: 0,
-        pid: disp_pid,
-        process_name: disp_name.clone(),
-        process_path: disp_path.clone(),
-        window_title: Some("Cyron External Target App".into()),
-        matched_app_id: None,
-        matched_app_name: None,
-        is_critical: false,
-        hunter_target_id: target_token.clone(),
-        can_terminate: true,
-        creation_time: disp_creation,
-    };
+    let target_token = target_resolved.hunter_target_id.clone();
 
     // Uninstaller snapshot in uninstaller map
     let mut uninstaller_proc_snapshots: std::collections::HashMap<String, process::StoredProcessSnapshot> =
@@ -184,7 +190,7 @@ fn main() {
     // Register Hunter target in isolated hunter maps
     let mut hunter_proc_snapshots = std::collections::HashMap::new();
     let mut hunter_app_snapshots = std::collections::HashMap::new();
-    hunter::register_target_in_state(&target_info, &mut hunter_proc_snapshots, &mut hunter_app_snapshots);
+    hunter::register_target_in_state(&target_resolved, &mut hunter_proc_snapshots, &mut hunter_app_snapshots);
 
     // Verify isolation: uninstaller map has not been mutated or overwritten
     assert_eq!(uninstaller_proc_snapshots.len(), 1);
@@ -212,9 +218,7 @@ fn main() {
         true,
     );
     assert!(ok_term[0].success, "verified termination of disposable process must succeed");
-    if let Some(mut child) = gui_child {
-        let _ = child.wait();
-    }
+    let _ = gui_child.wait();
     println!("Verified termination succeeded and isolated snapshots maintained.");
 
     // -------------------------------------------------------------------------
@@ -228,9 +232,9 @@ fn main() {
     println!("Unregistered application review passed.");
 
     // -------------------------------------------------------------------------
-    // 5. Broken registry entry removal, fingerprinting, tamper rejection & restoration
+    // 5. Broken registry entry removal, tampering rejection, conflict prevention, and fail-closed recovery
     // -------------------------------------------------------------------------
-    println!("[E2E 5/8] Testing broken registry entry removal, fingerprinting, and tamper rejection...");
+    println!("[E2E 5/8] Testing broken registry entry removal, tampering rejection, conflict prevention, and recovery...");
     let test_broken_name = format!("CyronE2EBroken_{pid}_{now}");
     let uninstall_rel = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{test_broken_name}");
     let full_broken_path = format!(r"HKCU\{uninstall_rel}");
@@ -303,14 +307,93 @@ fn main() {
     assert!(clean_res.registry_backup_path.is_some());
     assert!(hkcu.open_subkey(&uninstall_rel).is_err(), "broken entry key must be deleted");
 
-    // Restore from verified backup
+    let batch_folder = quarantine_dir.join(&plan_id);
+    let manifest = cleanup::read_manifest(&batch_folder).expect("manifest must be readable on disk");
+    assert_eq!(manifest.run_id, plan_id);
+    assert!(manifest.backup_sha256.is_some());
+    assert_eq!(manifest.registry_key_path.as_deref(), Some(full_broken_path.as_str()));
+
     let bkp_file = PathBuf::from(clean_res.registry_backup_path.unwrap());
     assert!(bkp_file.exists());
-    let rest_rep = leftovers::restore_registry_backup(&bkp_file).expect("restore broken entry from backup");
-    assert!(rest_rep.keys_restored >= 1);
-    assert!(hkcu.open_subkey(&uninstall_rel).is_ok(), "broken entry key restored");
+
+    // Tamper test 3: modified .reg backup content (checksum mismatch)
+    let tampered_file = batch_folder.join("tampered_backup.reg");
+    fs::write(&tampered_file, b"Windows Registry Editor Version 5.00\r\n\r\n; tampered line\r\n").unwrap();
+    let tamper_res = leftovers::restore_registry_backup_with_policy(&tampered_file, Some(&manifest), true);
+    assert!(tamper_res.is_err(), "tampered backup file must fail checksum validation");
+    let err_msg = tamper_res.err().unwrap();
+    assert!(err_msg.contains("tampering") || err_msg.contains("mismatch"), "error must report checksum tampering: {err_msg}");
+
+    // Scope test: out-of-scope section injection
+    let rogue_file = batch_folder.join("rogue_backup.reg");
+    let rogue_content = format!(
+        "Windows Registry Editor Version 5.00\r\n\r\n[{}]\r\n\"Test\"=\"Val\"\r\n\r\n[HKEY_LOCAL_MACHINE\\Software\\RogueKey]\r\n\"Injected\"=\"Bad\"\r\n",
+        full_broken_path.replace("HKCU\\", "HKEY_CURRENT_USER\\")
+    );
+    fs::write(&rogue_file, rogue_content).unwrap();
+    let scope_res = leftovers::verify_registry_backup_scope(&rogue_file, &full_broken_path);
+    assert!(scope_res.is_err(), "out-of-scope sections must be refused");
+
+    // Conflict test: recreate live key before restoration; silent overwrite MUST be refused
+    let (recreated_k, _) = hkcu.create_subkey(&uninstall_rel).expect("recreate live key for conflict test");
+    recreated_k.set_value("DisplayName", &"Existing Live Entry").expect("write live value");
+    let conflict_res = leftovers::restore_registry_backup_with_policy(&bkp_file, Some(&manifest), false);
+    assert!(conflict_res.is_err(), "restoration over existing live key without explicit overwrite confirmation must fail");
+    let conflict_err = conflict_res.err().unwrap();
+    assert!(conflict_err.contains("conflict") || conflict_err.contains("already exists"), "error must indicate conflict: {conflict_err}");
+
+    // Safe recovery decision: overwrite confirmed
+    let overwrite_rep = leftovers::restore_registry_backup_with_policy(&bkp_file, Some(&manifest), true).expect("restoration with overwrite confirmed");
+    assert!(overwrite_rep.keys_restored >= 1);
+    assert!(hkcu.open_subkey(&uninstall_rel).is_ok(), "key restored successfully");
     let _ = hkcu.delete_subkey_all(&uninstall_rel);
-    println!("Broken registry entry removal and restoration passed.");
+
+    // Test quarantine file restoration/purge does NOT destroy outstanding registry backup
+    let mixed_batch_id = format!("mixed-batch-{pid}");
+    let mixed_dir = quarantine_dir.join(&mixed_batch_id);
+    fs::create_dir_all(&mixed_dir).unwrap();
+    let dummy_quarantined_file = mixed_dir.join("quarantined.dat");
+    fs::write(&dummy_quarantined_file, b"test file bytes").unwrap();
+    let dummy_reg = mixed_dir.join("registry_backup.reg");
+    fs::write(&dummy_reg, b"Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\Test]\r\n\"Val\"=\"1\"\r\n").unwrap();
+    let dummy_manifest = cleanup::BatchManifest {
+        run_id: mixed_batch_id.clone(),
+        created_at: 1000,
+        expires_at: 2000,
+        target_ids: vec!["target-1".into()],
+        items: vec![cleanup::ManifestItem {
+            original_path: temp_root.join("restored_original.dat").to_string_lossy().to_string(),
+            stored_path: dummy_quarantined_file.to_string_lossy().to_string(),
+            size: 15,
+        }],
+        registry_backup: Some("registry_backup.reg".into()),
+        registry_key_path: Some("HKCU\\Software\\Test".into()),
+        hive: Some("user-64".into()),
+        subkey_name: Some("Test".into()),
+        app_id: Some("user-64|Test".into()),
+        backup_sha256: Some("dummy".into()),
+        backup_size_bytes: Some(100),
+    };
+    cleanup::write_manifest(&mixed_dir, &dummy_manifest).unwrap();
+
+    // Restore batch files:
+    let rest_batch = cleanup::restore_batch(&quarantine_dir, &mixed_batch_id).expect("restore mixed batch");
+    assert_eq!(rest_batch.restored, 1);
+    assert!(dummy_reg.exists(), "restore_batch must NEVER delete or invalidate registry_backup.reg");
+    assert!(mixed_dir.join("manifest.json").exists(), "manifest must be preserved for registry recovery");
+
+    // Purge batch files when mixed:
+    let _ = cleanup::purge_batch(&quarantine_dir, &mixed_batch_id).expect("purge mixed batch");
+    assert!(dummy_reg.exists(), "purge_batch on mixed batch must NEVER delete registry_backup.reg");
+
+    // Clean up dummy test batch
+    let _ = fs::remove_file(&dummy_reg);
+    let _ = fs::remove_file(mixed_dir.join("manifest.json"));
+    let _ = fs::remove_file(mixed_dir.join(cleanup::JOURNAL_FILE));
+    let _ = fs::remove_dir(&mixed_dir);
+    let _ = fs::remove_file(temp_root.join("restored_original.dat"));
+
+    println!("Broken registry entry removal, tampering rejection, conflict prevention, and fail-closed recovery passed.");
 
     // -------------------------------------------------------------------------
     // 6. Startup entry disable, byte preservation, and restoration

@@ -341,7 +341,8 @@ pub fn create_uninstall_plan(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let plan_id = format!("uninst-{}-{}-{}", now, std::process::id(), app.id.replace(|c: char| !c.is_ascii_alphanumeric(), "_"));
+    let nonce = crate::leftovers::generate_crypto_nonce(6);
+    let plan_id = format!("uninst-{}-{}-{}-{}", now, std::process::id(), app.id.replace(|c: char| !c.is_ascii_alphanumeric(), "_"), nonce);
 
     Ok(StoredUninstallPlan {
         plan_id,
@@ -424,7 +425,8 @@ pub fn create_batch_uninstall_plan(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let plan_id = format!("batch-{}-{}-{}", now, std::process::id(), items.len());
+    let nonce = crate::leftovers::generate_crypto_nonce(6);
+    let plan_id = format!("batch-{}-{}-{}-{}", now, std::process::id(), items.len(), nonce);
 
     Ok(StoredBatchUninstallPlan {
         plan_id,

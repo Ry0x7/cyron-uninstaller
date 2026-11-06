@@ -37,7 +37,7 @@ const MAX_IDS: usize = 64;
 const MAX_EXCLUSIONS: usize = 128;
 const MAX_DEPTH: u32 = 64;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-const MANIFEST: &str = "manifest.json";
+pub const MANIFEST: &str = "manifest.json";
 const LOG_FILE: &str = "cleanup-log.json";
 const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(120);
 
@@ -213,23 +213,35 @@ pub struct CleanupLogEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ManifestItem {
-    original_path: String,
-    stored_path: String,
-    size: u64,
+pub struct ManifestItem {
+    pub original_path: String,
+    pub stored_path: String,
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BatchManifest {
-    run_id: String,
-    created_at: u64,
-    expires_at: u64,
-    target_ids: Vec<String>,
+pub struct BatchManifest {
+    pub run_id: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub target_ids: Vec<String>,
     #[serde(default)]
-    items: Vec<ManifestItem>,
+    pub items: Vec<ManifestItem>,
     #[serde(default)]
-    registry_backup: Option<String>,
+    pub registry_backup: Option<String>,
+    #[serde(default)]
+    pub registry_key_path: Option<String>,
+    #[serde(default)]
+    pub hive: Option<String>,
+    #[serde(default)]
+    pub subkey_name: Option<String>,
+    #[serde(default)]
+    pub app_id: Option<String>,
+    #[serde(default)]
+    pub backup_sha256: Option<String>,
+    #[serde(default)]
+    pub backup_size_bytes: Option<u64>,
 }
 
 /* ------------------------------------------------------- plan construction */
@@ -532,6 +544,16 @@ fn append_journal_entry(journal_path: &Path, item: &ManifestItem) -> Result<(), 
     Ok(())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JournalRecord {
+    original_path: String,
+    stored_path: String,
+    size: u64,
+    #[serde(default)]
+    action: Option<String>,
+}
+
 fn read_journal(journal_path: &Path) -> Option<Vec<ManifestItem>> {
     let content = fs::read_to_string(journal_path).ok()?;
     let mut items = Vec::new();
@@ -540,8 +562,15 @@ fn read_journal(journal_path: &Path) -> Option<Vec<ManifestItem>> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(item) = serde_json::from_str::<ManifestItem>(line) {
-            items.push(item);
+        if let Ok(rec) = serde_json::from_str::<JournalRecord>(line) {
+            if rec.action.as_deref() == Some("registry_backup") {
+                continue;
+            }
+            items.push(ManifestItem {
+                original_path: rec.original_path,
+                stored_path: rec.stored_path,
+                size: rec.size,
+            });
         }
     }
     Some(items)
@@ -593,6 +622,12 @@ pub fn execute_plan(
         target_ids: plan.specs.iter().map(|spec| spec.id.clone()).collect(),
         items: Vec::new(),
         registry_backup: None,
+        registry_key_path: None,
+        hive: None,
+        subkey_name: None,
+        app_id: None,
+        backup_sha256: None,
+        backup_size_bytes: None,
     };
 
     let mut items = Vec::new();
@@ -883,12 +918,23 @@ pub fn list_quarantine(root: &Path) -> Vec<QuarantineBatch> {
         if manifest.items.is_empty() && !has_reg_backup {
             continue;
         }
+        let reg_bytes = if has_reg_backup {
+            manifest.backup_size_bytes.unwrap_or_else(|| {
+                fs::metadata(dir.join("registry_backup.reg")).map(|m| m.len()).unwrap_or(0)
+            })
+        } else {
+            0
+        };
+        let items_bytes: u64 = manifest.items.iter().map(|item| item.size).sum();
+        let total_bytes = items_bytes + reg_bytes;
+        let file_count = (manifest.items.len() + if has_reg_backup { 1 } else { 0 }) as u64;
+
         batches.push(QuarantineBatch {
             run_id: manifest.run_id,
             created_at: manifest.created_at,
             expires_at: manifest.expires_at,
-            bytes: manifest.items.iter().map(|item| item.size).sum(),
-            file_count: manifest.items.len() as u64,
+            bytes: total_bytes,
+            file_count,
             dir: dir.to_string_lossy().to_string(),
             target_ids: manifest.target_ids,
         });
@@ -956,17 +1002,9 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
     }
 
     manifest.items = remaining;
-    let reg_backup_file = dir.join("registry_backup.reg");
-    let mut reg_restored = false;
-    if reg_backup_file.exists() {
-        if let Ok(reg_rep) = crate::leftovers::restore_registry_backup(&reg_backup_file) {
-            report.restored += reg_rep.keys_restored as u64;
-            let _ = fs::remove_file(&reg_backup_file);
-            reg_restored = true;
-        }
-    }
+    let has_reg_backup = dir.join("registry_backup.reg").exists() || manifest.registry_backup.is_some();
 
-    if manifest.items.is_empty() && (!reg_backup_file.exists() || reg_restored) {
+    if manifest.items.is_empty() && !has_reg_backup {
         let _ = fs::remove_file(dir.join(JOURNAL_FILE));
         let _ = fs::remove_file(dir.join(MANIFEST));
         // `remove_dir` only succeeds on an empty folder, so nothing outside the
@@ -974,11 +1012,28 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
         let _ = fs::remove_dir(&dir);
     } else {
         let _ = write_manifest(&dir, &manifest);
-        // Rewrite journal to reflect remaining items
+        // Rewrite journal to reflect remaining items and preserve registry backup entry if present
         let journal_path = dir.join(JOURNAL_FILE);
         let _ = fs::remove_file(&journal_path);
         for item in &manifest.items {
             let _ = append_journal_entry(&journal_path, item);
+        }
+        if has_reg_backup {
+            let reg_file = dir.join("registry_backup.reg");
+            let reg_entry = serde_json::json!({
+                "originalPath": manifest.registry_key_path.as_deref().unwrap_or(""),
+                "storedPath": reg_file.to_string_lossy(),
+                "size": manifest.backup_size_bytes.unwrap_or(0),
+                "sha256": manifest.backup_sha256.as_deref().unwrap_or(""),
+                "action": "registry_backup"
+            });
+            let line = serde_json::to_string(&reg_entry).unwrap_or_default();
+            use std::io::Write;
+            if let Ok(mut jf) = fs::OpenOptions::new().create(true).append(true).open(&journal_path) {
+                let _ = writeln!(jf, "{line}");
+                let _ = jf.flush();
+                let _ = jf.sync_all();
+            }
         }
     }
     Ok(report)
@@ -998,6 +1053,7 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
         removed_files: 0,
         freed_bytes: 0,
     };
+    let has_reg_backup = dir.join("registry_backup.reg").exists() || manifest.registry_backup.is_some();
     let mut remaining = Vec::new();
 
     for item in manifest.items {
@@ -1022,12 +1078,35 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
     }
 
     if remaining.is_empty() {
-        let _ = fs::remove_file(dir.join("registry_backup.reg"));
-        let _ = fs::remove_file(dir.join(JOURNAL_FILE));
-        let _ = fs::remove_file(dir.join(MANIFEST));
-        // `remove_dir` fails if anything unexpected is still inside, which is the
-        // behaviour we want.
-        let _ = fs::remove_dir(&dir);
+        if has_reg_backup {
+            // Preserve outstanding registry recovery; do not delete batch or registry backup unexpectedly
+            manifest.items = Vec::new();
+            let _ = write_manifest(&dir, &manifest);
+            let journal_path = dir.join(JOURNAL_FILE);
+            let _ = fs::remove_file(&journal_path);
+            let reg_file = dir.join("registry_backup.reg");
+            let reg_entry = serde_json::json!({
+                "originalPath": manifest.registry_key_path.as_deref().unwrap_or(""),
+                "storedPath": reg_file.to_string_lossy(),
+                "size": manifest.backup_size_bytes.unwrap_or(0),
+                "sha256": manifest.backup_sha256.as_deref().unwrap_or(""),
+                "action": "registry_backup"
+            });
+            let line = serde_json::to_string(&reg_entry).unwrap_or_default();
+            use std::io::Write;
+            if let Ok(mut jf) = fs::OpenOptions::new().create(true).append(true).open(&journal_path) {
+                let _ = writeln!(jf, "{line}");
+                let _ = jf.flush();
+                let _ = jf.sync_all();
+            }
+        } else {
+            let _ = fs::remove_file(dir.join("registry_backup.reg"));
+            let _ = fs::remove_file(dir.join(JOURNAL_FILE));
+            let _ = fs::remove_file(dir.join(MANIFEST));
+            // `remove_dir` fails if anything unexpected is still inside, which is the
+            // behaviour we want.
+            let _ = fs::remove_dir(&dir);
+        }
     } else {
         manifest.items = remaining;
         let _ = write_manifest(&dir, &manifest);
@@ -1036,6 +1115,23 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
         let _ = fs::remove_file(&journal_path);
         for item in &manifest.items {
             let _ = append_journal_entry(&journal_path, item);
+        }
+        if has_reg_backup {
+            let reg_file = dir.join("registry_backup.reg");
+            let reg_entry = serde_json::json!({
+                "originalPath": manifest.registry_key_path.as_deref().unwrap_or(""),
+                "storedPath": reg_file.to_string_lossy(),
+                "size": manifest.backup_size_bytes.unwrap_or(0),
+                "sha256": manifest.backup_sha256.as_deref().unwrap_or(""),
+                "action": "registry_backup"
+            });
+            let line = serde_json::to_string(&reg_entry).unwrap_or_default();
+            use std::io::Write;
+            if let Ok(mut jf) = fs::OpenOptions::new().create(true).append(true).open(&journal_path) {
+                let _ = writeln!(jf, "{line}");
+                let _ = jf.flush();
+                let _ = jf.sync_all();
+            }
         }
     }
     Ok(report)
@@ -1110,7 +1206,7 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
     ))
 }
 
-fn read_manifest(dir: &Path) -> Option<BatchManifest> {
+pub fn read_manifest(dir: &Path) -> Option<BatchManifest> {
     let manifest_path = dir.join(MANIFEST);
     let journal_path = dir.join(JOURNAL_FILE);
 
@@ -1156,26 +1252,52 @@ fn read_manifest(dir: &Path) -> Option<BatchManifest> {
                 target_ids: Vec::new(),
                 items: valid_items,
                 registry_backup: None,
+                registry_key_path: None,
+                hive: None,
+                subkey_name: None,
+                app_id: None,
+                backup_sha256: None,
+                backup_size_bytes: None,
             })
         }
         (None, None) => None,
     }
 }
 
-fn write_manifest(dir: &Path, manifest: &BatchManifest) -> Result<(), String> {
+pub fn write_manifest(dir: &Path, manifest: &BatchManifest) -> Result<(), String> {
     fs::create_dir_all(dir)
         .map_err(|error| format!("Could not create the quarantine folder: {error}"))?;
     let json = serde_json::to_string_pretty(manifest)
         .map_err(|error| format!("Could not encode the quarantine manifest: {error}"))?;
     let path = dir.join(MANIFEST);
     let temp = dir.join("manifest.json.tmp");
-    fs::write(&temp, json).map_err(|error| format!("Could not write the manifest: {error}"))?;
+    {
+        use std::io::Write;
+        let mut f = fs::File::create(&temp)
+            .map_err(|error| format!("Could not create the manifest temp file: {error}"))?;
+        f.write_all(json.as_bytes())
+            .map_err(|error| format!("Could not write the manifest temp file: {error}"))?;
+        f.flush()
+            .map_err(|error| format!("Could not flush the manifest temp file: {error}"))?;
+        f.sync_all()
+            .map_err(|error| format!("Could not sync the manifest temp file: {error}"))?;
+    }
     fs::rename(&temp, &path).or_else(|_| {
         fs::copy(&temp, &path)
             .map(|_| ())
             .map_err(|error| error.to_string())
     })?;
     let _ = fs::remove_file(&temp);
+
+    // Re-read and verify manifest integrity on disk
+    let verified: BatchManifest = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .ok_or_else(|| "Written manifest failed disk validation / json parse".to_string())?;
+    if verified.run_id != manifest.run_id {
+        return Err("Written manifest corrupted: run_id mismatch".into());
+    }
+
     Ok(())
 }
 
@@ -1519,7 +1641,8 @@ fn next_id(prefix: &str, at: u64) -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.subsec_nanos())
         .unwrap_or(0);
-    format!("{prefix}-{at}-{nanos}-{}-{sequence}", std::process::id())
+    let nonce = crate::leftovers::generate_crypto_nonce(6);
+    format!("{prefix}-{at}-{nanos}-{}-{sequence}-{nonce}", std::process::id())
 }
 
 /* ------------------------------------------------------------------- tests */

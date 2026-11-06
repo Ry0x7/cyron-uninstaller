@@ -9,6 +9,31 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const msvc = path.join(root, "scripts", "msvc-env.mjs");
 const marker = "RC1_E2E_FIXTURE_OK";
 
+// First build both test fixtures so disposable_gui_target.exe is available alongside rc1_e2e_fixture
+console.log("verify-e2e: building disposable_gui_target and rc1_e2e_fixture...");
+const buildRes = spawnSync(process.execPath, [
+  msvc,
+  "cargo",
+  "build",
+  "--quiet",
+  "--manifest-path",
+  "src-tauri/Cargo.toml",
+  "--example",
+  "disposable_gui_target",
+  "--example",
+  "rc1_e2e_fixture",
+], {
+  cwd: root,
+  encoding: "utf8",
+  timeout: 300_000,
+  windowsHide: true,
+});
+if (buildRes.status !== 0) {
+  if (buildRes.stderr) process.stderr.write(buildRes.stderr);
+  console.error(`verify-e2e: could not build test fixtures`);
+  process.exit(1);
+}
+
 const args = [
   msvc,
   "cargo",

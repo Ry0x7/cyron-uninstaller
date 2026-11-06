@@ -145,7 +145,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `clean_app_leftovers` | `planId`, `itemIds[]` | `LeftoverCleanReport` | Moves leftovers to quarantine with write-ahead journal and multi-type `.reg` registry backups. |
 | `prepare_broken_inventory_cleanup` | `appId` | `BrokenEntryPlan` | Prepares single-use 5-minute plan for removing broken/orphaned uninstall registry keys. |
 | `execute_broken_inventory_cleanup` | `planId` | `LeftoverCleanReport` | Revalidates broken status, creates verified `.reg` backup in quarantine, deletes orphaned subkey. |
-| `restore_registry_backup` | `runId` | `RegistryRestoreReport` | Re-imports quarantined `.reg` backup using native `reg.exe import`; re-verifies subkey restoration. |
+| `restore_registry_backup` | `runId`, `overwriteConflict?` | `RegistryRestoreReport` | Restores quarantined `.reg` backup using native `winreg` restoration with manifest binding, SHA-256 integrity verification, scope checking, and conflict protection. |
 | `prepare_batch_uninstallation` | `appIds[]` | `BatchUninstallPlan` | Validates multiple apps and prepares an ordered execution queue. |
 | `inspect_cleanable_directory` | `path` | `CleanableDirectoryInfo` | Inspects arbitrary directory against safety guards and size estimators. |
 | `open_in_terminal` | `path` | — | Launches Windows Terminal or PowerShell at the target folder without shell wrappers. |

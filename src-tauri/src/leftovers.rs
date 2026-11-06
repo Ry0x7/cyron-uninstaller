@@ -107,22 +107,89 @@ pub struct StoredBrokenEntryPlan {
 
 static PLAN_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+/// Fills a buffer with OS-backed cryptographically secure pseudo-random bytes via Windows BCryptGenRandom.
+pub fn fill_crypto_random(buf: &mut [u8]) -> Result<(), String> {
+    use windows_sys::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
+    let status = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("BCryptGenRandom failed with NTSTATUS {status:#010x}"))
+    }
+}
+
+/// Generates a hexadecimal cryptographic nonce of `byte_len` bytes.
+pub fn generate_crypto_nonce(byte_len: usize) -> String {
+    let mut buf = vec![0u8; byte_len];
+    if fill_crypto_random(&mut buf).is_err() {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_le_bytes());
+        hasher.update(std::process::id().to_le_bytes());
+        return format!("{:x}", hasher.finalize())[..byte_len * 2].to_string();
+    }
+    buf.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
 pub fn generate_collision_resistant_plan_id(prefix: &str) -> String {
-    use sha2::{Digest, Sha256};
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos();
+        .as_secs();
     let count = PLAN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let pid = std::process::id();
+    let entropy = generate_crypto_nonce(8);
 
+    format!("{prefix}-{now}-{pid}-{count}-{entropy}")
+}
+
+/// Computes SHA-256 checksum for a file on disk.
+pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let bytes = fs::read(path).map_err(|e| format!("Could not read file for hashing {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
-    hasher.update(now.to_le_bytes());
-    hasher.update(count.to_le_bytes());
-    hasher.update(pid.to_le_bytes());
-    let entropy = &format!("{:x}", hasher.finalize())[..12];
+    hasher.update(&bytes);
+    Ok(format!("{:x}", hasher.finalize()))
+}
 
-    format!("{prefix}-{now}-{count}-{entropy}")
+fn normalize_reg_path_for_comparison(p: &str) -> String {
+    let lower = p.to_ascii_lowercase();
+    if let Some(rest) = lower.strip_prefix("hkey_current_user\\") {
+        format!("hkcu\\{rest}")
+    } else if let Some(rest) = lower.strip_prefix("hkey_local_machine\\") {
+        format!("hklm\\{rest}")
+    } else {
+        lower
+    }
+}
+
+/// Validates that every section in a .reg file is strictly within allowed_key_path.
+pub fn verify_registry_backup_scope(path: &Path, allowed_key_path: &str) -> Result<(), String> {
+    let content = fs::read_to_string(path).map_err(|e| format!("Cannot read backup file: {e}"))?;
+    let allowed_norm = normalize_reg_path_for_comparison(allowed_key_path);
+    let allowed_prefix = format!("{}\\", allowed_norm);
+
+    for (line_idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section = &trimmed[1..trimmed.len() - 1];
+            let sec_norm = normalize_reg_path_for_comparison(section);
+            if sec_norm != allowed_norm && !sec_norm.starts_with(&allowed_prefix) {
+                return Err(format!(
+                    "Line {}: Section [{section}] is outside the bound approved key [{allowed_key_path}]. Rejecting backup.",
+                    line_idx + 1
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn compute_entry_fingerprint(
@@ -1065,9 +1132,57 @@ fn export_key_recursive(
     Ok(())
 }
 
-/// Restores registry keys and values from a .reg file.
+/// Restores registry keys and values from a .reg file using verified manifest binding and conflict policies.
 /// Fails closed if any key creation, subkey traversal, or value write operation fails.
-pub fn restore_registry_backup(backup_path: &Path) -> Result<RegistryRestoreReport, String> {
+pub fn restore_registry_backup_with_policy(
+    backup_path: &Path,
+    manifest: Option<&crate::cleanup::BatchManifest>,
+    overwrite_conflict: bool,
+) -> Result<RegistryRestoreReport, String> {
+    if !backup_path.exists() {
+        return Err(format!("Registry backup file does not exist at {}", backup_path.display()));
+    }
+    let meta = fs::metadata(backup_path).map_err(|e| format!("Cannot read backup metadata: {e}"))?;
+    if meta.len() == 0 {
+        return Err("Registry backup file is empty.".into());
+    }
+
+    // 1. Manifest binding validation if manifest is provided
+    if let Some(m) = manifest {
+        // Validate backup sha256 checksum
+        if let Some(ref expected_hash) = m.backup_sha256 {
+            let actual_hash = compute_file_sha256(backup_path)?;
+            if !actual_hash.eq_ignore_ascii_case(expected_hash) {
+                return Err(format!(
+                    "Registry backup tampering detected: computed SHA-256 '{actual_hash}' does not match manifest hash '{expected_hash}'."
+                ));
+            }
+        } else {
+            return Err("Manifest is missing required 'backupSha256' field.".into());
+        }
+
+        // Validate scope against approved key
+        if let Some(ref approved_key) = m.registry_key_path {
+            verify_registry_backup_scope(backup_path, approved_key)?;
+
+            // Live key conflict check: if live key already exists, do not silently overwrite
+            let (root_hive, subkey) = parse_reg_path(approved_key)?;
+            if root_hive.open_subkey(&subkey).is_ok() {
+                if !overwrite_conflict {
+                    return Err(format!(
+                        "Registry key conflict: '{approved_key}' already exists in live registry. Refusing silent overwrite. Explicit operator confirmation is required."
+                    ));
+                }
+            }
+        } else {
+            return Err("Manifest is missing required 'registryKeyPath' field.".into());
+        }
+    }
+
+    // 2. Syntax validation
+    verify_registry_backup(backup_path)?;
+
+    // 3. Native Win32 Registry Restoration
     let content = fs::read_to_string(backup_path)
         .map_err(|e| format!("Could not read registry backup file: {e}"))?;
 
@@ -1196,6 +1311,10 @@ pub fn restore_registry_backup(backup_path: &Path) -> Result<RegistryRestoreRepo
         values_restored,
         errors,
     })
+}
+
+pub fn restore_registry_backup(backup_path: &Path) -> Result<RegistryRestoreReport, String> {
+    restore_registry_backup_with_policy(backup_path, None, true)
 }
 
 fn parse_hex_bytes(s: &str) -> Result<Vec<u8>, String> {
@@ -1435,6 +1554,11 @@ pub fn execute_broken_entry_removal(
     plan: &StoredBrokenEntryPlan,
     quarantine_root: &Path,
 ) -> Result<LeftoverCleanReport, String> {
+    let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    if plan.expires_at < now_ts {
+        return Err("Cleanup plan has expired. Please re-scan and preview broken entries before removing.".into());
+    }
+
     // 1. Re-read live metadata and re-verify everything right now
     let live_meta = read_live_broken_entry_metadata(&plan.hive, &plan.subkey_name)?;
 
@@ -1465,13 +1589,21 @@ pub fn execute_broken_entry_removal(
 
     export_registry_backup(&[&candidate], &reg_backup_file)?;
     verify_registry_backup(&reg_backup_file)?;
+    verify_registry_backup_scope(&reg_backup_file, &plan.registry_key_path)?;
+
+    let backup_sha256 = compute_file_sha256(&reg_backup_file)?;
+    let backup_size = fs::metadata(&reg_backup_file).map(|m| m.len()).unwrap_or(0);
+    if backup_size == 0 {
+        return Err("Registry backup file is empty. Aborting deletion.".into());
+    }
 
     // Write write-ahead recovery journal for crash-consistency
     let journal_file = batch.join(crate::cleanup::JOURNAL_FILE);
     let journal_entry = serde_json::json!({
         "originalPath": plan.registry_key_path,
         "storedPath": reg_backup_file.to_string_lossy(),
-        "size": 0,
+        "size": backup_size,
+        "sha256": backup_sha256,
         "action": "registry_backup"
     });
     let line = serde_json::to_string(&journal_entry).unwrap_or_default();
@@ -1485,21 +1617,39 @@ pub fn execute_broken_entry_removal(
     jf.flush().map_err(|e| format!("Could not flush recovery journal: {e}"))?;
     jf.sync_all().map_err(|e| format!("Could not sync recovery journal: {e}"))?;
 
-    // Write quarantine manifest for discoverable recovery
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    let manifest = serde_json::json!({
-        "runId": plan.plan_id,
-        "createdAt": now,
-        "expiresAt": now + 7 * 86_400,
-        "targetIds": [plan.app_id],
-        "items": [],
-        "registryBackup": "registry_backup.reg",
-        "registryKeyPath": plan.registry_key_path
-    });
-    let _ = fs::write(
-        batch.join("manifest.json"),
-        serde_json::to_string_pretty(&manifest).unwrap_or_default(),
-    );
+    // Write and persist quarantine manifest with complete fail-closed verification
+    let manifest = crate::cleanup::BatchManifest {
+        run_id: plan.plan_id.clone(),
+        created_at: now_ts,
+        expires_at: now_ts + 7 * 86_400,
+        target_ids: vec![plan.app_id.clone()],
+        items: Vec::new(),
+        registry_backup: Some("registry_backup.reg".into()),
+        registry_key_path: Some(plan.registry_key_path.clone()),
+        hive: Some(plan.hive.clone()),
+        subkey_name: Some(plan.subkey_name.clone()),
+        app_id: Some(plan.app_id.clone()),
+        backup_sha256: Some(backup_sha256.clone()),
+        backup_size_bytes: Some(backup_size),
+    };
+    crate::cleanup::write_manifest(&batch, &manifest)?;
+
+    // Verify manifest and backup integrity on disk before executing deletion
+    let manifest_on_disk = crate::cleanup::read_manifest(&batch)
+        .ok_or_else(|| "Manifest could not be read back after write. Aborting deletion.".to_string())?;
+    if manifest_on_disk.run_id != plan.plan_id
+        || manifest_on_disk.backup_sha256 != Some(backup_sha256)
+        || manifest_on_disk.registry_key_path != Some(plan.registry_key_path.clone())
+    {
+        return Err("Manifest integrity check failed on disk. Aborting deletion to prevent unrecoverable state.".into());
+    }
+
+    // Recheck live registry identity immediately before deletion to minimize race window
+    let pre_del_meta = read_live_broken_entry_metadata(&plan.hive, &plan.subkey_name)?;
+    if pre_del_meta.fingerprint != plan.fingerprint {
+        return Err("Registry metadata changed immediately before deletion. Aborting deletion.".into());
+    }
+    verify_live_broken_status(&pre_del_meta)?;
 
     // 5. Delete the subkey
     if !delete_registry_key(&plan.registry_key_path) {
@@ -1880,5 +2030,114 @@ mod tests {
 
         // Clean up quarantine fixture
         let _ = fs::remove_dir_all(&quarantine_dir);
+    }
+
+    #[test]
+    fn manifest_write_failure_prevents_registry_deletion() {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let test_subkey_name = format!("CyronFailManifest_{}_{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
+        let subkey_rel = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{test_subkey_name}");
+        let full_path = format!(r"HKCU\{subkey_rel}");
+
+        let (key, _) = hkcu.create_subkey(&subkey_rel).expect("create test key");
+        key.set_value("DisplayName", &"Fail Manifest App").expect("set name");
+        key.set_value("UninstallString", &"C:\\NonExistent\\uninst.exe").expect("set uninst");
+
+        let live_meta = read_live_broken_entry_metadata("user-64", &test_subkey_name).expect("read metadata");
+        let plan_id = generate_collision_resistant_plan_id("broken-fail-manifest");
+        let plan = StoredBrokenEntryPlan {
+            plan_id: plan_id.clone(),
+            app_id: format!("user-64|{test_subkey_name}"),
+            app_name: "Fail Manifest App".into(),
+            registry_key_path: full_path,
+            subkey_name: test_subkey_name,
+            hive: "user-64".into(),
+            fingerprint: live_meta.fingerprint,
+            expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 300,
+        };
+
+        // Quarantine root set to an invalid path (a regular file cannot have child directories created in it)
+        let invalid_quarantine = std::env::temp_dir().join(format!("cyron_file_blocker_{}.dat", std::process::id()));
+        fs::write(&invalid_quarantine, b"blocker").unwrap();
+
+        let result = execute_broken_entry_removal(&plan, &invalid_quarantine);
+        assert!(result.is_err(), "manifest/quarantine failure must abort deletion");
+        assert!(hkcu.open_subkey(&subkey_rel).is_ok(), "registry key must NOT be deleted when manifest fails to write");
+
+        let _ = hkcu.delete_subkey_all(&subkey_rel);
+        let _ = fs::remove_file(&invalid_quarantine);
+    }
+
+    #[test]
+    fn registry_tampering_and_conflict_prevention_tests() {
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let test_subkey_name = format!("CyronTamperTest_{}_{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
+        let subkey_rel = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{test_subkey_name}");
+        let full_path = format!(r"HKCU\{subkey_rel}");
+
+        let (key, _) = hkcu.create_subkey(&subkey_rel).expect("create key");
+        key.set_value("DisplayName", &"Tamper Test App").expect("set name");
+        key.set_value("UninstallString", &"C:\\NonExistent\\uninst.exe").expect("set uninst");
+
+        let live_meta = read_live_broken_entry_metadata("user-64", &test_broken_name_helper(&test_subkey_name)).unwrap();
+        let plan_id = generate_collision_resistant_plan_id("tamper-plan");
+        let plan = StoredBrokenEntryPlan {
+            plan_id: plan_id.clone(),
+            app_id: format!("user-64|{test_subkey_name}"),
+            app_name: "Tamper Test App".into(),
+            registry_key_path: full_path.clone(),
+            subkey_name: test_subkey_name.clone(),
+            hive: "user-64".into(),
+            fingerprint: live_meta.fingerprint,
+            expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 300,
+        };
+
+        let q_root = std::env::temp_dir().join(format!("cyron-tamper-q-{}", std::process::id()));
+        let _ = fs::create_dir_all(&q_root);
+
+        let _clean_report = execute_broken_entry_removal(&plan, &q_root).expect("removal succeeds");
+        assert!(hkcu.open_subkey(&subkey_rel).is_err(), "key is deleted");
+
+        let batch_dir = q_root.join(&plan_id);
+        let manifest = crate::cleanup::read_manifest(&batch_dir).expect("manifest exists");
+        let backup_file = batch_dir.join("registry_backup.reg");
+        assert!(backup_file.exists());
+
+        // 1. Tampered backup file is refused
+        let tampered_backup = batch_dir.join("tampered.reg");
+        fs::write(&tampered_backup, b"Windows Registry Editor Version 5.00\r\n\r\n; altered\r\n").unwrap();
+        let tamper_res = restore_registry_backup_with_policy(&tampered_backup, Some(&manifest), true);
+        assert!(tamper_res.is_err(), "checksum mismatch must be rejected");
+
+        // 2. Out-of-scope section injection is refused
+        let rogue_backup = batch_dir.join("rogue.reg");
+        let rogue_text = format!(
+            "Windows Registry Editor Version 5.00\r\n\r\n[{}]\r\n\"Val\"=\"1\"\r\n\r\n[HKEY_LOCAL_MACHINE\\Software\\Malicious]\r\n\"Bad\"=\"1\"\r\n",
+            full_path.replace("HKCU\\", "HKEY_CURRENT_USER\\")
+        );
+        fs::write(&rogue_backup, rogue_text).unwrap();
+        assert!(verify_registry_backup_scope(&rogue_backup, &full_path).is_err(), "out-of-scope section must be refused");
+
+        // 3. Existing live key conflict: silent overwrite refused
+        let (recreated, _) = hkcu.create_subkey(&subkey_rel).expect("recreate live key");
+        recreated.set_value("DisplayName", &"Live Conflict Value").expect("write live value");
+        let conflict_res = restore_registry_backup_with_policy(&backup_file, Some(&manifest), false);
+        assert!(conflict_res.is_err(), "conflict must refuse silent overwrite");
+        let err = conflict_res.err().unwrap();
+        assert!(err.contains("conflict") || err.contains("already exists"));
+
+        // 4. Overwrite confirmed: restoration succeeds
+        let overwrite_res = restore_registry_backup_with_policy(&backup_file, Some(&manifest), true).expect("overwrite restore succeeds");
+        assert!(overwrite_res.keys_restored >= 1);
+        let restored_key = hkcu.open_subkey(&subkey_rel).expect("open restored key");
+        let name: String = restored_key.get_value("DisplayName").expect("get name");
+        assert_eq!(name, "Tamper Test App");
+
+        let _ = hkcu.delete_subkey_all(&subkey_rel);
+        let _ = fs::remove_dir_all(&q_root);
+    }
+
+    fn test_broken_name_helper(s: &str) -> String {
+        s.to_string()
     }
 }
