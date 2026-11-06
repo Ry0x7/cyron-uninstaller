@@ -312,7 +312,9 @@ preview is stored alongside a `CleanupPlan` in `AppState::plans` under an opaque
 1. `start_cleanup` validates the plan id, pops the plan exactly once (expired plans are swept),
    re-checks that the selection is a subset of the plan, and re-checks read-only mode.
 2. For each spec: re-run `guard_path`, walk the location again, and create the batch folder only if
-   there is something to move.
+   there is something to move. Anything the second walk refuses — a target that became a junction, a
+   subfolder swapped for a link after the preview — is added to the report as a warning, so the run
+   never silently cleans nothing.
 3. For each file: `symlink_metadata` (must be a regular file, no reparse attribute), canonicalize the
    parent and require it to be inside the target root, then `fs::rename` into
    `<quarantine>\<run-id>\<index>-<name>`. Rename means a file on another volume or held without

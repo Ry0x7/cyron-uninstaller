@@ -18,7 +18,7 @@ Update downloads) are refused in the backend. There is still no uninstall, proce
 registry-write path.
 
 Latest measured verification: frontend typecheck clean; **70 Vitest tests in 7 files pass**;
-**131 Rust tests pass** (105 unit, 15 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress)
+**133 Rust tests pass** (105 unit, 17 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress)
 with 3 ignored; `CLEANUP_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`. No real
 user cache was cleaned during verification.
 
@@ -89,9 +89,9 @@ user cache was cleaned during verification.
 | 15 | Backend-controlled exclusions, audit log, global read-only mode | Done | Settings exclusions are validated as absolute non-root paths by `preview_cleanup`, stored in the plan and applied to both preview and execution; `cleanup-log.json` keeps 100 entries; `read_only` is an `AtomicBool` in `AppState` |
 | 16 | No administrator rights requested | Done | No elevation call exists; locked or system-owned files are reported as skipped |
 | 17 | Functional Cleaner UI in the existing page | Done | `Cleaner.tsx`: Windows/Applications/Developer/AI groups, risk and category filters, search, per-target detail, selection bar, preview drawer, progress, results, Quarantine and History tabs, read-only banner, empty/error/stale states |
-| 18 | Destructive-operation security suite replacing the blanket audit | Done | `tests/read_only.rs` removed; `tests/security.rs` (15 tests) asserts which modules may call destructive APIs, protected-path refusal, hostile ids, junction/link handling, restore/purge boundaries and read-only refusal |
+| 18 | Destructive-operation security suite replacing the blanket audit | Done | `tests/read_only.rs` removed; `tests/security.rs` (17 tests) asserts which modules may call destructive APIs, protected-path refusal, hostile ids, junction/link handling, restore/purge boundaries, read-only refusal and two plan-to-execution junction swaps |
 | 19 | Cleanup tested only on isolated fixtures | Done | `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` use `%TEMP%\cyron-cleanup-<pid>`; `tests/cleanup_stress.rs` uses temp fixtures. No personal cache was cleaned |
-| 20 | Path traversal, junction, TOCTOU, locked, partial, cancellation, restore-failure tests | Done | Covered across `tests/security.rs`, `tests/cleanup_stress.rs` and the fixture: hostile run ids, junction target, locked file, cancelled run, restore onto an existing file, purge accounting |
+| 20 | Path traversal, junction, TOCTOU, locked, partial, cancellation, restore-failure tests | Done | `tests/security.rs` covers hostile run ids, a junction target, and two TOCTOU swaps (subfolder and whole target replaced by a junction between preview and execution — nothing outside moves, the swap is reported); `tests/cleanup_stress.rs` and the fixture cover locked files, cancelled runs, restore onto an existing file and purge accounting. Moving files consumes no extra disk space, so the insufficient-space case reduces to the manifest write, which is written incrementally |
 | 21 | Reconcile Phase 2 counting differences before quoting recoverable space | Done | Cleaner sizes and preview totals both come from the same directory walk (`walk_target`), so the preview matches the measured target; MFT totals are never used for cleanup figures. The UI labels sizes as measured, not as guaranteed savings |
 | 22 | Windows CI, native build, all suites, real UI behaviour | Partly verified | CI workflow extended with the security, cleanup-stress and fixture steps (remote run not observed); native build, binary check and launch smoke pass; the Cleaner was driven live in both themes on 2026-11-06 (G13), which found and fixed the preview/read-only defect and an Overview warning layout bug |
 | 23 | Milestone documentation | Done | README, ROADMAP, HANDOFF, this file, SECURITY, ARCHITECTURE, AGENTS and GATES updated in the same commit |
@@ -103,9 +103,9 @@ user cache was cleaned during verification.
 | TypeScript | `npm run typecheck` | Pass |
 | Frontend unit tests | `npm test` | Pass, 70/70 across 7 files |
 | Frontend production bundle | `node scripts/verify-dist.mjs` | Pass (`DIST_OK`) |
-| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | Pass: 105 unit (2 ignored), 15 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress (1 ignored) |
+| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | Pass: 105 unit (2 ignored), 17 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress (1 ignored) |
 | Real registry/cache/scan | `... --test real_system -- --nocapture` | Pass: live registry, live cache targets, exact byte fixture |
-| Permission boundaries | `... --test security -- --nocapture` | Pass 15/15: destructive-API module boundary, protected paths, hostile ids, junction, links, restore/purge, read-only |
+| Permission boundaries | `... --test security -- --nocapture` | Pass 17/17: destructive-API module boundary, protected paths, hostile ids, junction, TOCTOU swaps, links, restore/purge, read-only |
 | Cleanup stress | `... --test cleanup_stress -- --nocapture` | Pass 5/5: wide fixture, locked file, cancellation, consecutive batches, empty targets |
 | Cleanup fixture | `node scripts/verify-cleanup.mjs` | Pass: `CLEANUP_FIXTURE_OK` |
 | Scanner stress | `... --test stress_scan -- --nocapture` | Pass 5/5 (one 20k-file test) |

@@ -15,8 +15,8 @@ There is still **no uninstall, process termination or registry-write path**. Cle
 *ids* from the fixed catalog only, never arbitrary paths, and protected data is refused by the
 backend rather than hidden by the UI.
 
-Latest measured checks: typecheck clean; **70 frontend tests in 7 files pass**; **131 Rust tests
-pass** (105 unit, 15 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress) with 3 ignored;
+Latest measured checks: typecheck clean; **70 frontend tests in 7 files pass**; **133 Rust tests
+pass** (105 unit, 17 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress) with 3 ignored;
 `CLEANUP_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`. No real user cache was
 cleaned during verification — the engine was exercised against isolated `%TEMP%` fixtures only.
 Release MSI/NSIS packaging and signing remain unverified. The Phase 3 Cleaner was captured
@@ -77,7 +77,7 @@ mode, and Overview joined its cache warnings into one run-on sentence.
   filters, search, expandable per-target detail with impact text, selection bar, preview drawer with
   the planned path list and confirmation checkbox, progress bar, per-item results, Quarantine tab
   (restore/purge with confirmation) and History tab.
-- **Security suite**: `tests/security.rs` (15 tests) replaces the blanket `read_only.rs` source
+- **Security suite**: `tests/security.rs` (17 tests) replaces the blanket `read_only.rs` source
   audit with module boundaries plus protected-path, id, junction, link, restore/purge and read-only
   assertions. `tests/cleanup_stress.rs` (5) and `examples/cleanup_fixture.rs` cover wide fixtures,
   locked files, cancellation and the full round trip. CI runs all three.
@@ -107,8 +107,8 @@ mode, and Overview joined its cache warnings into one run-on sentence.
 | TypeScript | `npm run typecheck` | Pass |
 | Frontend tests | `npm test` | 70/70 pass, 7 files |
 | Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` |
-| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 131 pass, 3 ignored |
-| Permission boundaries | `... --test security -- --nocapture` | 15/15 pass |
+| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 133 pass, 3 ignored |
+| Permission boundaries | `... --test security -- --nocapture` | 17/17 pass |
 | Cleanup stress | `... --test cleanup_stress -- --nocapture` | 5/5 pass |
 | Cleanup fixture | `node scripts/verify-cleanup.mjs` | `CLEANUP_FIXTURE_OK` |
 | Real system | `... --test real_system -- --nocapture` | Pass |

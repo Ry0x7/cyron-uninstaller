@@ -545,6 +545,14 @@ pub fn execute_plan(
         if walk.cancelled {
             cancelled = true;
         }
+        // A target or subfolder that became a link between preview and execution
+        // must be explained, not silently skipped.
+        for (path, reason) in walk.skipped.iter().take(MAX_WARNINGS) {
+            push_warning(
+                &mut warnings,
+                format!("{}: {reason} — left alone.", path.display()),
+            );
+        }
         if !walk.files.is_empty() {
             fs::create_dir_all(&batch).map_err(|error| {
                 format!("Could not create the quarantine folder: {error}")

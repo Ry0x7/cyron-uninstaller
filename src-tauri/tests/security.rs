@@ -583,3 +583,102 @@ fn missing_scan_path_returns_an_error_without_panicking() {
     assert_eq!(result.file_count, 0);
     assert!(!result.errors.is_empty());
 }
+
+/* ------------------------------------------- time-of-check / time-of-use */
+
+fn create_junction(link: &Path, target: &Path) -> bool {
+    std::process::Command::new("cmd.exe")
+        .arg("/C")
+        .arg("mklink")
+        .arg("/J")
+        .arg(link)
+        .arg(target)
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[test]
+fn a_junction_swapped_in_after_the_preview_moves_nothing() {
+    let root = TempDir::new("toctou-root");
+    let outside = TempDir::new("toctou-outside");
+    let target = root.path().join("cache");
+    let nested = target.join("nested");
+    write_fixture(&nested.join("victim.bin"), 640);
+    let secret = outside.path().join("secret.txt");
+    write_fixture(&secret, 32);
+    let secret_bytes = fs::read(&secret).expect("read outside file");
+    let quarantine = root.path().join("quarantine");
+    fs::create_dir_all(&quarantine).expect("quarantine root");
+
+    let (plan, preview) =
+        cleanup::plan_specs(vec![fixture_spec(&target)], false).expect("plan builds");
+    assert_eq!(preview.file_count, 1, "the preview saw the real folder");
+
+    // The previewed subfolder is replaced by a junction to unrelated data
+    // before the user confirms.
+    fs::remove_dir_all(&nested).expect("remove previewed folder");
+    if !create_junction(&nested, outside.path()) {
+        eprintln!("skipping TOCTOU assertion: Windows refused junction creation");
+        return;
+    }
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let report = cleanup::execute_plan(&plan, &quarantine, &cancel, &|_| {}).expect("execute");
+    let _ = fs::remove_dir(&nested);
+
+    assert_eq!(report.quarantined, 0, "nothing behind the junction may move");
+    assert_eq!(
+        fs::read(&secret).expect("outside file survives"),
+        secret_bytes,
+        "data outside the target must not be quarantined"
+    );
+    assert!(
+        report
+            .items
+            .iter()
+            .all(|item| !Path::new(&item.path).starts_with(outside.path())),
+        "no result may point at data outside the target"
+    );
+}
+
+#[test]
+fn a_target_replaced_by_a_junction_is_reported_instead_of_silently_skipped() {
+    let root = TempDir::new("toctou-swap");
+    let outside = TempDir::new("toctou-swap-outside");
+    let target = root.path().join("cache");
+    write_fixture(&target.join("old.bin"), 128);
+    let secret = outside.path().join("secret.txt");
+    write_fixture(&secret, 48);
+    let secret_bytes = fs::read(&secret).expect("read outside file");
+    let quarantine = root.path().join("quarantine");
+    fs::create_dir_all(&quarantine).expect("quarantine root");
+
+    let (plan, preview) =
+        cleanup::plan_specs(vec![fixture_spec(&target)], false).expect("plan builds");
+    assert_eq!(preview.file_count, 1);
+
+    fs::remove_dir_all(&target).expect("remove previewed target");
+    if !create_junction(&target, outside.path()) {
+        eprintln!("skipping TOCTOU assertion: Windows refused junction creation");
+        return;
+    }
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let report = cleanup::execute_plan(&plan, &quarantine, &cancel, &|_| {}).expect("execute");
+    let _ = fs::remove_dir(&target);
+
+    assert_eq!(report.quarantined, 0);
+    assert_eq!(report.files, 0);
+    assert_eq!(
+        fs::read(&secret).expect("outside file survives"),
+        secret_bytes
+    );
+    assert!(
+        report
+            .errors
+            .iter()
+            .any(|error| error.contains("junction") || error.contains("link")),
+        "the swap must be explained, not silent: {:?}",
+        report.errors
+    );
+}

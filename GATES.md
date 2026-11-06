@@ -22,8 +22,8 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G2: the complete Rust suite passes
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
   EXPECT: exit 0
-  EVIDENCE: exit 0. 105 lib tests (2 ignored), 15 security, 5 cleanup_stress, 1 real_system,
-  5 stress_scan (1 ignored) → 131 passed, 3 ignored, 0 failed.
+  EVIDENCE: exit 0. 105 lib tests (2 ignored), 17 security, 5 cleanup_stress, 1 real_system,
+  5 stress_scan (1 ignored) → 133 passed, 3 ignored, 0 failed.
 
 - [x] G3: frontend typecheck
   CHECK: npm run typecheck
@@ -46,10 +46,12 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 - [x] G6: permission-boundary and protected-path tests pass
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security
   EXPECT: exit 0
-  EVIDENCE: exit 0, 15/15. Covers: destructive calls only in reviewed modules; every catalog
+  EVIDENCE: exit 0, 17/17. Covers: destructive calls only in reviewed modules; every catalog
   cleanup path passes the guard; protected/ancestor paths refused; hostile ids and run ids refused;
   junction not followed; links and directories never moved; restore never overwrites; purge removes
-  only batch files; read-only blocks execution; hard links counted once; fixture round trip.
+  only batch files; read-only blocks execution; hard links counted once; fixture round trip; and two
+  plan-to-execution races (a previewed subfolder swapped for a junction, and the whole target swapped
+  for one) move nothing outside the target and report the swap instead of failing silently.
   NOTE: read-only gates execution only. `preview_cleanup` no longer calls `ensure_cleanup_enabled`
   because a preview reads sizes and paths and never modifies anything; `start_cleanup` still calls
   it first, and the embedded read-only visual pass in G13 exercised the preview path live.
