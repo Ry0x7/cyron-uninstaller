@@ -34,6 +34,9 @@ import type {
   IndexStats,
   SearchQuery,
   SearchResultPage,
+  HunterTargetInfo,
+  SystemSpecs,
+  StartupItem,
 } from "./types";
 
 export function isDesktop(): boolean {
@@ -139,6 +142,9 @@ export const api = {
     call<SearchResultPage>("search_indexed_files", { query }),
   getScanIndexStats: (jobId: string) =>
     call<IndexStats>("get_scan_index_stats", { jobId }),
+  resolveCursorTarget: () => call<HunterTargetInfo | null>("resolve_cursor_target"),
+  getSystemSpecs: () => call<SystemSpecs>("get_system_specs"),
+  listStartupItems: () => call<StartupItem[]>("list_startup_items"),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

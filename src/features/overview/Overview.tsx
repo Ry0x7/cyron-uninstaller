@@ -29,6 +29,7 @@ import {
   IconApps,
   IconCleaner,
   IconClock,
+  IconCpu,
   IconDrive,
   IconRefresh,
   type IconProps,
@@ -97,16 +98,30 @@ function StatusBadge({ entry }: { entry: HistoryEntry }) {
   return <span className={`badge badge--${tone}`}>{label}</span>;
 }
 
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
 export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void }) {
+  const specs = useAsync(() => api.getSystemSpecs(), []);
   const volumes = useAsync(() => api.listVolumes(), []);
   const applications = useAsync(() => loadInstalledApps(), []);
   const caches = useAsync(() => loadCaches(), []);
   const history = useAsync(() => api.getHistory(), []);
+  const [lastSpecs, setLastSpecs] = useState<typeof specs.data>(null);
   const [lastVolumes, setLastVolumes] = useState<VolumeInfo[] | null>(null);
   const [lastApplications, setLastApplications] = useState<typeof applications.data>(null);
   const [lastCaches, setLastCaches] = useState<typeof caches.data>(null);
   const [lastHistory, setLastHistory] = useState<typeof history.data>(null);
 
+  useEffect(() => {
+    if (specs.data) setLastSpecs(specs.data);
+  }, [specs.data]);
   useEffect(() => {
     if (volumes.data) setLastVolumes(volumes.data);
   }, [volumes.data]);
@@ -120,6 +135,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
     if (history.data) setLastHistory(history.data);
   }, [history.data]);
 
+  const specsData = specs.data ?? lastSpecs;
   const volumeData = volumes.data ?? lastVolumes;
   const applicationData = applications.data ?? lastApplications;
   const cacheData = caches.data ?? lastCaches;
@@ -170,10 +186,10 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
 
   const recentHistory = [...(historyData ?? [])].sort((a, b) => b.at - a.at).slice(0, 5);
 
-  const offline = [volumes, applications, caches, history].some(
+  const offline = [volumes, applications, caches, history, specs].some(
     (state) => state.error === BACKEND_OFFLINE,
   );
-  const refreshing = [volumes, applications, caches, history].some(
+  const refreshing = [volumes, applications, caches, history, specs].some(
     (state) => state.status === "loading",
   );
 
@@ -188,6 +204,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
   const refreshAll = () => {
     invalidateInstalledApps();
     invalidateCaches();
+    specs.reload();
     volumes.reload();
     applications.reload();
     caches.reload();
@@ -238,6 +255,85 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
         )}
 
         <div className="ov-grid">
+          <Panel
+            className="ov-specs"
+            title="System & Hardware"
+            subtitle="Platform architecture, processor, memory pressure, and display adapters"
+            actions={
+              <div className="ov-panel-status">
+                {specs.status === "loading" && specsData && <span className="badge badge--neutral">Updating</span>}
+                {specs.status === "error" && specsData && specs.error !== BACKEND_OFFLINE && (
+                  <span className="badge badge--caution">Stale</span>
+                )}
+                {specsData && (
+                  <span className="badge badge--safe">
+                    Uptime: {formatUptime(specsData.uptimeSeconds)}
+                  </span>
+                )}
+              </div>
+            }
+          >
+            {!specsData && specs.status === "loading" && <LoadingRows rows={2} />}
+            {specs.status === "error" && !specsData && specs.error && specs.error !== BACKEND_OFFLINE && (
+              <LoadError message={specs.error} onRetry={specs.reload} />
+            )}
+            {specsData && (
+              <div className="ov-specs__grid">
+                <div className="ov-specs__card">
+                  <span className="ov-specs__card-title">
+                    <IconApps size={14} /> Operating System
+                  </span>
+                  <span className="ov-specs__card-value">{specsData.osName || "Windows"}</span>
+                  <span className="ov-specs__card-sub">
+                    Build {specsData.osBuild || "Unknown"} ({specsData.osArchitecture})
+                  </span>
+                </div>
+
+                <div className="ov-specs__card">
+                  <span className="ov-specs__card-title">
+                    <IconCpu size={14} /> Processor
+                  </span>
+                  <span className="ov-specs__card-value">{specsData.cpuBrand || "Generic CPU"}</span>
+                  <span className="ov-specs__card-sub">
+                    {specsData.cpuLogicalCores} Logical Cores · {specsData.osArchitecture}
+                  </span>
+                </div>
+
+                <div className="ov-specs__card">
+                  <span className="ov-specs__card-title">
+                    <IconActivity size={14} /> Memory Pressure
+                  </span>
+                  <div className="spread" style={{ alignItems: "baseline" }}>
+                    <span className="ov-specs__card-value">
+                      {formatBytes(specsData.totalMemoryBytes - specsData.availableMemoryBytes)} / {formatBytes(specsData.totalMemoryBytes)}
+                    </span>
+                    <span className="mono small faint">{specsData.memoryInUsePercent}%</span>
+                  </div>
+                  <ProgressBar
+                    value={specsData.memoryInUsePercent / 100}
+                    label="Physical memory load"
+                    tone={specsData.memoryInUsePercent >= 85 ? "danger" : specsData.memoryInUsePercent >= 70 ? "caution" : "accent"}
+                  />
+                  <span className="ov-specs__card-sub">
+                    {formatBytes(specsData.availableMemoryBytes)} available
+                  </span>
+                </div>
+
+                <div className="ov-specs__card">
+                  <span className="ov-specs__card-title">
+                    <IconDrive size={14} /> Graphics Adapter
+                  </span>
+                  <span className="ov-specs__card-value truncate">
+                    {specsData.gpuBrand || "Standard Display Adapter"}
+                  </span>
+                  <span className="ov-specs__card-sub truncate">
+                    Direct3D / Vulkan hardware acceleration
+                  </span>
+                </div>
+              </div>
+            )}
+          </Panel>
+
           <Panel
             className="ov-storage"
             title="Storage"

@@ -1432,6 +1432,21 @@ pub fn get_scan_index_stats(
     Ok(index.stats())
 }
 
+#[tauri::command]
+pub fn resolve_cursor_target() -> Result<Option<crate::hunter::HunterTargetInfo>, String> {
+    crate::hunter::resolve_cursor_target()
+}
+
+#[tauri::command]
+pub fn get_system_specs() -> crate::system::SystemSpecs {
+    crate::system::query_system_specs()
+}
+
+#[tauri::command]
+pub fn list_startup_items() -> Vec<crate::system::StartupItem> {
+    crate::system::list_startup_items()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

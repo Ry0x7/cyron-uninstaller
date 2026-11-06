@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, errorMessage } from "../../lib/api";
 import { useSettings, type ThemePreference } from "../../lib/settings";
-import type { ExplorerIntegrationStatus } from "../../lib/types";
+import type { ExplorerIntegrationStatus, StartupItem } from "../../lib/types";
 import {
   Badge,
   Banner,
@@ -14,10 +14,12 @@ import {
 } from "../../components/ui";
 import {
   IconCheck,
+  IconCopy,
   IconExternal,
   IconLock,
   IconMonitor,
   IconMoon,
+  IconRefresh,
   IconShield,
   IconSun,
   type IconProps,
@@ -200,6 +202,23 @@ export function Settings() {
     lastSynced.current = "";
     setResetDone(true);
   };
+
+  const [startupItems, setStartupItems] = useState<StartupItem[]>([]);
+  const [startupLoading, setStartupLoading] = useState(false);
+
+  const loadStartup = () => {
+    setStartupLoading(true);
+    api.listStartupItems()
+      .then((items) => {
+        setStartupItems(items);
+        setStartupLoading(false);
+      })
+      .catch(() => setStartupLoading(false));
+  };
+
+  useEffect(() => {
+    loadStartup();
+  }, []);
 
   const resolved = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme;
   const themeSource = settings.theme === "system" ? "Following system preference" : "Chosen manually";
@@ -446,6 +465,53 @@ export function Settings() {
                   </Button>
                 )}
               </div>
+            </Panel>
+
+            <Panel
+              title="Startup Applications"
+              subtitle="Programs registered to launch automatically when Windows boots."
+              actions={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconRefresh size={13} />}
+                  loading={startupLoading}
+                  onClick={loadStartup}
+                >
+                  Refresh
+                </Button>
+              }
+            >
+              {startupItems.length === 0 ? (
+                <p className="set-note">
+                  {startupLoading ? "Reading startup entries…" : "No startup applications detected."}
+                </p>
+              ) : (
+                <div className="set-startup-list">
+                  {startupItems.map((item) => (
+                    <div className="set-startup-item" key={item.id}>
+                      <div className="set-startup-info">
+                        <span className="set-startup-name">
+                          {item.name}
+                          <Badge tone="neutral">{item.location}</Badge>
+                        </span>
+                        <span className="set-startup-cmd" title={item.command}>
+                          {item.command}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<IconCopy size={12} />}
+                        title="Copy command line"
+                        onClick={() => navigator.clipboard.writeText(item.command)}
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Panel>
 
             <Panel title="Data">

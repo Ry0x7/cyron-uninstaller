@@ -1,0 +1,105 @@
+.hunter-floating-widget {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.hunter-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-panel, #18181b);
+  border: 1px solid var(--accent, #6366f1);
+  border-radius: var(--radius-full, 9999px);
+  color: var(--text-base, #eee);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.hunter-trigger-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(99, 102, 241, 0.3);
+}
+
+.hunter-trigger-btn--active {
+  background: var(--accent, #6366f1);
+  color: #fff;
+  animation: hunter-pulse 2s infinite ease-in-out;
+}
+
+@keyframes hunter-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(99, 102, 241, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
+.hunter-hud {
+  width: 320px;
+  background: var(--bg-panel, #18181b);
+  border: 1px solid var(--border-default, rgba(255, 255, 255, 0.15));
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: hunter-fade-in 0.2s ease;
+}
+
+@keyframes hunter-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.hunter-hud__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  padding-bottom: 8px;
+}
+
+.hunter-hud__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-base, #eee);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hunter-hud__body {
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hunter-target-title {
+  font-weight: 600;
+  color: var(--text-base, #eee);
+  word-break: break-word;
+}
+
+.hunter-target-meta {
+  color: var(--text-muted, #888);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.hunter-hud__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}

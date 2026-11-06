@@ -131,6 +131,9 @@ describe("Tauri IPC contract", () => {
         command: "get_scan_index_stats",
         args: { jobId: "job-1" },
       },
+      { run: () => api.resolveCursorTarget(), command: "resolve_cursor_target", args: undefined },
+      { run: () => api.getSystemSpecs(), command: "get_system_specs", args: undefined },
+      { run: () => api.listStartupItems(), command: "list_startup_items", args: undefined },
     ];
 
     for (const { run, command, args } of calls) {

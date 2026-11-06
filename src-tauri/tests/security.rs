@@ -772,6 +772,7 @@ fn process_termination_rejects_unlisted_pids_and_mismatched_apps() {
     let snapshot = process::StoredProcessSnapshot {
         app_id: "app-target".into(),
         install_location: "C:\\Program Files\\TargetApp".into(),
+        candidate_roots: Vec::new(),
         timestamp: now,
         processes: vec![process::AppProcess {
             pid: 12345,
