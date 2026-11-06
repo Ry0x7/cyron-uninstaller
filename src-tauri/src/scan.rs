@@ -162,12 +162,28 @@ pub fn scan_directory(
     cancel: Arc<AtomicBool>,
     progress: &(dyn Fn(ScanProgress) + Send + Sync),
 ) -> ScanResult {
+    scan_directory_with_index(job_id, path, options, cancel, progress, None)
+}
+
+/// Walks a directory, updates the indexed scan database, and returns real file sizes.
+pub fn scan_directory_with_index(
+    job_id: &str,
+    path: &Path,
+    options: &ScanOptions,
+    cancel: Arc<AtomicBool>,
+    progress: &(dyn Fn(ScanProgress) + Send + Sync),
+    index: Option<Arc<crate::index::ScanIndex>>,
+) -> ScanResult {
     let started = Instant::now();
-    let mut walker = Walker::new(job_id, options, Some(cancel), Some(progress), true);
+    let mut walker =
+        Walker::new(job_id, options, Some(cancel), Some(progress), true).with_index(index.clone());
     let mut root = walker.walk(path, 0);
 
     if walker.collect_tree && prune_tree(&mut root, 0) {
         walker.truncated = true;
+    }
+    if let Some(ref idx) = index {
+        idx.mark_complete();
     }
     walker.emit_progress(path, true);
     let extension_stats = walker.extension_stats();
@@ -254,6 +270,7 @@ struct Walker<'a> {
     /// Started on the first walked directory; `measure_path` also collects it
     /// but only `scan_directory` reports the result.
     categories: Option<Accumulator>,
+    index: Option<Arc<crate::index::ScanIndex>>,
 }
 
 impl<'a> Walker<'a> {
@@ -294,7 +311,13 @@ impl<'a> Walker<'a> {
             largest: Vec::new(),
             errors: Vec::new(),
             categories: None,
+            index: None,
         }
+    }
+
+    fn with_index(mut self, index: Option<Arc<crate::index::ScanIndex>>) -> Self {
+        self.index = index;
+        self
     }
 
     fn walk(&mut self, path: &Path, depth: u32) -> ScanNode {
@@ -375,6 +398,12 @@ impl<'a> Walker<'a> {
                 node.allocated += child.allocated;
                 sub_files += child.file_count;
                 sub_dirs += child.dir_count + 1;
+                if let Some(ref idx) = self.index {
+                    idx.insert_child(
+                        &path.to_string_lossy(),
+                        crate::index::IndexedChild::from(&child),
+                    );
+                }
                 if keep_children && self.tree_nodes < MAX_TREE_NODES {
                     self.tree_nodes += 1;
                     retain_directory_child(
@@ -432,6 +461,28 @@ impl<'a> Walker<'a> {
 
             self.track_extension(entry, unique);
             self.track_largest(entry);
+
+            if let Some(ref idx) = self.index {
+                let ext = if entry.name.contains('.') {
+                    entry.name.split('.').last().unwrap_or("").to_lowercase()
+                } else {
+                    String::new()
+                };
+                idx.insert_child(
+                    &path.to_string_lossy(),
+                    crate::index::IndexedChild {
+                        name: entry.name.clone(),
+                        path: display_path(&entry.path.to_string_lossy()),
+                        kind: "file".into(),
+                        size: entry.size,
+                        allocated: if unique { entry.allocated } else { 0 },
+                        file_count: 1,
+                        dir_count: 0,
+                        modified: entry.modified,
+                        extension: ext,
+                    },
+                );
+            }
 
             if keep_children && self.tree_nodes < MAX_TREE_NODES {
                 self.tree_nodes += 1;

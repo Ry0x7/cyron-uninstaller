@@ -547,3 +547,52 @@ export interface CleanupProviderDef {
   patterns: string[];
 }
 
+export interface DirectoryQuery {
+  jobId: string;
+  dirPath: string;
+  page: number;
+  pageSize: number;
+  sortField?: "size" | "name" | "modified" | "files";
+  sortDir?: "asc" | "desc";
+  search?: string;
+  minSize?: number;
+  extension?: string;
+}
+
+export interface DirectoryPage {
+  entries: ScanNode[];
+  totalEntries: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
+export interface SearchQuery {
+  jobId: string;
+  query: string;
+  extension?: string;
+  minSize?: number;
+  maxSize?: number;
+  limit: number;
+  offset: number;
+  sortField?: string;
+  sortDir?: "asc" | "desc";
+}
+
+export interface SearchResultPage {
+  items: FileStat[];
+  totalMatches: number;
+  limit: number;
+  offset: number;
+}
+
+export interface IndexStats {
+  jobId: string;
+  totalFiles: number;
+  totalDirs: number;
+  totalSize: number;
+  totalAllocated: number;
+  isComplete: boolean;
+}
+
+

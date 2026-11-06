@@ -138,6 +138,7 @@ pub async fn start_scan(
 
     let scans = Arc::clone(&state.scans);
     let cleanup_job = job_id.clone();
+    let scan_index = state.index_manager.get_or_create(&job_id);
     let task = tauri::async_runtime::spawn_blocking(move || {
         let emit_target = app.clone();
         let progress = move |payload: ScanProgress| {
@@ -147,7 +148,14 @@ pub async fn start_scan(
         let started = SystemTime::now();
         let mut note: Option<String> = None;
         let mut result = if method == "directory" {
-            scan::scan_directory(&job_id, &root, &options, cancel, &progress)
+            scan::scan_directory_with_index(
+                &job_id,
+                &root,
+                &options,
+                cancel,
+                &progress,
+                Some(scan_index),
+            )
         } else {
             let mft_attempt = mft::support(&root).and_then(|()| {
                 mft::scan(&job_id, &root, &options, Arc::clone(&cancel), &progress)
@@ -158,7 +166,14 @@ pub async fn start_scan(
                     // An explicit MFT request still falls back rather than
                     // failing the scan; the note explains why.
                     note = Some(reason);
-                    scan::scan_directory(&job_id, &root, &options, cancel, &progress)
+                    scan::scan_directory_with_index(
+                        &job_id,
+                        &root,
+                        &options,
+                        cancel,
+                        &progress,
+                        Some(scan_index),
+                    )
                 }
             }
         };
@@ -1242,6 +1257,42 @@ pub fn inspect_cleanable_directory(
             total_occupied_bytes: measured.allocated,
         })
     }
+}
+
+#[tauri::command]
+pub fn query_directory_children(
+    state: State<'_, AppState>,
+    query: crate::index::DirectoryQuery,
+) -> Result<crate::index::DirectoryPage, String> {
+    let index = state
+        .index_manager
+        .get(&query.job_id)
+        .ok_or_else(|| format!("Scan index for job '{}' is not available.", query.job_id))?;
+    Ok(index.query_children(&query))
+}
+
+#[tauri::command]
+pub fn search_indexed_files(
+    state: State<'_, AppState>,
+    query: crate::index::SearchQuery,
+) -> Result<crate::index::SearchResultPage, String> {
+    let index = state
+        .index_manager
+        .get(&query.job_id)
+        .ok_or_else(|| format!("Scan index for job '{}' is not available.", query.job_id))?;
+    Ok(index.search(&query))
+}
+
+#[tauri::command]
+pub fn get_scan_index_stats(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> Result<crate::index::IndexStats, String> {
+    let index = state
+        .index_manager
+        .get(&job_id)
+        .ok_or_else(|| format!("Scan index for job '{job_id}' is not available."))?;
+    Ok(index.stats())
 }
 
 #[cfg(test)]

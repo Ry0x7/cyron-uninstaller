@@ -28,6 +28,11 @@ import type {
   ExplorerIntegrationStatus,
   CleanableInspection,
   CleanupProviderDef,
+  DirectoryPage,
+  DirectoryQuery,
+  IndexStats,
+  SearchQuery,
+  SearchResultPage,
 } from "./types";
 
 export function isDesktop(): boolean {
@@ -123,6 +128,12 @@ export const api = {
   listCleanupProviders: () => call<CleanupProviderDef[]>("list_cleanup_providers"),
   inspectCleanableDirectory: (path: string) =>
     call<CleanableInspection>("inspect_cleanable_directory", { path }),
+  queryDirectoryChildren: (query: DirectoryQuery) =>
+    call<DirectoryPage>("query_directory_children", { query }),
+  searchIndexedFiles: (query: SearchQuery) =>
+    call<SearchResultPage>("search_indexed_files", { query }),
+  getScanIndexStats: (jobId: string) =>
+    call<IndexStats>("get_scan_index_stats", { jobId }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

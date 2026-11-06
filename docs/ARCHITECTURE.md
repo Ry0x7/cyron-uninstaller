@@ -74,7 +74,7 @@ src-tauri/
   src/providers.rs            declarative cleanup provider system, schema validator, safety enforcement
   src/volumes.rs              local volume capacity
   src/history.rs              app-data history persistence
-  src/commands.rs             validated Tauri command layer (34 commands)
+  src/commands.rs             validated Tauri command layer (37 commands)
   src/lib.rs                  state, dialog plugin, command registration
   tests/real_system.rs        live registry/cache/scan integration test
   tests/security.rs           permission boundaries, protected paths, links, fixtures

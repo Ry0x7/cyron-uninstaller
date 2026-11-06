@@ -114,6 +114,21 @@ describe("Tauri IPC contract", () => {
       { run: () => api.repairExplorerIntegration(), command: "repair_explorer_integration", args: undefined },
       { run: () => api.listCleanupProviders(), command: "list_cleanup_providers", args: undefined },
       { run: () => api.inspectCleanableDirectory("C:\\cache"), command: "inspect_cleanable_directory", args: { path: "C:\\cache" } },
+      {
+        run: () => api.queryDirectoryChildren({ jobId: "job-1", dirPath: "C:\\scan", page: 1, pageSize: 50 }),
+        command: "query_directory_children",
+        args: { query: { jobId: "job-1", dirPath: "C:\\scan", page: 1, pageSize: 50 } },
+      },
+      {
+        run: () => api.searchIndexedFiles({ jobId: "job-1", query: "test", limit: 20, offset: 0 }),
+        command: "search_indexed_files",
+        args: { query: { jobId: "job-1", query: "test", limit: 20, offset: 0 } },
+      },
+      {
+        run: () => api.getScanIndexStats("job-1"),
+        command: "get_scan_index_stats",
+        args: { jobId: "job-1" },
+      },
     ];
 
     for (const { run, command, args } of calls) {

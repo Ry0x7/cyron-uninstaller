@@ -6,6 +6,7 @@ pub mod duplicates;
 pub mod explorer;
 pub mod fs;
 pub mod history;
+pub mod index;
 pub mod leftovers;
 pub mod mft;
 pub mod process;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
     pub startup_route: Arc<Mutex<Option<explorer::StartupRoute>>>,
+    pub index_manager: Arc<index::IndexManager>,
     /// True until the user deliberately enables cleaning.
     pub read_only: Arc<AtomicBool>,
 }
@@ -47,6 +49,7 @@ impl Default for AppState {
             process_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
             startup_route: Arc::default(),
+            index_manager: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -96,6 +99,9 @@ pub fn run() {
             commands::repair_explorer_integration,
             commands::list_cleanup_providers,
             commands::inspect_cleanable_directory,
+            commands::query_directory_children,
+            commands::search_indexed_files,
+            commands::get_scan_index_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");
