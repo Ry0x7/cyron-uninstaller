@@ -701,7 +701,7 @@ fn estimated_size_bytes(kilobytes: u32) -> Option<u64> {
     }
 }
 
-fn is_protected(
+pub(crate) fn is_protected(
     name: &str,
     publisher: Option<&str>,
     install_location: Option<&str>,

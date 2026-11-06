@@ -25,7 +25,10 @@ The Uninstaller view provides transparent management of all desktop software, mo
   - **Portable Applications**: Discovers standalone executables installed under `%LOCALAPPDATA%\Programs`.
   - **Broken Records & Review-First Cleanup**:
   - Flags uninstall entries whose executable or uninstall string targets missing binaries.
-  - Safe 2-step cleanup: prepares an expiring plan (`BrokenEntryPlan`) showing the exact registry path, generates an automatic multi-type `.reg` backup in quarantine with a write-ahead recovery journal, and deletes the orphaned entry. Protected Windows components and altered entries are strictly refused.
+  - Safe 2-step cleanup: prepares an expiring plan (`BrokenEntryPlan`) bound to a SHA-256 fingerprint of live registry metadata.
+  - Re-reads and re-verifies live metadata and broken qualification immediately before deletion. Altered, tampered, or recovered entries are refused.
+  - Generates an automatic multi-type `.reg` backup in quarantine with a crash-consistent recovery journal and manifest.
+  - Provides instant in-app registry restoration ("Restore Registry Now" button in the wizard) and discoverable quarantine recovery. Protected Windows components are strictly refused.
 - **Source Filtering & Badges**: Filter easily between `All`, `Win32`, `Store`, `Steam`, `Portable`, and `Broken` records.
 - **Application Search & Filtering**: Filter by publisher, name, or installation scope (machine-wide vs per-user).
 - **Size Measurement**: Because many installers record inaccurate or missing sizes, use the **Measure folder** action to calculate exact on-disk byte totals.
@@ -88,8 +91,8 @@ Clean accumulated build artifacts, package manager caches, and disposable tempor
 ## 6. Activity & Recovery Management
 
 The Activity view maintains an audit log of past scans and quarantine batches:
-- **Inspect Batches**: View quarantined files, original paths, file sizes, and creation timestamps.
-- **Restore Batch**: Safely returns quarantined files to their original directories.
+- **Inspect Batches**: View quarantined files, original paths, file sizes, creation timestamps, and associated `.reg` registry backups.
+- **Restore Batch**: Safely returns quarantined files to their original directories and supports in-app `.reg` registry restoration via verified import.
 - **Purge Batch**: Permanently deletes files inside the batch folder and removes the quarantine record once confirmed.
 
 ---
@@ -124,6 +127,7 @@ Hunter Mode allows you to identify, inspect, terminate, or uninstall any visible
 
 Manage programs configured to start automatically with Windows:
 - **Comprehensive Coverage**: Discovers startup registrations across HKCU/HKLM `Run` and `RunOnce`, WOW6432Node keys, and user/all-users Startup folders.
-- **Reversible Toggling**: Disables or enables startup items per-user using Windows standard `StartupApproved` binary values (`0x02` enabled, `0x03` disabled) without deleting registry keys or losing launch arguments.
+- **Reversible Toggling**: Disables or enables startup items per-user using Windows standard `StartupApproved` binary values (`0x02` enabled, `0x03` disabled) while preserving exact 12-byte payloads and updating FILETIME timestamps matching Windows Task Manager.
+- **Elevation Awareness**: Machine-wide entries (HKLM / all users) require administrator privileges; Cyron verifies write permissions and cleanly disables toggles when unelevated rather than indicating misleading success.
 - **System Protection**: Critical Windows security components (Windows Defender, SecurityHealthSystray, SmartScreen) are clearly badged as **System Protected** and cannot be disabled.
 - **Operator Review**: Modifying any startup entry requires explicit confirmation.

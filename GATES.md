@@ -343,6 +343,33 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   8. Critical Windows process & shared system directory refusal.
   EVIDENCE: `RC1_E2E_FIXTURE_OK` (8/8 scenarios passed).
 
+## Phase 7.2: Release-Blocking Correctness & Desktop Validation
+
+- [x] G47: Broken entry live metadata fingerprint binding & in-app registry restoration
+  CHECK: `src-tauri/src/leftovers.rs`, `src-tauri/src/commands.rs`, `rc1_e2e_fixture.rs` Scenario 5, and isolated HKCU unit tests
+  EXPECT: Binds BrokenEntryPlan to SHA-256 fingerprint over all normalized live registry metadata; re-reads and compares live metadata immediately before deletion; rejects altered, recovered, or no-longer-broken entries; generates collision-resistant plan IDs; records manifest.json and recovery_journal.jsonl in quarantine; verifies in-app registry restoration workflow (`restore_registry_backup` IPC command).
+  EVIDENCE: Passed all isolated HKCU unit tests and Scenario 5 of RC1 E2E fixture.
+
+- [x] G48: Hunter process snapshot isolation & target token isolation
+  CHECK: `src-tauri/src/hunter.rs`, `src-tauri/src/commands.rs`, `src-tauri/tests/security.rs` (`concurrent_hunter_and_uninstaller_snapshots_stay_isolated`), and `rc1_e2e_fixture.rs` Scenario 3
+  EXPECT: Generates unique opaque tokens (`hunter-target-...`); isolates Hunter process snapshots in `AppState::hunter_snapshots` and `AppState::hunter_app_snapshots`; guarantees concurrent Hunter cursor polling never overwrites or mutates active Uninstaller process snapshots; revalidates PID, creation time, and image path; rejects stale targets (> 300s).
+  EVIDENCE: `concurrent_hunter_and_uninstaller_snapshots_stay_isolated` passed; `rc1_e2e_fixture.rs` Scenario 3 passed.
+
+- [x] G49: Real external window targeting with disposable Win32 GUI target (Local Desktop: PASS; Headless CI: NOT VERIFIED)
+  CHECK: `src-tauri/examples/disposable_gui_target.rs`, `src-tauri/examples/rc1_e2e_fixture.rs` Scenario 1 & 2
+  EXPECT: Spawns real Win32 window with valid HWND; verifies `WindowFromPoint` cursor resolution, process image matching, crosshair drag/release, locking/cancellation, and directory boundary collision protection (`C:\Apps\Foo` vs `C:\Apps\FooBar`).
+  EVIDENCE: Verified on local Windows 11 desktop: real HWND created, targeted, locked, and terminated cleanly. In headless CI without desktop window manager / interactive session, recorded as NOT VERIFIED.
+
+- [x] G50: Startup Manager elevation awareness & 12-byte payload preservation
+  CHECK: `src-tauri/src/system.rs` and `rc1_e2e_fixture.rs` Scenario 6
+  EXPECT: Differentiates HKCU vs HKLM and per-user vs all-users Startup folders; checks write permissions via `is_hklm_startup_writable`; disables toggles (`can_toggle: false`) when unelevated instead of false success; preserves exact 12-byte raw binary payload structure with FILETIME updates in bytes 4..12 matching Windows Task Manager.
+  EVIDENCE: Passed `rc1_e2e_fixture.rs` Scenario 6 and unit tests.
+
+- [x] G51: Honest Hunter Mode performance & memory stability benchmark
+  CHECK: `node scripts/verify-hunter-perf.mjs` (`src-tauri/examples/hunter_benchmark.rs`)
+  EXPECT: Measures min/mean/p50/p95/p99 targeting latencies; reports in-memory matching (<1 ms) vs cold discovery (~43 ms); verifies 0 KB memory leak across 100 sustained continuous cycles.
+  EVIDENCE: `HUNTER_BENCHMARK_OK` (in-memory matching p50=737 µs, window resolution p50=0.7 µs, cold discovery=43 ms, memory delta=0 KB).
+
 ## Not gated
 
 - [ ] SignPath Foundation external acceptance: Cyron Uninstaller has prepared the technical integration but has not yet received external approval from SignPath Foundation; public releases prior to approval remain `UNSIGNED_RC` (or `DEV_TEST_SIGNED` for isolated test builds).

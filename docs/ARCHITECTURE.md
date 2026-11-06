@@ -105,8 +105,8 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 34 validated IPC commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 34 Tauri commands. `read_only` starts `true`. |
+| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 45 validated IPC commands. |
+| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 45 Tauri commands. `read_only` starts `true`. |
 
 ## IPC surface
 
@@ -145,6 +145,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `clean_app_leftovers` | `planId`, `itemIds[]` | `LeftoverCleanReport` | Moves leftovers to quarantine with write-ahead journal and multi-type `.reg` registry backups. |
 | `prepare_broken_inventory_cleanup` | `appId` | `BrokenEntryPlan` | Prepares single-use 5-minute plan for removing broken/orphaned uninstall registry keys. |
 | `execute_broken_inventory_cleanup` | `planId` | `LeftoverCleanReport` | Revalidates broken status, creates verified `.reg` backup in quarantine, deletes orphaned subkey. |
+| `restore_registry_backup` | `runId` | `RegistryRestoreReport` | Re-imports quarantined `.reg` backup using native `reg.exe import`; re-verifies subkey restoration. |
 | `prepare_batch_uninstallation` | `appIds[]` | `BatchUninstallPlan` | Validates multiple apps and prepares an ordered execution queue. |
 | `inspect_cleanable_directory` | `path` | `CleanableDirectoryInfo` | Inspects arbitrary directory against safety guards and size estimators. |
 | `open_in_terminal` | `path` | — | Launches Windows Terminal or PowerShell at the target folder without shell wrappers. |
@@ -509,8 +510,10 @@ Windows Store, UWP, and modern packaged applications (MSIX) do not write standar
 | Pending cleanup plans | Rust memory (`AppState::plans`) | 10 minutes or until executed |
 | Pending uninstall plans | Rust memory (`AppState::uninstall_plans`) | 10 minutes or until executed |
 | Process snapshots | Rust memory (`AppState::process_snapshots`) | 5 minutes or until refreshed |
+| Hunter process snapshots | Rust memory (`AppState::hunter_snapshots`) | 5 minutes; completely isolated from uninstaller process snapshots |
+| Hunter app snapshots | Rust memory (`AppState::hunter_app_snapshots`) | 5 minutes; isolated from uninstaller app snapshots |
 | Pending leftover plans | Rust memory (`AppState::leftover_plans`) | 10 minutes or until executed |
-| Pending broken entry plans | Rust memory (`AppState::broken_entry_plans`) | 5 minutes or until executed |
+| Pending broken entry plans | Rust memory (`AppState::broken_entry_plans`) | 5 minutes or until executed; bound to SHA-256 live metadata fingerprint |
 | Cached installed apps | Rust memory (`AppState::cached_apps`) | Session / until invalidated |
 
 Disk scans, cleanup runs, restores and purges write history; cache discovery and duplicate runs are

@@ -109,6 +109,7 @@ describe("Tauri IPC contract", () => {
       { run: () => api.snapshotAppIdentity("app-1"), command: "snapshot_app_identity", args: { appId: "app-1" } },
       { run: () => api.prepareBrokenInventoryCleanup("app-1"), command: "prepare_broken_inventory_cleanup", args: { appId: "app-1" } },
       { run: () => api.executeBrokenInventoryCleanup("plan-1", "HKCU\\test"), command: "execute_broken_inventory_cleanup", args: { planId: "plan-1", confirmedKeyPath: "HKCU\\test" } },
+      { run: () => api.restoreRegistryBackup("run-1"), command: "restore_registry_backup", args: { runId: "run-1" } },
       { run: () => api.prepareBatchUninstall(["app-1", "app-2"], false), command: "prepare_batch_uninstall", args: { appIds: ["app-1", "app-2"], quiet: false } },
       { run: () => api.executeBatchUninstall("batch-plan-1"), command: "execute_batch_uninstall", args: { planId: "batch-plan-1" } },
       { run: () => api.getStartupRoute(), command: "get_startup_route", args: undefined },

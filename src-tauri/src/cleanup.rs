@@ -226,7 +226,10 @@ struct BatchManifest {
     created_at: u64,
     expires_at: u64,
     target_ids: Vec<String>,
+    #[serde(default)]
     items: Vec<ManifestItem>,
+    #[serde(default)]
+    registry_backup: Option<String>,
 }
 
 /* ------------------------------------------------------- plan construction */
@@ -589,6 +592,7 @@ pub fn execute_plan(
         expires_at: now + RETENTION_DAYS * 86_400,
         target_ids: plan.specs.iter().map(|spec| spec.id.clone()).collect(),
         items: Vec::new(),
+        registry_backup: None,
     };
 
     let mut items = Vec::new();
@@ -875,7 +879,8 @@ pub fn list_quarantine(root: &Path) -> Vec<QuarantineBatch> {
         let Some(manifest) = read_manifest(&dir) else {
             continue;
         };
-        if manifest.items.is_empty() {
+        let has_reg_backup = dir.join("registry_backup.reg").exists() || manifest.registry_backup.is_some();
+        if manifest.items.is_empty() && !has_reg_backup {
             continue;
         }
         batches.push(QuarantineBatch {
@@ -951,7 +956,17 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
     }
 
     manifest.items = remaining;
-    if manifest.items.is_empty() {
+    let reg_backup_file = dir.join("registry_backup.reg");
+    let mut reg_restored = false;
+    if reg_backup_file.exists() {
+        if let Ok(reg_rep) = crate::leftovers::restore_registry_backup(&reg_backup_file) {
+            report.restored += reg_rep.keys_restored as u64;
+            let _ = fs::remove_file(&reg_backup_file);
+            reg_restored = true;
+        }
+    }
+
+    if manifest.items.is_empty() && (!reg_backup_file.exists() || reg_restored) {
         let _ = fs::remove_file(dir.join(JOURNAL_FILE));
         let _ = fs::remove_file(dir.join(MANIFEST));
         // `remove_dir` only succeeds on an empty folder, so nothing outside the
@@ -1007,6 +1022,7 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
     }
 
     if remaining.is_empty() {
+        let _ = fs::remove_file(dir.join("registry_backup.reg"));
         let _ = fs::remove_file(dir.join(JOURNAL_FILE));
         let _ = fs::remove_file(dir.join(MANIFEST));
         // `remove_dir` fails if anything unexpected is still inside, which is the
@@ -1139,6 +1155,7 @@ fn read_manifest(dir: &Path) -> Option<BatchManifest> {
                 expires_at: now + RETENTION_DAYS * 86_400,
                 target_ids: Vec::new(),
                 items: valid_items,
+                registry_backup: None,
             })
         }
         (None, None) => None,
