@@ -1,5 +1,48 @@
 /* Disk Analyzer view: treemap canvas, volumes, and the details rail. */
 
+.az-drive-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+
+.az-drive-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.az-drive-tab:hover {
+  background: var(--surface-3);
+  color: var(--text-strong);
+}
+
+.az-drive-tab.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.az-drive-tab__meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  opacity: 0.85;
+}
+
 .az-start {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);

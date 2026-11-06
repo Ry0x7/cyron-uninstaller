@@ -46,6 +46,8 @@ import { useSettings } from "../../lib/settings";
 import { SCAN_EVENT, type CleanableInspection, type ScanNode, type ScanProgress, type ScanResult } from "../../lib/types";
 import { Treemap } from "./Treemap";
 import { TreeView } from "./TreeView";
+import { DetailedListing } from "./DetailedListing";
+import { ItemPropertiesDialog } from "./ItemPropertiesDialog";
 import { AnalyzerFilterBar } from "./AnalyzerFilters";
 import { DuplicatesPanel } from "./DuplicatesPanel";
 import { StoragePanel } from "./StoragePanel";
@@ -85,7 +87,8 @@ const RAIL_TABS = [
 type RailTab = (typeof RAIL_TABS)[number]["value"];
 
 const MODES = [
-  { value: "map" as const, label: "Map" },
+  { value: "map" as const, label: "Treemap" },
+  { value: "details" as const, label: "Explorer Table" },
   { value: "duplicates" as const, label: "Duplicates" },
   { value: "storage" as const, label: "Storage" },
 ];
@@ -136,13 +139,43 @@ function isAbsoluteWindowsPath(value: string): boolean {
   return value.startsWith("\\\\") && value.length > 2 && value[2] !== "\\";
 }
 
+function exportScanCsv(result: ScanResult) {
+  const rows: string[] = ["Path,Name,Kind,Size,Allocated,Files,Folders,Modified"];
+  const walk = (node: ScanNode) => {
+    const escapedPath = `"${(node.path || "").replace(/"/g, '""')}"`;
+    const escapedName = `"${node.name.replace(/"/g, '""')}"`;
+    rows.push(
+      `${escapedPath},${escapedName},${node.kind},${node.size},${node.allocated},${node.fileCount},${node.dirCount},${node.modified ?? ""}`,
+    );
+    node.children.forEach(walk);
+  };
+  walk(result.root);
+  const blob = new Blob([rows.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cyron-scan-${result.rootPath.replace(/[^a-zA-Z0-9]/g, "_")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportScanJson(result: ScanResult) {
+  const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `cyron-scan-${result.rootPath.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function Analyzer({
   initialPath,
   initialMode,
   onNavigateToCleaner,
 }: {
   initialPath?: string | null;
-  initialMode?: "map" | "duplicates" | "storage" | null;
+  initialMode?: "map" | "details" | "duplicates" | "storage" | null;
   onNavigateToCleaner?: (targetId?: string) => void;
 } = {}) {
   const { settings } = useSettings();
@@ -150,13 +183,15 @@ export function Analyzer({
   const [phase, setPhase] = useState<"idle" | "scanning" | "result">("idle");
   const [path, setPath] = useState(initialPath ?? "");
   const [lastPath, setLastPath] = useState("");
-  const [result, setResult] = useState<ScanResult | null>(null);
+  const [scannedRoots, setScannedRoots] = useState<Record<string, ScanResult>>({});
+  const [activeRootKey, setActiveRootKey] = useState<string>("default");
+  const [propertiesItem, setPropertiesItem] = useState<ScanNode | null>(null);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [error, setError] = useState<ScanFailure | null>(null);
   const [stack, setStack] = useState<ScanNode[]>([]);
   const [selected, setSelected] = useState<ScanNode | null>(null);
   const [railTab, setRailTab] = useState<RailTab>("selection");
-  const [mode, setMode] = useState<AnalyzerMode>(initialMode ?? "map");
+  const [mode, setMode] = useState<AnalyzerMode>(initialMode === "details" ? "details" : (initialMode ?? "map"));
   const [filters, setFilters] = useState<AnalyzerFilters>(defaultFilters);
   const [treeWidth, setTreeWidth] = useState(readTreeWidth);
   const [treeOpen, setTreeOpen] = useState(false);
@@ -230,6 +265,57 @@ export function Analyzer({
     };
   }, []);
 
+  const combinedResult = useMemo<ScanResult | null>(() => {
+    const rootList = Object.values(scannedRoots);
+    if (rootList.length === 0) return null;
+    if (rootList.length === 1) return rootList[0];
+
+    const totalSize = rootList.reduce((sum, r) => sum + r.totalSize, 0);
+    const totalAllocated = rootList.reduce((sum, r) => sum + r.totalAllocated, 0);
+    const fileCount = rootList.reduce((sum, r) => sum + r.fileCount, 0);
+    const dirCount = rootList.reduce((sum, r) => sum + r.dirCount, 0);
+
+    const root: ScanNode = {
+      name: "All Scanned Drives",
+      path: "",
+      kind: "dir",
+      size: totalSize,
+      allocated: totalAllocated,
+      fileCount,
+      dirCount,
+      modified: null,
+      children: rootList.map((r) => r.root),
+    };
+
+    return {
+      jobId: "combined-workspace",
+      rootPath: "All Scanned Drives",
+      root,
+      totalSize,
+      totalAllocated,
+      fileCount,
+      dirCount,
+      dedupedFiles: 0,
+      skippedReparse: 0,
+      errors: rootList.flatMap((r) => r.errors),
+      extensionStats: rootList[0].extensionStats,
+      largestFiles: rootList.flatMap((r) => r.largestFiles).sort((a, b) => b.size - a.size).slice(0, 100),
+      elapsedMs: 0,
+      cancelled: false,
+      truncated: false,
+      method: "workspace",
+      methodNote: null,
+      categories: rootList[0].categories,
+      ageBuckets: rootList[0].ageBuckets,
+      insights: rootList[0].insights,
+    };
+  }, [scannedRoots]);
+
+  const result = useMemo<ScanResult | null>(() => {
+    if (activeRootKey === "all") return combinedResult;
+    return scannedRoots[activeRootKey] ?? combinedResult;
+  }, [activeRootKey, scannedRoots, combinedResult]);
+
   const current = stack.length > 0 ? stack[stack.length - 1] : result?.root ?? null;
 
   const nodesByPath = useMemo(() => {
@@ -297,7 +383,6 @@ export function Analyzer({
     startedRef.current = performance.now();
     setPhase("scanning");
     setProgress(null);
-    setResult(null);
     setError(null);
     setSelected(null);
     setStack([]);
@@ -322,7 +407,11 @@ export function Analyzer({
       jobRef.current = null;
       setProgress(null);
       setCancelling(false);
-      setResult(scan);
+      setScannedRoots((prev) => ({
+        ...prev,
+        [scan.rootPath]: scan,
+      }));
+      setActiveRootKey(scan.rootPath);
       setStack([scan.root]);
       setPath(scan.rootPath);
       setPhase("result");
@@ -447,12 +536,30 @@ export function Analyzer({
     ) : (
       <>
         {result && (
-          <Button
-            icon={<IconRefresh size={15} />}
-            onClick={() => void runScan(lastPath || result.rootPath)}
-          >
-            Rescan
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => exportScanCsv(result)}
+              title="Export scan hierarchy as CSV"
+            >
+              Export CSV
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => exportScanJson(result)}
+              title="Export complete scan details as JSON"
+            >
+              Export JSON
+            </Button>
+            <Button
+              icon={<IconRefresh size={15} />}
+              onClick={() => void runScan(lastPath || result.rootPath)}
+            >
+              Rescan
+            </Button>
+          </>
         )}
         <Button variant="primary" icon={<IconFolder size={15} />} onClick={() => void chooseFolder()}>
           Choose folder
@@ -672,6 +779,39 @@ export function Analyzer({
               {" · "}logical size and allocated size are reported separately.
             </p>
 
+            {Object.keys(scannedRoots).length > 1 && (
+              <div className="az-drive-tabs" role="tablist" aria-label="Scanned drives">
+                <button
+                  type="button"
+                  className={cx("az-drive-tab", activeRootKey === "all" && "is-active")}
+                  onClick={() => {
+                    setActiveRootKey("all");
+                    setStack([]);
+                  }}
+                >
+                  All Scanned Drives ({Object.keys(scannedRoots).length})
+                </button>
+                {Object.keys(scannedRoots).map((rootKey) => (
+                  <button
+                    key={rootKey}
+                    type="button"
+                    className={cx("az-drive-tab", activeRootKey === rootKey && "is-active")}
+                    onClick={() => {
+                      setActiveRootKey(rootKey);
+                      if (scannedRoots[rootKey]) {
+                        setStack([scannedRoots[rootKey].root]);
+                      }
+                    }}
+                  >
+                    <span>{rootKey}</span>
+                    <span className="az-drive-tab__meta">
+                      {formatBytes(scannedRoots[rootKey].totalSize)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="az-modes">
               <Segmented
                 size="sm"
@@ -681,6 +821,17 @@ export function Analyzer({
                 ariaLabel="Analyzer mode"
               />
             </div>
+
+            {mode === "details" && (
+              <DetailedListing
+                node={current}
+                selectedPath={selected?.path ?? ""}
+                onSelect={setSelected}
+                onDrill={drill}
+                onReveal={reveal}
+                onShowProperties={setPropertiesItem}
+              />
+            )}
 
             {mode === "duplicates" && (
               <DuplicatesPanel
@@ -965,6 +1116,11 @@ export function Analyzer({
           </>
         )}
       </div>
+      <ItemPropertiesDialog
+        item={propertiesItem}
+        onClose={() => setPropertiesItem(null)}
+        onReveal={reveal}
+      />
     </>
   );
 }

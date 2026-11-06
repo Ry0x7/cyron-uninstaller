@@ -106,4 +106,58 @@ describe("TreeView regression tests", () => {
       nodeKey(root.children[0].children[0], nodeKey(root.children[0], nodeKey(root, null, 0), 0), 0),
     );
   });
+
+  it("handles multi-root workspaces with independent volume expansion", () => {
+    const driveC = makeTree();
+    const driveD: ScanNode = {
+      name: "D:",
+      path: "D:\\",
+      kind: "dir",
+      size: 40_000,
+      allocated: 40_000,
+      fileCount: 4,
+      dirCount: 1,
+      modified: 1700000000,
+      children: [
+        {
+          name: "Games",
+          path: "D:\\Games",
+          kind: "dir",
+          size: 40_000,
+          allocated: 40_000,
+          fileCount: 4,
+          dirCount: 0,
+          children: [],
+        },
+      ],
+    };
+
+    const combinedRoot: ScanNode = {
+      name: "All Scanned Drives",
+      path: "",
+      kind: "dir",
+      size: driveC.size + driveD.size,
+      allocated: driveC.allocated + driveD.allocated,
+      fileCount: driveC.fileCount + driveD.fileCount,
+      dirCount: driveC.dirCount + driveD.dirCount + 2,
+      modified: null,
+      children: [driveC, driveD],
+    };
+
+    const combinedKey = nodeKey(combinedRoot, null, 0);
+    const cKey = nodeKey(driveC, combinedKey, 0);
+    const dKey = nodeKey(driveD, combinedKey, 1);
+
+    // Expand combined workspace root and drive D, but keep drive C collapsed
+    const expanded = new Set<string>([combinedKey, dKey]);
+    const { rows } = flattenVisible(combinedRoot, expanded, defaultFilters);
+
+    // Should have: CombinedRoot, C: (collapsed, hasChildren: true), D: (expanded), D:\Games
+    expect(rows).toHaveLength(4);
+    expect(rows[0].node.name).toBe("All Scanned Drives");
+    expect(rows[1].node.name).toBe("C:");
+    expect(rows[1].hasChildren).toBe(true);
+    expect(rows[2].node.name).toBe("D:");
+    expect(rows[3].node.name).toBe("Games");
+  });
 });

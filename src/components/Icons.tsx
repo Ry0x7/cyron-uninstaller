@@ -233,3 +233,10 @@ export const IconArrowUpRight = (props: IconProps) => (
     <path d="M7 17 17 7M9.5 7H17v7.5" />
   </Svg>
 );
+
+export const IconCopy = (props: IconProps) => (
+  <Svg {...props}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Svg>
+);
