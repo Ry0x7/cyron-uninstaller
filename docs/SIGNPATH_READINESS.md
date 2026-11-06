@@ -25,7 +25,7 @@ Local development builds are fully functional and cryptographically verifiable t
 | 7 | **Documented Privacy Policy & System Disclosures** | Clear disclosures regarding system modifications (registry backup, quarantine) and zero personal data collection. | **PASS** | Formally documented in `docs/CODE_SIGNING_POLICY.md` and `docs/SECURITY.md`. |
 | 8 | **Build Pipeline & Reproducible Automation** | GitHub Actions build pipeline executes full test suite (71 frontend, 171 Rust, fixtures) and builds binaries in release mode. | **PASS** | Ready for integration with `signpath/github-action-submit-signing-request`. |
 | 9 | **GitHub Account Security & MFA** | SignPath requires project maintainers to enforce GitHub two-factor authentication (MFA) and branch protection on release branches. | **PASS (EXTERNAL REQUIREMENT)** | Maintainer must verify 2FA/MFA is enabled on GitHub account `Ry0x7`. |
-| 10 | **Accurate Windows Metadata** | PE VERSIONINFO, WiX MSI database properties, and NSIS setup headers match project identity (`Cyron Uninstaller`, version from `package.json`, publisher `Ry0x7`, UpgradeCode locked). | **PASS** | Verified via `npm run verify:metadata` (`WINDOWS_METADATA_OK`). |
+| 10 | **Accurate Windows Metadata** | PE VERSIONINFO, WiX MSI database properties, and NSIS setup headers match project identity (`Cyron Uninstaller`, version from `package.json`, publisher `Chryypt`, UpgradeCode locked). | **PASS** | Verified via `npm run verify:metadata` (`WINDOWS_METADATA_OK`). |
 | 11 | **Public Code Signing Policy & Attribution** | SignPath terms require attribution to SignPath Foundation and clear maintainer/reviewer signing policies. | **PASS** | Documented in `docs/CODE_SIGNING_POLICY.md`. |
 
 ---

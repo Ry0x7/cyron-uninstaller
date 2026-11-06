@@ -20,7 +20,7 @@ $tauriConf = Get-Content $tauriConfPath -Raw | ConvertFrom-Json
 
 $expectedVersion = $pkg.version
 $expectedProductName = "Cyron Uninstaller"
-$expectedPublisher = "Ry0x7"
+$expectedPublisher = "Chryypt"
 $expectedExeName = "cyron.exe"
 $expectedIdentifier = "dev.cyron.uninstaller"
 $expectedUpgradeCode = "{C2BCD648-205F-5904-9E5C-85726E376EC2}"
@@ -88,8 +88,8 @@ if (-not (Test-Path $exePath)) {
     if ($vi.OriginalFilename -ne $expectedExeName) {
         $failures += "cyron.exe OriginalFilename ('$($vi.OriginalFilename)') != expected '$expectedExeName'"
     }
-    if (-not ($vi.LegalCopyright -match "Ry0x7" -and $vi.LegalCopyright -match "2026")) {
-        $failures += "cyron.exe LegalCopyright ('$($vi.LegalCopyright)') does not contain 'Ry0x7' and '2026'"
+    if (-not ($vi.LegalCopyright -match "Chryypt" -and $vi.LegalCopyright -match "2026")) {
+        $failures += "cyron.exe LegalCopyright ('$($vi.LegalCopyright)') does not contain 'Chryypt' and '2026'"
     }
     Write-Host "cyron.exe metadata verified: ProductName='$($vi.ProductName)', Version='$($vi.ProductVersion)', Publisher='$($vi.CompanyName)'" -ForegroundColor Green
 }
@@ -111,8 +111,8 @@ if (-not $nsisExe) {
     if ($nvi.ProductVersion -ne $expectedVersion) {
         $failures += "NSIS installer ProductVersion ('$($nvi.ProductVersion)') != expected '$expectedVersion'"
     }
-    if (-not ($nvi.LegalCopyright -match "Ry0x7" -and $nvi.LegalCopyright -match "2026")) {
-        $failures += "NSIS installer LegalCopyright ('$($nvi.LegalCopyright)') does not contain 'Ry0x7' and '2026'"
+    if (-not ($nvi.LegalCopyright -match "Chryypt" -and $nvi.LegalCopyright -match "2026")) {
+        $failures += "NSIS installer LegalCopyright ('$($nvi.LegalCopyright)') does not contain 'Chryypt' and '2026'"
     }
     Write-Host "NSIS installer metadata verified: Name='$($nsisExe.Name)', Version='$($nvi.ProductVersion)'" -ForegroundColor Green
 }

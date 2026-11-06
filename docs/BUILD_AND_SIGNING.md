@@ -115,8 +115,8 @@ Windows metadata is enforced consistently across all artifacts and audited autom
 - **File Description**: `Windows Application Uninstaller, Disk Analyzer & Cleaner`
 - **Version**: Derived dynamically from `package.json` and `tauri.conf.json` (`0.1.0`)
 - **Original Filename**: `cyron.exe`
-- **Publisher**: `Ry0x7`
-- **Copyright**: `Copyright © 2026 Ry0x7`
+- **Publisher**: `Chryypt`
+- **Copyright**: `Copyright © 2026 Chryypt`
 - **Application Identifier**: `dev.cyron.uninstaller`
 - **MSI UpgradeCode**: `{C2BCD648-205F-5904-9E5C-85726E376EC2}`
 

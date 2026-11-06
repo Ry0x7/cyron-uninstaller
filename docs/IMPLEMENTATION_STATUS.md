@@ -66,7 +66,7 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | Feature | Status | Verification & Evidence |
 |---|---|---|
 | Explorer Shell Integration | Done | `explorer.rs`: per-user shell verbs registered in `HKCU\Software\Classes` without elevation; safe CLI argument sanitization; toggleable and repairable via Settings. |
-| Windows Metadata Standards | Done | Product name, version, publisher (`Ry0x7`), UpgradeCode, and description enforced across PE, MSI, and NSIS (`WINDOWS_METADATA_OK`). |
+| Windows Metadata Standards | Done | Product name, version, publisher (`Chryypt`), UpgradeCode, and description enforced across PE, MSI, and NSIS (`WINDOWS_METADATA_OK`). |
 | Local Dev Code Signing | Done | `scripts/sign-dev-build.ps1` signs binaries with local self-signed certificate (`DEV_TEST_SIGNED`); signature integrity and negative tests verified (`SIGNATURES_VERIFIED_OK`). |
 | SignPath Foundation Integration | Prepared | Prepared `.github/workflows/signpath-release.yml` and `docs/CODE_SIGNING_POLICY.md` pending open-source onboarding. |
 | Installer Bundling | Done | NSIS setup (`.exe`) and WiX MSI (`.msi`) generated and verified (`RELEASE_BUNDLES_OK`). |

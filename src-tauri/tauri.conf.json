@@ -31,8 +31,8 @@
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
-    "publisher": "Ry0x7",
-    "copyright": "Copyright © 2026 Ry0x7",
+    "publisher": "Chryypt",
+    "copyright": "Copyright © 2026 Chryypt",
     "category": "Utility",
     "shortDescription": "Windows Application Uninstaller, Disk Analyzer & Cleaner",
     "longDescription": "Windows Application Uninstaller, Disk Analyzer & Cleaner with review-first cache cleanup, recoverable quarantine, process management, and leftover scanning.",

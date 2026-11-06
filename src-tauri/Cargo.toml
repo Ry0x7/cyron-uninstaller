@@ -2,7 +2,7 @@
 name = "cyron"
 version = "0.1.0"
 description = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
-authors = ["Ry0x7"]
+authors = ["Chryypt"]
 license-file = "../LICENSE"
 edition = "2021"
 rust-version = "1.77"
@@ -12,8 +12,8 @@ OriginalFilename = "cyron.exe"
 InternalName = "cyron.exe"
 FileDescription = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
 ProductName = "Cyron Uninstaller"
-CompanyName = "Ry0x7"
-LegalCopyright = "Copyright © 2026 Ry0x7"
+CompanyName = "Chryypt"
+LegalCopyright = "Copyright © 2026 Chryypt"
 
 [lib]
 name = "cyron_lib"

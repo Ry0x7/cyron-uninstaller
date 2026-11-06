@@ -300,7 +300,7 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 
 - [x] G40: Windows metadata consistency across binary and installers
   CHECK: `npm run verify:metadata` (`scripts/verify-windows-metadata.ps1`)
-  EXPECT: PE VERSIONINFO, WiX MSI database properties, and NSIS headers match `Cyron Uninstaller`, version `0.1.0`, publisher `Ry0x7`, UpgradeCode `{C2BCD648-205F-5904-9E5C-85726E376EC2}`.
+  EXPECT: PE VERSIONINFO, WiX MSI database properties, and NSIS headers match `Cyron Uninstaller`, version `0.1.0`, publisher `Chryypt`, UpgradeCode `{C2BCD648-205F-5904-9E5C-85726E376EC2}`.
   EVIDENCE: `WINDOWS_METADATA_OK` (5/5 checks passed).
 
 - [x] G41: Local development code signing (`DEV_TEST_SIGNED`)
