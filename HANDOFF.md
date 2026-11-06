@@ -4,7 +4,17 @@ Updated: 2026-11-06 (Phase 7 Code Signing Architecture, Release Provenance & RC1
 
 ## Current Status
 
-Phases 1–7, Priority 0 security hardening, Release Candidate 1 (RC1) hardening, and the two-track code signing architecture are implemented and verified across the Rust backend and React desktop interface.
+Phases 1–7, Priority 0 security hardening, Release Candidate 1 (RC1) hardening, two-track code signing architecture, and official GitHub v0.1.0 tag and release candidate publication are implemented, verified, and published.
+
+### Release Candidate 1 (v0.1.0):
+- **Tag & Release:** `https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.1.0`
+- **Published Assets:**
+  - `Cyron Uninstaller_0.1.0_x64-setup.exe` (NSIS Installer, DEV_TEST_SIGNED)
+  - `Cyron Uninstaller_0.1.0_x64_en-US.msi` (WiX MSI Installer, DEV_TEST_SIGNED)
+  - `cyron.exe` (Standalone Portable Executable, DEV_TEST_SIGNED)
+  - `SHA256SUMS.txt` (Cryptographic SHA-256 manifest)
+- **Security & Quality:** 0 open Dependabot/npm alerts; strict no-rebase policy enforced; branch protections active.
+
 
 ### Capabilities Delivered in Phase 7:
 1. **Windows Metadata Normalization & Automated Audit**:
