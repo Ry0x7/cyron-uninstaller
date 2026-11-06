@@ -85,13 +85,45 @@ function withToolchain(base) {
     }
   }
 
-  const environment = { ...base };
-  environment.PATH = [...pathParts, environment.PATH ?? ""].join(path.delimiter);
-  if (includeParts.length) {
-    environment.INCLUDE = [...includeParts, environment.INCLUDE ?? ""].join(";");
+  // Find Cargo home directory if present to guarantee cargo is resolvable
+  const cargoHome = base.CARGO_HOME || (base.USERPROFILE ? path.join(base.USERPROFILE, ".cargo") : undefined);
+  if (cargoHome) {
+    const cargoBin = path.join(cargoHome, "bin");
+    if (existsSync(cargoBin)) {
+      pathParts.push(cargoBin);
+    }
   }
+
+  const environment = { ...base };
+  const existingPathKey = Object.keys(environment).find((k) => k.toUpperCase() === "PATH");
+  const existingPath = existingPathKey ? environment[existingPathKey] : "";
+  for (const key of Object.keys(environment)) {
+    if (key.toUpperCase() === "PATH") {
+      delete environment[key];
+    }
+  }
+  const combinedPath = [...pathParts, existingPath].filter(Boolean).join(path.delimiter);
+  environment.PATH = combinedPath;
+  environment.Path = combinedPath;
+
+  const existingIncKey = Object.keys(environment).find((k) => k.toUpperCase() === "INCLUDE");
+  const existingInc = existingIncKey ? environment[existingIncKey] : "";
+  if (includeParts.length) {
+    const combinedInc = [...includeParts, existingInc].filter(Boolean).join(";");
+    for (const key of Object.keys(environment)) {
+      if (key.toUpperCase() === "INCLUDE") delete environment[key];
+    }
+    environment.INCLUDE = combinedInc;
+  }
+
+  const existingLibKey = Object.keys(environment).find((k) => k.toUpperCase() === "LIB");
+  const existingLib = existingLibKey ? environment[existingLibKey] : "";
   if (libParts.length) {
-    environment.LIB = [...libParts, environment.LIB ?? ""].join(";");
+    const combinedLib = [...libParts, existingLib].filter(Boolean).join(";");
+    for (const key of Object.keys(environment)) {
+      if (key.toUpperCase() === "LIB") delete environment[key];
+    }
+    environment.LIB = combinedLib;
   }
   return environment;
 }

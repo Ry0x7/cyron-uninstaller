@@ -52,3 +52,5 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
       - name: Isolated cleanup fixture (plan, quarantine, restore, purge)
         run: node scripts/verify-cleanup.mjs
+      - name: End-to-end uninstallation & residual recovery fixture
+        run: node scripts/verify-e2e.mjs

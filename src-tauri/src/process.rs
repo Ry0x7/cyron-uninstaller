@@ -188,7 +188,10 @@ pub fn discover_app_processes(
         let path_key = normalize_key(Path::new(full_path));
         if is_within_key(&path_key, &target_root_key) {
             let critical = is_critical_process(pid, &exe_name, exe_path.as_deref());
-            let creation_time = get_process_creation_time(pid).unwrap_or(0);
+            let creation_time = match get_process_creation_time(pid) {
+                Some(t) if t != 0 => t,
+                _ => continue, // Fail closed: unverified process identity cannot be snapshotted or terminated
+            };
             matching.push(AppProcess {
                 pid,
                 name: exe_name,
@@ -281,8 +284,22 @@ pub fn terminate_processes_verified(
         }
 
         // Re-verify PID creation time has not changed (PID recycling protection)
-        let current_creation = get_process_creation_time(pid).unwrap_or(0);
-        if expected.creation_time != 0 && current_creation != 0 && expected.creation_time != current_creation {
+        // Must fail closed if creation time cannot be determined or does not match snapshot.
+        let current_creation = match get_process_creation_time(pid) {
+            Some(t) if t != 0 => t,
+            _ => {
+                results.push(ProcessTerminateResult {
+                    pid,
+                    name,
+                    success: false,
+                    graceful: false,
+                    error: Some("Could not determine process creation time. Termination aborted to prevent PID recycling race.".into()),
+                });
+                continue;
+            }
+        };
+
+        if expected.creation_time == 0 || expected.creation_time != current_creation {
             results.push(ProcessTerminateResult {
                 pid,
                 name,

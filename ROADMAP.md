@@ -149,6 +149,19 @@ size cap or expiry sweep; batches stay until purged.
 - [x] Store/MSIX inventory investigation and compatibility boundary documented (`docs/ARCHITECTURE.md`).
 - [x] User documentation, contribution guide, and release checklist (`docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md`).
 
+## Release Candidate 1 (RC1) — Release Hardening (implemented)
+
+- [x] Batch uninstall confirmation plan: server-held, single-use, 10-minute expiring confirmation plan (`BatchUninstallPlan`), live registry command revalidation, and explicit operator approval of executables and arguments before execution.
+- [x] Fail-closed leftover file cleanup: durable write-ahead journal entry with physical disk synchronization (`sync_all`) must succeed before moving any file; failures abort file movement to prevent unrecoverable data loss.
+- [x] Recursive registry backup error propagation: all subkey enumeration, value reading, and file write errors propagate immediately instead of silently skipping entries.
+- [x] Registry backup integrity verification & multi-type roundtrip: checks header, file length, and syntax structure across all 6 Windows value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and nested subkeys before deleting any key.
+- [x] Registry restoration error reporting: reports exact counts of restored keys and values, captures every failure, and never claims success on partial restoration.
+- [x] Process creation-time fail-closed verification: process termination rejects processes whose creation time cannot be determined or does not match the snapshot, preventing PID recycling races.
+- [x] CI runner environment fix: patched MSVC toolchain wrapper (`scripts/msvc-env.mjs`) to preserve Windows `Path` and locate `cargo` in CI runners, resolving the `verify-cleanup.mjs` failure.
+- [x] End-to-end fixture test suite: added `rc1_e2e_fixture.rs` and `scripts/verify-e2e.mjs` (`RC1_E2E_FIXTURE_OK`) covering uninstallation, process management, registry backup/restore, and residual cleanup.
+- [x] UI/UX audit & branding cleanup: removed obsolete "Phase 1 is read-only" from bundle descriptions and Settings, verified all six views.
+- [x] Release automation gating: `.github/workflows/release.yml` enforces test suites, runs installer verification, and publishes unsigned release candidates as draft pre-releases with explicit disclaimers.
+
 ## Non-negotiable constraints for every phase
 
 - Never recursively delete arbitrary directories based on names.

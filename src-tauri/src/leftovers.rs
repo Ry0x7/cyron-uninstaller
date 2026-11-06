@@ -431,9 +431,17 @@ pub fn clean_leftovers(
     if !selected_regs.is_empty() {
         let reg_backup_file = batch.join("registry_backup.reg");
         match export_registry_backup(&selected_regs, &reg_backup_file) {
-            Ok(()) => {
-                backup_path = Some(reg_backup_file.to_string_lossy().to_string());
-            }
+            Ok(()) => match verify_registry_backup(&reg_backup_file) {
+                Ok(()) => {
+                    backup_path = Some(reg_backup_file.to_string_lossy().to_string());
+                }
+                Err(e) => {
+                    errors.push(format!("Registry backup integrity verification failed: {e}"));
+                    return Err(format!(
+                        "Registry backup verification failed ({e}). Residual cleanup was aborted to protect your registry."
+                    ));
+                }
+            },
             Err(e) => {
                 errors.push(format!("Failed to create registry backup: {e}"));
                 return Err(format!(
@@ -500,16 +508,25 @@ pub fn clean_leftovers(
             });
             let line = serde_json::to_string(&item).unwrap_or_default();
             use std::io::Write;
-            if let Ok(mut jf) = fs::OpenOptions::new().create(true).append(true).open(&journal_path) {
-                let _ = writeln!(jf, "{line}");
-                let _ = jf.flush();
-                let _ = jf.sync_all();
+            let journal_res: Result<(), std::io::Error> = (|| {
+                let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
+                writeln!(jf, "{line}")?;
+                jf.flush()?;
+                jf.sync_all()?;
+                Ok(())
+            })();
+
+            if let Err(e) = journal_res {
+                errors.push(format!("Journal write failed for {}: {e}; skipped moving to preserve recoverability", file.display()));
+                continue; // fail closed: NEVER move file if journal write failed!
             }
 
             if fs::rename(&file, &dest).is_ok() {
                 quarantined_files += 1;
                 quarantined_bytes += size;
                 manifest_items.push(item);
+            } else {
+                errors.push(format!("Could not move {} to quarantine", file.display()));
             }
         }
 
@@ -553,6 +570,14 @@ pub fn clean_leftovers(
     })
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistryRestoreReport {
+    pub keys_restored: usize,
+    pub values_restored: usize,
+    pub errors: Vec<String>,
+}
+
 /// Recursively exports registry keys and all subkeys with full value type preservation.
 pub fn export_registry_backup(regs: &[&LeftoverCandidate], output: &Path) -> Result<(), String> {
     use std::io::Write;
@@ -569,14 +594,58 @@ pub fn export_registry_backup(regs: &[&LeftoverCandidate], output: &Path) -> Res
     file.flush().map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
 
-    // Verify backup integrity: file must exist, non-zero length, and start with header
-    let meta = fs::metadata(output).map_err(|e| format!("Backup verification failed: {e}"))?;
+    verify_registry_backup(output)
+}
+
+/// Validates a .reg backup file: checks file size, header, and syntax of sections and values.
+pub fn verify_registry_backup(path: &Path) -> Result<(), String> {
+    let meta = fs::metadata(path).map_err(|e| format!("Cannot read backup metadata: {e}"))?;
     if meta.len() == 0 {
-        return Err("Backup file was empty after export.".into());
+        return Err("Backup file is empty.".into());
     }
-    let content = fs::read_to_string(output).map_err(|e| format!("Could not read back backup file: {e}"))?;
+    let content = fs::read_to_string(path).map_err(|e| format!("Cannot read backup file: {e}"))?;
     if !content.starts_with("Windows Registry Editor Version 5.00") {
-        return Err("Backup file header verification failed.".into());
+        return Err("Missing or invalid Windows Registry header.".into());
+    }
+
+    let mut section_count = 0;
+    for (line_idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with("Windows Registry") {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            section_count += 1;
+            let section = &trimmed[1..trimmed.len() - 1];
+            if !section.starts_with("HKEY_CURRENT_USER\\")
+                && !section.starts_with("HKEY_LOCAL_MACHINE\\")
+                && !section.starts_with("HKCU\\")
+                && !section.starts_with("HKLM\\")
+            {
+                return Err(format!("Line {}: Unrecognized hive prefix in [{section}]", line_idx + 1));
+            }
+        } else if let Some(eq) = trimmed.find('=') {
+            let val = trimmed[eq + 1..].trim();
+            if val.starts_with('"') {
+                if !val.ends_with('"') || val.len() < 2 {
+                    return Err(format!("Line {}: Unterminated string literal", line_idx + 1));
+                }
+            } else if let Some(dw) = val.strip_prefix("dword:") {
+                if u32::from_str_radix(dw, 16).is_err() {
+                    return Err(format!("Line {}: Malformed dword value '{dw}'", line_idx + 1));
+                }
+            } else if val.starts_with("hex:") || val.starts_with("hex(") {
+                let Some(colon) = val.find(':') else {
+                    return Err(format!("Line {}: Malformed hex entry", line_idx + 1));
+                };
+                let bytes_part = &val[colon + 1..];
+                parse_hex_bytes(bytes_part).map_err(|e| format!("Line {}: {e}", line_idx + 1))?;
+            }
+        }
+    }
+
+    if section_count == 0 {
+        return Err("Backup file contains no registry sections.".into());
     }
 
     Ok(())
@@ -600,9 +669,10 @@ fn export_key_recursive(
         display_prefix.to_string()
     };
 
-    writeln!(file, "[{full_hive_prefix}]").map_err(|e| e.to_string())?;
+    writeln!(file, "[{full_hive_prefix}]").map_err(|e| format!("Failed writing section header for {full_hive_prefix}: {e}"))?;
 
-    for (name, val) in key.enum_values().flatten() {
+    for res in key.enum_values() {
+        let (name, val) = res.map_err(|e| format!("Failed to read registry value in {display_prefix}: {e}"))?;
         let escaped_name = if name.is_empty() {
             "@".into()
         } else {
@@ -672,27 +742,33 @@ fn export_key_recursive(
     }
     writeln!(file).map_err(|e| e.to_string())?;
 
-    // Recursively enumerate subkeys
-    for sub in key.enum_keys().flatten() {
+    // Recursively enumerate subkeys, failing closed if enumeration or open fails
+    for res in key.enum_keys() {
+        let sub = res.map_err(|e| format!("Failed to enumerate subkeys in {display_prefix}: {e}"))?;
         let child_subkey = format!("{subkey_path}\\{sub}");
         let child_display = format!("{display_prefix}\\{sub}");
-        if let Ok(child_key) = root.open_subkey(&child_subkey) {
-            let _ = export_key_recursive(root, &child_display, &child_subkey, &child_key, file);
-        }
+        let child_key = root
+            .open_subkey(&child_subkey)
+            .map_err(|e| format!("Failed to open subkey {child_display} during backup: {e}"))?;
+        export_key_recursive(root, &child_display, &child_subkey, &child_key, file)?;
     }
 
     Ok(())
 }
 
 /// Restores registry keys and values from a .reg file.
-pub fn restore_registry_backup(backup_path: &Path) -> Result<usize, String> {
+/// Fails closed if any key creation, subkey traversal, or value write operation fails.
+pub fn restore_registry_backup(backup_path: &Path) -> Result<RegistryRestoreReport, String> {
     let content = fs::read_to_string(backup_path)
         .map_err(|e| format!("Could not read registry backup file: {e}"))?;
 
-    let mut restored_count = 0usize;
+    let mut keys_restored = 0usize;
+    let mut values_restored = 0usize;
+    let mut errors = Vec::new();
     let mut current_key: Option<RegKey> = None;
+    let mut current_section: String = String::new();
 
-    for line in content.lines() {
+    for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with("Windows Registry") {
             continue;
@@ -700,6 +776,7 @@ pub fn restore_registry_backup(backup_path: &Path) -> Result<usize, String> {
 
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
             let section = &trimmed[1..trimmed.len() - 1];
+            current_section = section.to_string();
             let (root_hive, subkey) = if let Some(rest) = section.strip_prefix("HKEY_CURRENT_USER\\") {
                 (RegKey::predef(HKEY_CURRENT_USER), rest.to_string())
             } else if let Some(rest) = section.strip_prefix("HKEY_LOCAL_MACHINE\\") {
@@ -709,14 +786,21 @@ pub fn restore_registry_backup(backup_path: &Path) -> Result<usize, String> {
             } else if let Some(rest) = section.strip_prefix("HKLM\\") {
                 (RegKey::predef(HKEY_LOCAL_MACHINE), rest.to_string())
             } else {
+                errors.push(format!("Line {}: Unknown hive in section [{section}]", line_idx + 1));
+                current_key = None;
                 continue;
             };
 
-            let (created, _) = root_hive
-                .create_subkey(&subkey)
-                .map_err(|e| format!("Failed to create registry subkey {subkey}: {e}"))?;
-            current_key = Some(created);
-            restored_count += 1;
+            match root_hive.create_subkey(&subkey) {
+                Ok((created, _)) => {
+                    current_key = Some(created);
+                    keys_restored += 1;
+                }
+                Err(e) => {
+                    errors.push(format!("Line {}: Failed to create registry subkey {subkey}: {e}", line_idx + 1));
+                    current_key = None;
+                }
+            }
             continue;
         }
 
@@ -725,10 +809,10 @@ pub fn restore_registry_backup(backup_path: &Path) -> Result<usize, String> {
         };
 
         if let Some(eq_idx) = trimmed.find('=') {
-            let name_part = &trimmed[..eq_idx].trim();
-            let val_part = &trimmed[eq_idx + 1..].trim();
+            let name_part = trimmed[..eq_idx].trim();
+            let val_part = trimmed[eq_idx + 1..].trim();
 
-            let val_name = if *name_part == "@" {
+            let val_name = if name_part == "@" {
                 String::new()
             } else if name_part.starts_with('"') && name_part.ends_with('"') && name_part.len() >= 2 {
                 name_part[1..name_part.len() - 1]
@@ -738,54 +822,85 @@ pub fn restore_registry_backup(backup_path: &Path) -> Result<usize, String> {
                 name_part.to_string()
             };
 
-            if val_part.starts_with('"') && val_part.ends_with('"') && val_part.len() >= 2 {
-                let unescaped = val_part[1..val_part.len() - 1]
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\");
-                let _ = key.set_value(&val_name, &unescaped);
-            } else if let Some(dword_str) = val_part.strip_prefix("dword:") {
-                if let Ok(dword) = u32::from_str_radix(dword_str, 16) {
-                    let _ = key.set_value(&val_name, &dword);
+            let set_res: Result<(), String> = (|| {
+                if val_part.starts_with('"') && val_part.ends_with('"') && val_part.len() >= 2 {
+                    let unescaped = val_part[1..val_part.len() - 1]
+                        .replace("\\\"", "\"")
+                        .replace("\\\\", "\\");
+                    key.set_value(&val_name, &unescaped).map_err(|e| e.to_string())?;
+                } else if let Some(dword_str) = val_part.strip_prefix("dword:") {
+                    let dword = u32::from_str_radix(dword_str, 16)
+                        .map_err(|e| format!("Invalid dword literal '{dword_str}': {e}"))?;
+                    key.set_value(&val_name, &dword).map_err(|e| e.to_string())?;
+                } else if let Some(hex_str) = val_part.strip_prefix("hex:") {
+                    let bytes = parse_hex_bytes(hex_str)?;
+                    let reg_val = RegValue {
+                        vtype: REG_BINARY,
+                        bytes,
+                    };
+                    key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
+                } else if let Some(hex_str) = val_part.strip_prefix("hex(2):") {
+                    let bytes = parse_hex_bytes(hex_str)?;
+                    let reg_val = RegValue {
+                        vtype: REG_EXPAND_SZ,
+                        bytes,
+                    };
+                    key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
+                } else if let Some(hex_str) = val_part.strip_prefix("hex(7):") {
+                    let bytes = parse_hex_bytes(hex_str)?;
+                    let reg_val = RegValue {
+                        vtype: REG_MULTI_SZ,
+                        bytes,
+                    };
+                    key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
+                } else if let Some(hex_str) = val_part.strip_prefix("hex(b):") {
+                    let bytes = parse_hex_bytes(hex_str)?;
+                    let reg_val = RegValue {
+                        vtype: REG_QWORD,
+                        bytes,
+                    };
+                    key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
+                } else {
+                    return Err(format!("Unrecognized value format: '{val_part}'"));
                 }
-            } else if let Some(hex_str) = val_part.strip_prefix("hex:") {
-                let bytes = parse_hex_bytes(hex_str);
-                let reg_val = RegValue {
-                    vtype: REG_BINARY,
-                    bytes,
-                };
-                let _ = key.set_raw_value(&val_name, &reg_val);
-            } else if let Some(hex_str) = val_part.strip_prefix("hex(2):") {
-                let bytes = parse_hex_bytes(hex_str);
-                let reg_val = RegValue {
-                    vtype: REG_EXPAND_SZ,
-                    bytes,
-                };
-                let _ = key.set_raw_value(&val_name, &reg_val);
-            } else if let Some(hex_str) = val_part.strip_prefix("hex(7):") {
-                let bytes = parse_hex_bytes(hex_str);
-                let reg_val = RegValue {
-                    vtype: REG_MULTI_SZ,
-                    bytes,
-                };
-                let _ = key.set_raw_value(&val_name, &reg_val);
-            } else if let Some(hex_str) = val_part.strip_prefix("hex(b):") {
-                let bytes = parse_hex_bytes(hex_str);
-                let reg_val = RegValue {
-                    vtype: REG_QWORD,
-                    bytes,
-                };
-                let _ = key.set_raw_value(&val_name, &reg_val);
+                Ok(())
+            })();
+
+            match set_res {
+                Ok(()) => {
+                    values_restored += 1;
+                }
+                Err(e) => {
+                    errors.push(format!("Line {}: Failed to set value '{val_name}' in [{}]: {e}", line_idx + 1, current_section));
+                }
             }
         }
     }
 
-    Ok(restored_count)
+    if !errors.is_empty() {
+        return Err(format!("Registry restoration encountered {} errors (restored {} keys, {} values): {}",
+            errors.len(), keys_restored, values_restored, errors.join("; ")));
+    }
+
+    Ok(RegistryRestoreReport {
+        keys_restored,
+        values_restored,
+        errors,
+    })
 }
 
-fn parse_hex_bytes(s: &str) -> Vec<u8> {
-    s.split(',')
-        .filter_map(|part| u8::from_str_radix(part.trim(), 16).ok())
-        .collect()
+fn parse_hex_bytes(s: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    for part in s.split(',') {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let b = u8::from_str_radix(trimmed, 16)
+            .map_err(|e| format!("Invalid hex byte '{trimmed}': {e}"))?;
+        bytes.push(b);
+    }
+    Ok(bytes)
 }
 
 /// Refuses to delete shared vendor keys or registry roots.
@@ -976,16 +1091,35 @@ mod tests {
         let test_subkey = format!("Software\\CyronTestFixture_{}_{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-        // 1. Create fixture key and subkey with values of multiple types
+        // 1. Create fixture key and subkey with values of ALL major types
         let (key, _) = hkcu.create_subkey(&test_subkey).expect("create test key");
         key.set_value("StringVal", &"hello world").expect("set string");
         key.set_value("DwordVal", &42u32).expect("set dword");
+        key.set_value("", &"default value").expect("set default value");
 
         let bin_val = RegValue {
             vtype: REG_BINARY,
             bytes: vec![0xde, 0xad, 0xbe, 0xef],
         };
         key.set_raw_value("BinaryVal", &bin_val).expect("set binary");
+
+        let qword_val = RegValue {
+            vtype: REG_QWORD,
+            bytes: vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88],
+        };
+        key.set_raw_value("QwordVal", &qword_val).expect("set qword");
+
+        let expand_val = RegValue {
+            vtype: REG_EXPAND_SZ,
+            bytes: vec![b'%', b'P', b'A', b'T', b'H', b'%', 0],
+        };
+        key.set_raw_value("ExpandVal", &expand_val).expect("set expand");
+
+        let multi_val = RegValue {
+            vtype: REG_MULTI_SZ,
+            bytes: vec![b'a', 0, b'b', 0, 0],
+        };
+        key.set_raw_value("MultiVal", &multi_val).expect("set multi");
 
         let child_path = format!("{test_subkey}\\ChildKey");
         let (child_key, _) = hkcu.create_subkey(&child_path).expect("create child key");
@@ -1012,21 +1146,43 @@ mod tests {
         assert!(reg_content.contains("StringVal"));
         assert!(reg_content.contains("DwordVal"));
         assert!(reg_content.contains("ChildKey"));
+        assert!(reg_content.contains("hex(b):")); // QWORD
+        assert!(reg_content.contains("hex(2):")); // EXPAND_SZ
+        assert!(reg_content.contains("hex(7):")); // MULTI_SZ
+
+        // Verify backup validation passes
+        verify_registry_backup(&temp_reg).expect("verify registry backup");
 
         // 3. Delete fixture key
         assert!(delete_registry_key(&format!("HKCU\\{test_subkey}")));
         assert!(hkcu.open_subkey(&test_subkey).is_err());
 
         // 4. Restore from .reg file
-        let restored_count = restore_registry_backup(&temp_reg).expect("restore backup");
-        assert!(restored_count >= 2); // Parent and ChildKey
+        let restore_report = restore_registry_backup(&temp_reg).expect("restore backup");
+        assert!(restore_report.keys_restored >= 2); // Parent and ChildKey
+        assert!(restore_report.values_restored >= 7);
+        assert!(restore_report.errors.is_empty());
 
-        // 5. Verify restored data
+        // 5. Verify restored data across all types
         let restored_parent = hkcu.open_subkey(&test_subkey).expect("open restored parent");
         let str_val: String = restored_parent.get_value("StringVal").expect("get string");
         assert_eq!(str_val, "hello world");
+        let def_val: String = restored_parent.get_value("").expect("get default value");
+        assert_eq!(def_val, "default value");
         let dw_val: u32 = restored_parent.get_value("DwordVal").expect("get dword");
         assert_eq!(dw_val, 42);
+
+        let restored_bin = restored_parent.get_raw_value("BinaryVal").expect("get binary");
+        assert_eq!(restored_bin.bytes, vec![0xde, 0xad, 0xbe, 0xef]);
+
+        let restored_qword = restored_parent.get_raw_value("QwordVal").expect("get qword");
+        assert_eq!(restored_qword.bytes, vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+
+        let restored_expand = restored_parent.get_raw_value("ExpandVal").expect("get expand");
+        assert_eq!(restored_expand.vtype, REG_EXPAND_SZ);
+
+        let restored_multi = restored_parent.get_raw_value("MultiVal").expect("get multi");
+        assert_eq!(restored_multi.vtype, REG_MULTI_SZ);
 
         let restored_child = hkcu.open_subkey(&child_path).expect("open restored child");
         let child_str: String = restored_child.get_value("ChildString").expect("get child string");

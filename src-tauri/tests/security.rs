@@ -871,3 +871,104 @@ fn leftover_cleanup_creates_registry_backup_before_deletion() {
     // Since nonexistent key open fails in winreg, it aborts to protect registry
     assert!(res.is_err(), "Nonexistent key backup aborts residual cleanup cleanly");
 }
+
+#[test]
+fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
+    use cyron_lib::apps::InstalledApp;
+    use cyron_lib::uninstall;
+
+    // 1. Empty app selection is rejected
+    assert!(uninstall::create_batch_uninstall_plan(&[], false).is_err());
+
+    // 2. Over 32 apps is rejected
+    let many_apps: Vec<InstalledApp> = (0..35).map(|i| InstalledApp {
+        id: format!("app-{i}"),
+        name: format!("App {i}"),
+        version: None,
+        publisher: None,
+        install_date: None,
+        estimated_size: None,
+        install_location: None,
+        uninstall_string: Some("C:\\App\\uninst.exe".into()),
+        quiet_uninstall_string: None,
+        display_icon: None,
+        hive: "user-64".into(),
+        scope: "user".into(),
+        architecture: "x64".into(),
+        is_protected: false,
+    }).collect();
+    assert!(uninstall::create_batch_uninstall_plan(&many_apps, false).is_err());
+
+    // 3. Selection with shell wrappers only is rejected
+    let shell_app = vec![InstalledApp {
+        id: "shell-app".into(),
+        name: "Malicious App".into(),
+        version: None,
+        publisher: None,
+        install_date: None,
+        estimated_size: None,
+        install_location: None,
+        uninstall_string: Some("cmd.exe /c del /f /q C:\\Windows".into()),
+        quiet_uninstall_string: None,
+        display_icon: None,
+        hive: "user-64".into(),
+        scope: "user".into(),
+        architecture: "x64".into(),
+        is_protected: false,
+    }];
+    assert!(uninstall::create_batch_uninstall_plan(&shell_app, false).is_err());
+}
+
+#[test]
+fn process_creation_time_fails_closed_when_unverified() {
+    use cyron_lib::process;
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    // Snapshot with creation_time = 0 (unverified)
+    let snapshot = process::StoredProcessSnapshot {
+        app_id: "test-app".into(),
+        install_location: "C:\\Program Files\\TestApp".into(),
+        timestamp: now,
+        processes: vec![process::AppProcess {
+            pid: std::process::id(),
+            name: "cyron.exe".into(),
+            path: Some("C:\\Program Files\\TestApp\\cyron.exe".into()),
+            is_critical: false,
+            title: None,
+            creation_time: 0, // Unverified / invalid
+        }],
+    };
+
+    let results = process::terminate_processes_verified("test-app", &snapshot, &[std::process::id()], false);
+    assert_eq!(results.len(), 1);
+    assert!(!results[0].success);
+    // Must be rejected because creation time 0 is invalid/unverified
+    assert!(results[0].error.as_ref().unwrap().contains("recycled") || results[0].error.as_ref().unwrap().contains("creation time"));
+}
+
+#[test]
+fn registry_backup_verification_detects_malformed_and_empty_files() {
+    use cyron_lib::leftovers;
+
+    let fixture = TempDir::new("reg-verify");
+
+    // Empty file
+    let empty_reg = fixture.path().join("empty.reg");
+    fs::write(&empty_reg, "").expect("write empty");
+    assert!(leftovers::verify_registry_backup(&empty_reg).is_err());
+
+    // Missing header
+    let no_header_reg = fixture.path().join("no_header.reg");
+    fs::write(&no_header_reg, "[HKCU\\Software\\Foo]\n\"val\"=\"bar\"\n").expect("write no header");
+    assert!(leftovers::verify_registry_backup(&no_header_reg).is_err());
+
+    // Malformed dword
+    let bad_dword_reg = fixture.path().join("bad_dword.reg");
+    fs::write(&bad_dword_reg, "Windows Registry Editor Version 5.00\r\n\r\n[HKCU\\Software\\Foo]\r\n\"v\"=dword:not_hex\r\n").expect("write bad dword");
+    assert!(leftovers::verify_registry_backup(&bad_dword_reg).is_err());
+
+    // Malformed hex bytes
+    let bad_hex_reg = fixture.path().join("bad_hex.reg");
+    fs::write(&bad_hex_reg, "Windows Registry Editor Version 5.00\r\n\r\n[HKCU\\Software\\Foo]\r\n\"v\"=hex:zz,yy\r\n").expect("write bad hex");
+    assert!(leftovers::verify_registry_backup(&bad_hex_reg).is_err());
+}

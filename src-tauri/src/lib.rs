@@ -25,6 +25,7 @@ pub struct AppState {
     pub plans: Arc<Mutex<HashMap<String, cleanup::CleanupPlan>>>,
     pub cleanup_jobs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredUninstallPlan>>>,
+    pub batch_uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredBatchUninstallPlan>>>,
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
     /// True until the user deliberately enables cleaning.
@@ -39,6 +40,7 @@ impl Default for AppState {
             plans: Arc::default(),
             cleanup_jobs: Arc::default(),
             uninstall_plans: Arc::default(),
+            batch_uninstall_plans: Arc::default(),
             process_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
@@ -71,6 +73,7 @@ pub fn run() {
             commands::purge_quarantine,
             commands::get_cleanup_log,
             commands::prepare_uninstall,
+            commands::prepare_batch_uninstall,
             commands::discover_app_processes,
             commands::terminate_app_processes,
             commands::parse_uninstall_command,

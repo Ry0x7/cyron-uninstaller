@@ -1,8 +1,8 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { api, errorMessage } from "../../lib/api";
-import { formatBytes, formatCount, formatDate, truncateMiddle } from "../../lib/format";
+import { formatBytes, formatCount, formatDate, formatDateTime, truncateMiddle } from "../../lib/format";
 import { useAsync } from "../../lib/hooks";
-import type { BatchUninstallReport, InstalledApp } from "../../lib/types";
+import type { BatchUninstallPlan, BatchUninstallReport, InstalledApp } from "../../lib/types";
 import {
   Badge,
   Banner,
@@ -71,6 +71,8 @@ export function Uninstaller() {
   const [batchQuiet, setBatchQuiet] = useState(true);
   const [batchConfirm, setBatchConfirm] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [batchPlan, setBatchPlan] = useState<BatchUninstallPlan | null>(null);
+  const [batchPreparing, setBatchPreparing] = useState(false);
   const [batchReport, setBatchReport] = useState<BatchUninstallReport | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
 
@@ -156,13 +158,41 @@ export function Uninstaller() {
     return apps.filter((a) => selectedIds.has(a.id));
   }, [apps, selectedIds]);
 
+  useEffect(() => {
+    if (!batchOpen || selectedApps.length === 0) {
+      setBatchPlan(null);
+      setBatchConfirm(false);
+      return;
+    }
+    let cancelled = false;
+    setBatchPreparing(true);
+    setBatchError(null);
+    api.prepareBatchUninstall(Array.from(selectedIds), batchQuiet)
+      .then((plan) => {
+        if (!cancelled) {
+          setBatchPlan(plan);
+          setBatchPreparing(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setBatchError(errorMessage(err));
+          setBatchPlan(null);
+          setBatchPreparing(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [batchOpen, selectedIds, batchQuiet]);
+
   const runBatchUninstall = async () => {
-    if (selectedApps.length === 0 || !batchConfirm || batchRunning) return;
+    if (!batchPlan || !batchConfirm || batchRunning) return;
     setBatchRunning(true);
     setBatchError(null);
     setBatchReport(null);
     try {
-      const report = await api.executeBatchUninstall(Array.from(selectedIds), batchQuiet);
+      const report = await api.executeBatchUninstall(batchPlan.planId);
       setBatchReport(report);
       inventory.reload();
     } catch (err) {
@@ -179,7 +209,7 @@ export function Uninstaller() {
         description="Application discovery, process termination, standard/MSI uninstaller execution, and review-first leftover scanning."
         actions={
           <>
-            <Badge tone="safe">Phase 4 Engine</Badge>
+            <Badge tone="safe">Verified Engine</Badge>
             <Button
               icon={<IconRefresh size={15} />}
               loading={inventory.status === "loading"}
@@ -447,7 +477,7 @@ export function Uninstaller() {
                 variant="danger"
                 icon={<IconPlay size={14} />}
                 loading={batchRunning}
-                disabled={!batchConfirm || batchRunning}
+                disabled={!batchConfirm || batchRunning || !batchPlan || batchPreparing || !batchPlan?.items.some((i) => i.isValid)}
                 onClick={runBatchUninstall}
               >
                 {batchRunning ? "Executing queue…" : `Start Batch Uninstall (${selectedApps.length})`}
@@ -464,42 +494,86 @@ export function Uninstaller() {
               isolated so one failure does not halt the queue.
             </Banner>
 
-            <Eyebrow>Queued applications ({selectedApps.length})</Eyebrow>
-            <div className="un-batch-queue">
-              {selectedApps.map((a) => {
-                const itemRes = batchReport?.results.find((r) => r.appId === a.id);
-                return (
+            {batchPreparing ? (
+              <div className="stack" style={{ gap: 8, padding: "12px 0" }}>
+                <Skeleton width="60%" />
+                <Skeleton width="100%" />
+                <Skeleton width="80%" />
+                <span className="un-footnote">Resolving registry commands and validating executable security…</span>
+              </div>
+            ) : batchPlan ? (
+              <>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <Eyebrow>Queued applications ({batchPlan.items.length})</Eyebrow>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                    Plan expires {formatDateTime(batchPlan.expiresAt)}
+                  </span>
+                </div>
+                <div className="un-batch-queue">
+                  {batchPlan.items.map((item) => {
+                    const itemRes = batchReport?.results.find((r) => r.appId === item.appId);
+                    return (
+                      <div key={item.appId} className="un-batch-item" style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                          <div>
+                            <strong>{item.appName}</strong>
+                          </div>
+                          <div>
+                            {itemRes ? (
+                              <Badge
+                                tone={
+                                  itemRes.status === "completed"
+                                    ? "safe"
+                                    : itemRes.status === "restart_required"
+                                    ? "caution"
+                                    : "danger"
+                                }
+                              >
+                                {itemRes.status.toUpperCase()}
+                              </Badge>
+                            ) : item.isValid ? (
+                              <Badge tone="safe">Verified</Badge>
+                            ) : (
+                              <Badge tone="danger">Refused</Badge>
+                            )}
+                          </div>
+                        </div>
+
+                        {item.isValid ? (
+                          <div className="mono" style={{ fontSize: 11, color: "var(--text-dim)", wordBreak: "break-all" }}>
+                            {item.executable} {item.arguments.join(" ")}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                            {item.rejectionReason ?? "Invalid uninstaller command"}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="un-batch-queue">
+                {selectedApps.map((a) => (
                   <div key={a.id} className="un-batch-item">
                     <div>
                       <strong>{a.name}</strong>
                       {a.version && <span className="mono"> v{a.version}</span>}
                     </div>
                     <div>
-                      {itemRes ? (
-                        <Badge
-                          tone={
-                            itemRes.status === "completed"
-                              ? "safe"
-                              : itemRes.status === "restart_required"
-                              ? "caution"
-                              : "danger"
-                          }
-                        >
-                          {itemRes.status.toUpperCase()}
-                        </Badge>
-                      ) : (
-                        <Badge tone="neutral">Queued</Badge>
-                      )}
+                      <Badge tone="neutral">Queued</Badge>
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
 
             <label className="un-confirm-box">
               <input
                 type="checkbox"
                 checked={batchQuiet}
+                disabled={batchRunning || batchPreparing}
                 onChange={(e) => setBatchQuiet(e.target.checked)}
               />
               <span>Use silent / quiet uninstallation switch where vendor uninstaller supports it</span>
@@ -509,11 +583,12 @@ export function Uninstaller() {
               <input
                 type="checkbox"
                 checked={batchConfirm}
+                disabled={batchRunning || batchPreparing || !batchPlan || !batchPlan.items.some((i) => i.isValid)}
                 onChange={(e) => setBatchConfirm(e.target.checked)}
               />
               <span>
-                I confirm sequentially uninstalling these {selectedApps.length} applications. Leftover
-                scanning will remain review-first and must be run separately.
+                I have reviewed the exact commands above and approve sequentially uninstalling these{" "}
+                {selectedApps.length} applications. Leftover scanning will remain review-first and separate.
               </span>
             </label>
 

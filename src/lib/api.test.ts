@@ -96,7 +96,8 @@ describe("Tauri IPC contract", () => {
       { run: () => api.executeUninstall("app-1", "plan-1", 60), command: "execute_uninstall", args: { appId: "app-1", planId: "plan-1", timeoutSecs: 60 } },
       { run: () => api.scanAppLeftovers("app-1"), command: "scan_app_leftovers", args: { appId: "app-1" } },
       { run: () => api.cleanAppLeftovers("app-1", "plan-1", ["c1"]), command: "clean_app_leftovers", args: { appId: "app-1", planId: "plan-1", candidateIds: ["c1"] } },
-      { run: () => api.executeBatchUninstall(["app-1", "app-2"]), command: "execute_batch_uninstall", args: { appIds: ["app-1", "app-2"], quiet: false } },
+      { run: () => api.prepareBatchUninstall(["app-1", "app-2"], false), command: "prepare_batch_uninstall", args: { appIds: ["app-1", "app-2"], quiet: false } },
+      { run: () => api.executeBatchUninstall("batch-plan-1"), command: "execute_batch_uninstall", args: { planId: "batch-plan-1" } },
     ];
 
     for (const { run, command, args } of calls) {

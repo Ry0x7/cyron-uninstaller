@@ -18,7 +18,7 @@ sequential batch uninstallation, and release installer bundling (NSIS and WiX MS
 Priority 0 hardening (crash-consistent write-ahead recovery journal with sync_all, atomic MoveFileExW no-overwrite
 restoration, approved snapshot binding, purge preservation, quarantine storage caps) is complete.
 The desktop build and launch are verified (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`), as are the
-isolated cleanup fixture (`CLEANUP_FIXTURE_OK`), all test suites (71 frontend, 153 Rust), and release installer
+isolated cleanup fixture (`CLEANUP_FIXTURE_OK`), the end-to-end fixture (`RC1_E2E_FIXTURE_OK`), all test suites (71 frontend, 157 Rust), and release installer
 bundles (`RELEASE_BUNDLES_OK`).
 
 ## Stack
@@ -31,12 +31,12 @@ bundles (`RELEASE_BUNDLES_OK`).
 
 ## How it works (the non-obvious parts)
 
-- **IPC surface** is twenty-seven commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
+- **IPC surface** is twenty-eight commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
   discovery/scan/duplicate/measurement/reveal, `clear_history`, eight cleanup commands
   (`get_cleanup_mode`, `set_cleanup_mode`, `preview_cleanup`, `start_cleanup`, `list_quarantine`,
-  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`), and eight Phase 4/5 uninstaller commands
-  (`prepare_uninstall`, `discover_app_processes`, `terminate_app_processes`, `parse_uninstall_command`,
-  `execute_uninstall`, `scan_app_leftovers`, `clean_app_leftovers`, `execute_batch_uninstall`). A running job id is
+  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`), and nine Phase 4/5 uninstaller commands
+  (`prepare_uninstall`, `prepare_batch_uninstall`, `discover_app_processes`, `terminate_app_processes`,
+  `parse_uninstall_command`, `execute_uninstall`, `scan_app_leftovers`, `clean_app_leftovers`, `execute_batch_uninstall`). A running job id is
   rejected rather than silently re-registered. Payloads use `#[serde(rename_all = "camelCase")]`;
   `src/lib/types.ts` mirrors the data contract. Change both together.
 - **Cleanup engine** (`cleanup.rs`) is the only module that modifies user files. `preview_cleanup`
@@ -135,6 +135,7 @@ node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test stress_scan -- --nocapture
 node scripts/verify-cleanup.mjs
+node scripts/verify-e2e.mjs
 node scripts/verify-dist.mjs
 node scripts/verify-desktop-binary.mjs
 node scripts/smoke-desktop.mjs

@@ -1,32 +1,29 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-06 (Phase 4.1 Priority 0 Hardening & Phase 5 Release Engineering complete)
+Updated: 2026-11-06 (Release Candidate 1 — RC1 Hardening complete)
 
 ## Current status
 
-Phases 1–5 and Priority 0 security hardening are implemented and verified across the Rust backend
+Phases 1–5, Priority 0 security hardening, and Release Candidate 1 (RC1) hardening are implemented and verified across the Rust backend
 and React desktop interface. Cyron discovers installed Windows applications, scans folders with an
 NTFS MFT reader or a streaming directory walk, renders a treemap with a persistent synchronized folder
 tree, verifies duplicates, categorizes storage, measures 48 developer/AI/Windows cache locations, cleans
 caches safely via recoverable quarantine, uninstalls applications with server-side command resolution
 and reboot alerts, terminates associated processes with snapshot verification and PID recycling guards,
 scans leftovers with risk ratings, exports multi-type recursive registry backups, cleans residuals into
-quarantine with durable write-ahead journals (`sync_all`), and executes sequential batch uninstall queues.
+quarantine with durable write-ahead journals (`sync_all`), and executes sequential batch uninstall queues under server-held single-use confirmation plans.
 
-Priority 0 hardening has secured all destructive operations:
-1. **Uninstaller execution boundary**: Client-supplied executable paths and arguments are untrusted.
-   Commands are resolved server-side from registered keys into single-use, 10-minute expiring plans
-   (`UninstallPlan`), with unquoted path support, MSI normalization, and live-registry revalidation.
-2. **Process termination**: Verified process snapshots with 64-bit creation times (`GetProcessTimes`),
-   strict executable install-location verification, PID recycling denial, and unconditional critical
-   system process protection.
-3. **Leftover cleanup**: Server-side `LeftoverPlan` with TTL, bounded non-following directory walker
-   skipping junctions and symlinks, and durable write-ahead recovery journals (`sync_all`).
-4. **Registry safety**: Recursive `.reg` export supporting all registry value types (`REG_SZ`, `REG_DWORD`,
-   `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and subkeys, verified backup integrity
-   prior to deletion, and verified restore helper.
-5. **Recovery correctness**: Physical disk synchronization (`sync_all`), destination ancestor reparse
-   checks, safe purge retries, and honest same-volume vs cross-volume restoration semantics.
+RC1 Hardening completed:
+1. **Batch uninstall confirmation plan**: Server-held, single-use, 10-minute expiring confirmation plan (`BatchUninstallPlan`), live registry command revalidation, and explicit operator approval of executables and arguments before execution.
+2. **Fail-closed leftover file cleanup**: Durable write-ahead journal entry with physical disk synchronization (`sync_all`) must succeed before moving any file; failures abort file movement to prevent unrecoverable data loss.
+3. **Recursive registry backup error propagation**: All subkey enumeration, value reading, and file write errors propagate immediately instead of silently skipping entries.
+4. **Registry backup integrity verification & multi-type roundtrip**: Checks header, file length, and syntax structure across all 6 Windows value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and nested subkeys before deleting any key.
+5. **Registry restoration error reporting**: Reports exact counts of restored keys and values, captures every failure, and never claims success on partial restoration.
+6. **Process creation-time fail-closed verification**: Process termination rejects processes whose creation time cannot be determined or does not match the snapshot, preventing PID recycling races.
+7. **CI runner environment fix**: Patched MSVC toolchain wrapper (`scripts/msvc-env.mjs`) to preserve Windows `Path` and locate `cargo` in CI runners, resolving the `verify-cleanup.mjs` failure.
+8. **End-to-end fixture test suite**: Added `rc1_e2e_fixture.rs` and `scripts/verify-e2e.mjs` (`RC1_E2E_FIXTURE_OK`) covering uninstallation, process management, registry backup/restore, and residual cleanup.
+9. **UI/UX audit & branding cleanup**: Removed obsolete "Phase 1 is read-only" from bundle descriptions and Settings, verified all six views.
+10. **Release automation gating**: `.github/workflows/release.yml` enforces test suites, runs installer verification, and publishes unsigned release candidates as draft pre-releases with explicit disclaimers.
 
 Release packaging has been verified locally (`RELEASE_BUNDLES_OK`):
 - **NSIS Setup**: `src-tauri/target/release/bundle/nsis/Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`).
@@ -35,10 +32,11 @@ Release packaging has been verified locally (`RELEASE_BUNDLES_OK`):
 Latest measured verification:
 - `npm run typecheck`: exit 0 (0 diagnostics).
 - `npm test`: 71/71 tests pass across 7 files.
-- `node scripts/verify-dist.mjs`: `DIST_OK` (2 assets, 448.8 KiB).
-- `cargo test`: **153 tests pass** (120 unit, 22 security, 5 cleanup_stress, 1 real_system, 5 stress_scan) with 3 ignored.
+- `node scripts/verify-dist.mjs`: `DIST_OK` (2 assets, 450.6 KiB).
+- `cargo test`: **157 tests pass** (120 unit, 25 security, 5 cleanup_stress, 1 real_system, 6 stress_scan) with 3 ignored.
 - `node scripts/verify-cleanup.mjs`: `CLEANUP_FIXTURE_OK`.
-- `node scripts/verify-desktop-binary.mjs`: `DESKTOP_BINARY_OK` (15.83 MiB).
+- `node scripts/verify-e2e.mjs`: `RC1_E2E_FIXTURE_OK`.
+- `node scripts/verify-desktop-binary.mjs`: `DESKTOP_BINARY_OK` (15.89 MiB).
 - `node scripts/smoke-desktop.mjs`: `DESKTOP_SMOKE_OK` ("Cyron").
 - `node scripts/verify-release-bundles.mjs`: `RELEASE_BUNDLES_OK`.
 
@@ -48,28 +46,30 @@ Latest measured verification:
 | --- | --- | --- |
 | TypeScript | `npm run typecheck` | Pass (0 diagnostics) |
 | Frontend tests | `npm test` | 71/71 pass, 7 files |
-| Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` (448.8 KiB) |
-| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 153 pass, 3 ignored |
-| Permission boundaries | `... --test security -- --nocapture` | 22/22 pass |
+| Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` (450.6 KiB) |
+| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 157 pass, 3 ignored |
+| Permission boundaries | `... --test security -- --nocapture` | 25/25 pass |
 | Cleanup stress | `... --test cleanup_stress -- --nocapture` | 5/5 pass |
 | Cleanup fixture | `node scripts/verify-cleanup.mjs` | `CLEANUP_FIXTURE_OK` |
+| End-to-end fixture | `node scripts/verify-e2e.mjs` | `RC1_E2E_FIXTURE_OK` |
 | Real system | `... --test real_system -- --nocapture` | Pass |
 | Scanner stress | `... --test stress_scan -- --nocapture` | 5/5 pass (1 ignored) |
-| Desktop binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` (15.83 MiB) |
+| Desktop binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` (15.89 MiB) |
 | Launch smoke test | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` ("Cyron") |
 | Release packaging | `node scripts/verify-release-bundles.mjs` | `RELEASE_BUNDLES_OK` (NSIS + MSI) |
-| GitHub CI & Release | `.github/workflows/ci.yml`, `release.yml` | Workflows configured |
+| GitHub CI & Release | `.github/workflows/ci.yml`, `release.yml` | Workflows gated & configured |
 
 ## Key files
 
-- `src-tauri/src/process.rs`: process discovery, snapshot tracking, PID creation time checks, critical process deny list, controlled termination.
-- `src-tauri/src/uninstall.rs`: server-side command resolution, `UninstallPlan` creation, safe uninstaller tokenization, execution, exit code tracking.
-- `src-tauri/src/leftovers.rs`: server-side `LeftoverPlan`, bounded non-following directory walker, recursive multi-type `.reg` backup and restore, residual quarantine.
+- `src-tauri/src/process.rs`: process discovery, snapshot tracking, PID creation time checks (`GetProcessTimes`), critical process deny list, fail-closed controlled termination.
+- `src-tauri/src/uninstall.rs`: server-side command resolution, `UninstallPlan` & `BatchUninstallPlan` creation, safe uninstaller tokenization, execution, exit code tracking.
+- `src-tauri/src/leftovers.rs`: server-side `LeftoverPlan`, bounded non-following directory walker, recursive multi-type `.reg` backup and restore, backup integrity verification, fail-closed residual quarantine.
 - `src-tauri/src/cleanup.rs`: cleanup engine, durable write-ahead recovery journal (`sync_all`), quarantine, atomic no-overwrite restore, audit log.
-- `src-tauri/src/commands.rs`: 27 validated IPC commands.
-- `src-tauri/tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`: security & stress suites.
-- `src/features/uninstaller/AppDrawer.tsx`, `Uninstaller.tsx`: uninstaller UI, plan-based execution, process manager, residual reviewer, batch queue.
+- `src-tauri/src/commands.rs`: 28 validated IPC commands.
+- `src-tauri/tests/security.rs`, `tests/cleanup_stress.rs`, `examples/cleanup_fixture.rs`, `examples/rc1_e2e_fixture.rs`: security, stress, & e2e suites.
+- `src/features/uninstaller/AppDrawer.tsx`, `Uninstaller.tsx`: uninstaller UI, plan-based execution, process manager, residual reviewer, reviewed batch queue.
 - `scripts/verify-release-bundles.mjs`: verification of release MSI and NSIS installers with SHA-256 hashes.
+- `scripts/verify-e2e.mjs`: runner for uninstaller and residual recovery end-to-end fixture.
 - `docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md`: comprehensive documentation.
 - `GATES.md`: acceptance ledger with recorded evidence.
 

@@ -319,8 +319,8 @@ export function Settings() {
               <p className="set-note set-note--spaced">
                 The Cleaner previews every cleanup before anything moves, quarantines what it does
                 move, and refuses protected locations in the backend even if a request asks for
-                them. Nothing is uninstalled, no process is terminated and no registry value is
-                written.
+                them. Application uninstallation, process management, and residual cleanup are review-first
+                and require server-verified confirmation plans.
               </p>
             </Panel>
 
@@ -343,7 +343,7 @@ export function Settings() {
                 items={[
                   { label: "Name", value: "Cyron" },
                   { label: "Version", value: "0.1.0" },
-                  { label: "Stage", value: "Phase 3 · disk intelligence and safe cleaning" },
+                  { label: "Stage", value: "Release Candidate 1 (RC1)" },
                   { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },
                   {
                     label: "Repository",

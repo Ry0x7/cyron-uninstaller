@@ -32,8 +32,8 @@
     "active": true,
     "targets": ["msi", "nsis"],
     "category": "Utility",
-    "shortDescription": "Application inventory, disk analyzer and developer cache inspector for Windows",
-    "longDescription": "Cyron shows what is installed, where disk space went and which developer or AI caches are safe to remove. Phase 1 is read-only.",
+    "shortDescription": "Application uninstaller, disk analyzer, and developer cache cleaner for Windows",
+    "longDescription": "Cyron provides safe application uninstallation, residual file and registry cleanup, disk space analysis, and review-first developer cache management with recoverable quarantine.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

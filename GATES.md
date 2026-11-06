@@ -213,6 +213,45 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   - NSIS: `Cyron_0.1.0_x64-setup.exe` (1.42 MiB, SHA-256: `29d884334a871c310047bc5191c9d2c2b9a1410b7450967943635c419bdcc0e0`)
   - WiX MSI: `Cyron_0.1.0_x64_en-US.msi` (2.00 MiB, SHA-256: `29453c42694a87723fe30b4827d4e9a92e52413038e9daded7592fd277271dc8`)
 
+## Release Candidate 1 (RC1) Hardening Gates
+
+- [x] G28: batch uninstallation confirmation plan & command validation
+  CHECK: `src-tauri/src/uninstall.rs`, `commands.rs`, `tests/security.rs`
+  EXPECT: batch uninstalls require server-side plan (`BatchUninstallPlan`, 10m TTL); exact executables and
+  arguments are reviewed and approved; live registry commands are revalidated before each execution;
+  forged/shell commands and empty/excessive batches are rejected.
+  EVIDENCE: `batch_uninstall_plan_requires_valid_commands_and_bounds_count` passes in `tests/security.rs`.
+
+- [x] G29: fail-closed leftover cleanup journal operations
+  CHECK: `src-tauri/src/leftovers.rs`
+  EXPECT: file is never moved to quarantine unless its write-ahead recovery journal entry is durably written
+  and physically synchronized with `sync_all()`; journal errors abort file move to preserve data recoverability.
+  EVIDENCE: verified by journal error handling in `leftovers::clean_leftovers`.
+
+- [x] G30: recursive registry backup error propagation & multi-type verification
+  CHECK: `src-tauri/src/leftovers.rs`, `tests/security.rs`
+  EXPECT: all subkey enumeration, value reading, and write errors propagate without silent skipping;
+  backup syntax and all 6 value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`)
+  and subkeys are validated prior to deleting any registry key; restore reports all failures.
+  EVIDENCE: `registry_backup_verification_detects_malformed_and_empty_files` and `registry_backup_and_restore_roundtrip_fixture` pass.
+
+- [x] G31: fail-closed process creation time verification
+  CHECK: `src-tauri/src/process.rs`, `tests/security.rs`
+  EXPECT: process termination fails closed if creation time cannot be determined or does not match snapshot,
+  preventing PID recycling race attacks.
+  EVIDENCE: `process_creation_time_fails_closed_when_unverified` passes in `tests/security.rs`.
+
+- [x] G32: end-to-end uninstallation & residual recovery fixture
+  CHECK: `node scripts/verify-e2e.mjs`
+  EXPECT: exit 0, prints `RC1_E2E_FIXTURE_OK`.
+  EVIDENCE: `verify-e2e: RC1_E2E_FIXTURE_OK` passed against isolated disposable `%TEMP%` and `HKCU` fixtures.
+
+- [x] G33: CI environment & PATH normalization fix
+  CHECK: `scripts/msvc-env.mjs`, `scripts/verify-cleanup.mjs`
+  EXPECT: preserves inherited Windows `Path` and `.cargo/bin` in child processes without case-clash shadowing;
+  `verify-cleanup.mjs` passes cleanly without `spawnSync cargo ENOENT`.
+  EVIDENCE: `verify-cleanup: CLEANUP_FIXTURE_OK` passed.
+
 ## Not gated
 
 - [ ] Windows CI remote run: workflow now runs the security, cleanup-stress and fixture steps;

@@ -24,7 +24,7 @@ WinDirStat replacement with plain-language risk labels, built for people who are
   - **Residual & Leftover Scanner**: detects leftover files, directories, and registry keys under AppData, ProgramData,
     and the registry. Automatically creates a complete recursive `.reg` backup before deleting any subkey and moves files
     into a recoverable quarantine batch.
-  - **Batch Uninstaller**: unattended sequential uninstallation with failure isolation.
+  - **Batch Uninstaller**: review-first sequential uninstallation under server-held, single-use confirmation plans with failure isolation.
 - **Disk analyzer** — pick a drive or folder, watch live progress, cancel, then work in three
   modes:
   - **Map** — a squarified treemap beside a persistent, resizable folder tree. Selection,
@@ -129,9 +129,11 @@ node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test stress_scan -- --nocapture
 node scripts/verify-cleanup.mjs                        # isolated cleanup fixture: plan → quarantine → restore → purge
+node scripts/verify-e2e.mjs                            # isolated uninstaller, process & residual recovery fixture
 node scripts/verify-dist.mjs                           # build + bundle assertions
 node scripts/verify-desktop-binary.mjs                 # debug binary exists
 node scripts/smoke-desktop.mjs                         # launches the app, checks its window, exits
+node scripts/verify-release-bundles.mjs                # release installer package verification (NSIS + MSI)
 ```
 
 Scanner benchmarks (the MFT half needs an Administrator terminal):

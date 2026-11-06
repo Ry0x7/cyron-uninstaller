@@ -455,6 +455,23 @@ export interface LeftoverCleanReport {
   errors: string[];
 }
 
+export interface BatchUninstallItemPlan {
+  appId: string;
+  appName: string;
+  rawCommand: string;
+  executable: string;
+  arguments: string[];
+  isMsi: boolean;
+  isValid: boolean;
+  rejectionReason: string | null;
+}
+
+export interface BatchUninstallPlan {
+  planId: string;
+  items: BatchUninstallItemPlan[];
+  expiresAt: number;
+}
+
 export interface BatchUninstallItemResult {
   appId: string;
   name: string;

@@ -46,6 +46,35 @@ pub struct UninstallPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BatchUninstallItemPlan {
+    pub app_id: String,
+    pub app_name: String,
+    pub raw_command: String,
+    pub executable: String,
+    pub arguments: Vec<String>,
+    pub is_msi: bool,
+    pub is_valid: bool,
+    pub rejection_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredBatchUninstallPlan {
+    pub plan_id: String,
+    pub items: Vec<BatchUninstallItemPlan>,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUninstallPlan {
+    pub plan_id: String,
+    pub items: Vec<BatchUninstallItemPlan>,
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UninstallExecutionResult {
     pub app_id: String,
     pub exit_code: Option<i32>,
@@ -334,6 +363,82 @@ pub fn to_public_plan(plan: &StoredUninstallPlan) -> UninstallPlan {
         arguments: plan.command.arguments.clone(),
         is_msi: plan.command.is_msi,
         expires_at: plan.expires_at,
+    }
+}
+
+/// Creates a single-use batch confirmation plan with server-side validation and 10-minute expiration.
+pub fn create_batch_uninstall_plan(
+    selected_apps: &[crate::apps::InstalledApp],
+    quiet: bool,
+) -> Result<StoredBatchUninstallPlan, String> {
+    if selected_apps.is_empty() {
+        return Err("Select at least one application to uninstall.".into());
+    }
+    if selected_apps.len() > 32 {
+        return Err("Select at most 32 applications for batch uninstall.".into());
+    }
+
+    let mut items = Vec::new();
+    let mut any_valid = false;
+
+    for app in selected_apps {
+        let raw_cmd = if quiet && app.quiet_uninstall_string.is_some() {
+            app.quiet_uninstall_string.as_ref().unwrap()
+        } else if app.uninstall_string.is_some() {
+            app.uninstall_string.as_ref().unwrap()
+        } else {
+            items.push(BatchUninstallItemPlan {
+                app_id: app.id.clone(),
+                app_name: app.name.clone(),
+                raw_command: String::new(),
+                executable: String::new(),
+                arguments: Vec::new(),
+                is_msi: false,
+                is_valid: false,
+                rejection_reason: Some("No registered uninstaller command found.".into()),
+            });
+            continue;
+        };
+
+        let parsed = parse_uninstall_command(raw_cmd);
+        if parsed.is_valid {
+            any_valid = true;
+        }
+        items.push(BatchUninstallItemPlan {
+            app_id: app.id.clone(),
+            app_name: app.name.clone(),
+            raw_command: raw_cmd.clone(),
+            executable: parsed.executable,
+            arguments: parsed.arguments,
+            is_msi: parsed.is_msi,
+            is_valid: parsed.is_valid,
+            rejection_reason: parsed.rejection_reason,
+        });
+    }
+
+    if !any_valid {
+        return Err("None of the selected applications have a valid uninstaller command.".into());
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let plan_id = format!("batch-{}-{}-{}", now, std::process::id(), items.len());
+
+    Ok(StoredBatchUninstallPlan {
+        plan_id,
+        items,
+        expires_at: now + 600, // 10 minutes TTL
+    })
+}
+
+/// Converts a stored batch plan to an outward-facing plan for frontend review.
+pub fn to_public_batch_plan(stored: &StoredBatchUninstallPlan) -> BatchUninstallPlan {
+    BatchUninstallPlan {
+        plan_id: stored.plan_id.clone(),
+        items: stored.items.clone(),
+        expires_at: stored.expires_at,
     }
 }
 

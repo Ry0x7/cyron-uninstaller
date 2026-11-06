@@ -892,16 +892,62 @@ pub struct BatchUninstallReport {
 }
 
 #[tauri::command]
-pub async fn execute_batch_uninstall(
+pub async fn prepare_batch_uninstall(
+    state: State<'_, AppState>,
     app_ids: Vec<String>,
     quiet: bool,
-) -> Result<BatchUninstallReport, String> {
+) -> Result<uninstall::BatchUninstallPlan, String> {
     if app_ids.is_empty() {
         return Err("Select at least one application to uninstall.".into());
     }
     if app_ids.len() > 32 {
         return Err("Select at most 32 applications for batch uninstall.".into());
     }
+
+    let inventory = run_blocking("Batch application lookup", apps::discover_apps).await?;
+    let mut selected_apps = Vec::new();
+    for id in &app_ids {
+        if let Some(app) = inventory.apps.iter().find(|a| a.id == *id) {
+            selected_apps.push(app.clone());
+        }
+    }
+
+    let plan = uninstall::create_batch_uninstall_plan(&selected_apps, quiet)?;
+    let public_plan = uninstall::to_public_batch_plan(&plan);
+
+    let mut plans = state
+        .batch_uninstall_plans
+        .lock()
+        .map_err(|_| "Batch uninstall plan registry is unavailable.".to_string())?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    plans.retain(|_, p| p.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan);
+
+    Ok(public_plan)
+}
+
+#[tauri::command]
+pub async fn execute_batch_uninstall(
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<BatchUninstallReport, String> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
+    // Consume single-use plan from backend registry
+    let plan = {
+        let mut plans = state
+            .batch_uninstall_plans
+            .lock()
+            .map_err(|_| "Batch uninstall plan registry is unavailable.".to_string())?;
+        plans
+            .remove(&plan_id)
+            .ok_or_else(|| "Batch uninstall plan expired or not found. Please review and confirm again.".to_string())?
+    };
+
+    if now > plan.expires_at {
+        return Err("Batch uninstall plan has expired. Please review and confirm again.".into());
+    }
+
     run_blocking("Batch uninstallation", move || {
         let inventory = apps::discover_apps();
         let mut results = Vec::new();
@@ -909,12 +955,25 @@ pub async fn execute_batch_uninstall(
         let mut failed = 0;
         let mut restart_required = 0;
 
-        for id in app_ids {
-            let app = inventory.apps.iter().find(|a| a.id == id);
-            let Some(app) = app else {
+        for item in plan.items {
+            if !item.is_valid {
                 results.push(BatchUninstallItemResult {
-                    app_id: id,
-                    name: "Unknown application".into(),
+                    app_id: item.app_id,
+                    name: item.app_name,
+                    status: "failed".into(),
+                    exit_code: None,
+                    message: item.rejection_reason.unwrap_or_else(|| "Invalid uninstaller command".into()),
+                });
+                failed += 1;
+                continue;
+            }
+
+            // Re-verify against live system inventory to detect tampering or changed uninstaller commands
+            let live_app = inventory.apps.iter().find(|a| a.id == item.app_id);
+            let Some(live_app) = live_app else {
+                results.push(BatchUninstallItemResult {
+                    app_id: item.app_id,
+                    name: item.app_name,
                     status: "failed".into(),
                     exit_code: None,
                     message: "Application is no longer registered in uninstall inventory.".into(),
@@ -923,37 +982,34 @@ pub async fn execute_batch_uninstall(
                 continue;
             };
 
-            let raw_cmd = if quiet && app.quiet_uninstall_string.is_some() {
-                app.quiet_uninstall_string.as_ref().unwrap()
-            } else if app.uninstall_string.is_some() {
-                app.uninstall_string.as_ref().unwrap()
+            let live_cmd = if item.arguments.iter().any(|a| a == "/qn" || a == "/quiet" || a == "/s" || a == "/S") && live_app.quiet_uninstall_string.is_some() {
+                live_app.quiet_uninstall_string.as_deref().unwrap_or(&item.raw_command)
             } else {
-                results.push(BatchUninstallItemResult {
-                    app_id: id,
-                    name: app.name.clone(),
-                    status: "failed".into(),
-                    exit_code: None,
-                    message: "No registered uninstaller command found.".into(),
-                });
-                failed += 1;
-                continue;
+                live_app.uninstall_string.as_deref().unwrap_or(&item.raw_command)
             };
 
-            let parsed = uninstall::parse_uninstall_command(raw_cmd);
-            if !parsed.is_valid {
+            if live_cmd != item.raw_command {
                 results.push(BatchUninstallItemResult {
-                    app_id: id,
-                    name: app.name.clone(),
+                    app_id: item.app_id,
+                    name: item.app_name,
                     status: "failed".into(),
                     exit_code: None,
-                    message: parsed.rejection_reason.unwrap_or_else(|| "Invalid uninstaller command".into()),
+                    message: "The registered uninstaller command was modified after confirmation. Execution skipped.".into(),
                 });
                 failed += 1;
                 continue;
             }
 
             let cancel = Arc::new(AtomicBool::new(false));
-            match uninstall::execute_uninstaller(&id, &parsed, &cancel, 600) {
+            let parsed_cmd = uninstall::ParsedUninstallCommand {
+                executable: item.executable,
+                arguments: item.arguments,
+                is_msi: item.is_msi,
+                is_valid: true,
+                rejection_reason: None,
+            };
+
+            match uninstall::execute_uninstaller(&item.app_id, &parsed_cmd, &cancel, 600) {
                 Ok(res) => {
                     if res.status == "completed" {
                         completed += 1;
@@ -963,8 +1019,8 @@ pub async fn execute_batch_uninstall(
                         failed += 1;
                     }
                     results.push(BatchUninstallItemResult {
-                        app_id: id,
-                        name: app.name.clone(),
+                        app_id: item.app_id,
+                        name: item.app_name,
                         status: res.status,
                         exit_code: res.exit_code,
                         message: res.message,
@@ -973,8 +1029,8 @@ pub async fn execute_batch_uninstall(
                 Err(err) => {
                     failed += 1;
                     results.push(BatchUninstallItemResult {
-                        app_id: id,
-                        name: app.name.clone(),
+                        app_id: item.app_id,
+                        name: item.app_name,
                         status: "failed".into(),
                         exit_code: None,
                         message: err,
@@ -984,15 +1040,15 @@ pub async fn execute_batch_uninstall(
         }
 
         let total = results.len();
-        BatchUninstallReport {
+        Ok(BatchUninstallReport {
             total,
             completed,
             failed,
             restart_required,
             results,
-        }
+        })
     })
-    .await
+    .await?
 }
 
 /* ----------------------------------------------------------------- helpers */

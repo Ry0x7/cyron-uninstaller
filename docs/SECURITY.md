@@ -163,9 +163,18 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
    - Roundtrip backup and restoration is verified using isolated test fixtures.
 
 5. **Recovery Correctness**:
-   - Recovery journals are appended and physically synchronized (`sync_all`) before any destructive `fs::rename`.
+   - Recovery journals are appended and physically synchronized (`sync_all`) before any destructive `fs::rename`. If journal write or synchronization fails, the move is skipped (fail closed) to ensure recoverability.
    - Restoring files verifies that destination parent directories exist and are not symlinks/junctions.
    - Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` prevents destination overwrites; on the same volume this provides atomic rename, and across volumes it safely copies and removes without overwriting.
+
+6. **Batch Uninstallation & Process Identity Fail-Closed Security (RC1)**:
+   - Batch uninstalls require a server-held, single-use, 10-minute expiring `BatchUninstallPlan`. The client cannot execute caller-chosen commands or arbitrate batch queue order.
+   - Exact executable and argument lists are presented to the operator for mandatory review and explicit confirmation before batch execution.
+   - Live registry uninstaller commands are re-validated immediately before launching each queue item.
+   - Process creation time verification fails closed: if a PID's creation time cannot be determined or does not match the snapshot, termination is refused to protect against PID recycling races.
+   - Recursive registry backup propagates all subkey enumeration and value errors without silent skipping.
+   - Registry backup validation checks syntax structure across all 6 Windows value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and nested subkeys before deleting any key.
+   - Registry restoration reports all failures and never claims success on partial recovery.
 
 ---
 

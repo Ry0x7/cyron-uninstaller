@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppInventory,
   AppProcess,
+  BatchUninstallPlan,
   BatchUninstallReport,
   CacheInventory,
   CleanupLogEntry,
@@ -105,8 +106,10 @@ export const api = {
     call<LeftoverScanReport>("scan_app_leftovers", { appId }),
   cleanAppLeftovers: (appId: string, planId: string, candidateIds: string[]) =>
     call<LeftoverCleanReport>("clean_app_leftovers", { appId, planId, candidateIds }),
-  executeBatchUninstall: (appIds: string[], quiet = false) =>
-    call<BatchUninstallReport>("execute_batch_uninstall", { appIds, quiet }),
+  prepareBatchUninstall: (appIds: string[], quiet = false) =>
+    call<BatchUninstallPlan>("prepare_batch_uninstall", { appIds, quiet }),
+  executeBatchUninstall: (planId: string) =>
+    call<BatchUninstallReport>("execute_batch_uninstall", { planId }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;
