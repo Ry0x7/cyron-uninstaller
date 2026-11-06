@@ -27,6 +27,16 @@ export function HunterMode({
   const [terminating, setTerminating] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const onDrawerChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ open: boolean }>;
+      setDrawerOpen(Boolean(customEvent.detail?.open));
+    };
+    window.addEventListener("cyron:drawer-change", onDrawerChange);
+    return () => window.removeEventListener("cyron:drawer-change", onDrawerChange);
+  }, []);
 
   const pollIntervalRef = useRef<number | null>(null);
   const inFlightRef = useRef(false);
@@ -165,7 +175,7 @@ export function HunterMode({
 
   return (
     <>
-      <div className="hunter-floating-widget">
+      <div className={`hunter-floating-widget ${drawerOpen && !isActive ? "hunter-floating-widget--hidden" : ""}`}>
         {/* Hunter HUD Panel when target is acquired */}
         {isActive && target && (
           <div className="hunter-hud">
@@ -190,7 +200,7 @@ export function HunterMode({
 
             <div className="hunter-hud__body">
               <div>
-                <div className="hunter-target-title">
+                <div className="hunter-target-title" title={target.windowTitle || target.processName}>
                   {target.windowTitle || target.processName}
                 </div>
                 <div className="hunter-target-meta">
@@ -229,6 +239,7 @@ export function HunterMode({
                   variant="danger"
                   icon={<IconTrash size={13} />}
                   onClick={() => setWizardOpen(true)}
+                  style={{ width: "100%", justifyContent: "center" }}
                 >
                   Uninstall {targetApp.name}…
                 </Button>
@@ -238,6 +249,7 @@ export function HunterMode({
                   variant="secondary"
                   icon={<IconTrash size={13} />}
                   onClick={handleForcedRemovalOfTarget}
+                  style={{ width: "100%", justifyContent: "center" }}
                 >
                   Forced Removal of Application…
                 </Button>
@@ -245,13 +257,14 @@ export function HunterMode({
 
               {!target.isCritical && target.canTerminate && (
                 confirmKill ? (
-                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <div className="hunter-confirm-kill-box">
                     <Button
                       size="sm"
                       variant="danger"
                       icon={<IconStop size={13} />}
                       loading={terminating}
                       onClick={handleTerminateProcess}
+                      style={{ width: "100%", justifyContent: "center" }}
                     >
                       Confirm Kill PID {target.pid}
                     </Button>
@@ -259,6 +272,7 @@ export function HunterMode({
                       size="sm"
                       variant="ghost"
                       onClick={() => setConfirmKill(false)}
+                      style={{ width: "100%", justifyContent: "center" }}
                     >
                       Cancel
                     </Button>
@@ -269,6 +283,7 @@ export function HunterMode({
                     variant="danger"
                     icon={<IconStop size={13} />}
                     onClick={() => setConfirmKill(true)}
+                    style={{ width: "100%", justifyContent: "center" }}
                   >
                     Kill Process
                   </Button>

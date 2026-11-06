@@ -38,8 +38,8 @@
 
 .un-grid {
   table-layout: fixed;
-  /* Keep six columns readable at 1000px: the wrapper scrolls instead of crushing cells. */
-  min-width: 720px;
+  /* Keep eight columns readable: wrapper scrolls horizontally when below minimum */
+  min-width: 820px;
 }
 
 .un-row:focus-visible {
@@ -84,9 +84,9 @@
 
 .un-scope {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
 }
 
 .un-arch {
@@ -420,8 +420,8 @@
   z-index: 1000;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
   padding: 4px;
   min-width: 190px;
   display: flex;
@@ -445,7 +445,7 @@
 }
 
 .un-context-item:hover {
-  background: var(--bg-hover);
+  background: var(--surface-hover);
   color: var(--text-strong);
 }
 
