@@ -1,0 +1,125 @@
+# AGENTS.md — cyron-uninstaller
+
+## What this is
+
+A Revo uninstaller copy that can uninstall AI and clean up coding dev caches or AI. Have a feature
+to clean up bloat or unnecessary files similar to bleachbit but with proper indications on what is
+safe to remove but also have the ability to force uninstall and kill process. In all sense it's a
+Revo uninstaller, bleachbit, and windirstat but better indications, material UI, clean simple
+usable for non-tech people.
+
+**Current state: Phase 1 is implemented and read-only for scanned/user data.** Application
+inventory, disk analysis with a treemap plus synchronized folder tree, and developer/AI cache
+inspection work. There is no user-data cleanup, uninstall, process termination or registry write
+path. `clear_history` deletes only Cyron's own history file; history temp-file maintenance removes
+only Cyron-created temporary files. The debug desktop build and launch are verified on this
+machine (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`); release installers, signing and a native visual
+pass are not.
+
+## Stack
+
+- Tauri v2 + Rust (`windows-sys`, `winreg`, `tauri-plugin-dialog`).
+- React 19 + TypeScript + Vite 7. No router, no chart library. Vitest for frontend tests.
+- Windows 10/11. The Rust backend calls Win32 APIs unconditionally; there is no cross-platform
+  path.
+- Design tokens and shared primitives are hand-built (`src/styles`, `src/components`).
+
+## How it works (the non-obvious parts)
+
+- **IPC surface** is nine commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
+  eight discovery/scan/measurement/reveal commands plus `clear_history`, which only removes Cyron's
+  own `history.json`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors
+  the data contract. Change both together.
+- **Application discovery** (`apps.rs`) reads HKLM/HKCU uninstall keys in the 64-bit view plus
+  `WOW6432Node`, drops updates/patches/system components, deduplicates by name+version+location
+  (preferring machine-64), and reports `estimatedSize: null` when the installer recorded nothing.
+  Windows Store/MSIX apps are not covered yet.
+- **Directory enumeration** (`fs.rs`) uses `GetFileInformationByHandleEx(FileIdBothDirectoryInfo)`
+  for logical size, allocated size and a stable file id, with a `std::fs` fallback. Reparse points
+  (junctions/symlinks/mount points) are never followed.
+- **Scanner** (`scan.rs`) is depth-first and single-threaded per request. It deduplicates hard
+  links using at most 1,000,000 tracked ids, retains at most 40 file nodes per folder, and prunes
+  the IPC tree to 200 children and 8 levels. It reports top-24 extensions and top-100 largest files
+  from the walk. Cancellation is an `AtomicBool` polled per directory and entry; progress is
+  throttled to 120 ms (also polled each 512 files in a single large directory). Directory entry /
+  child vectors and the extension map can still grow with input; strict memory bounds are not
+  guaranteed.
+- **Cache catalog** (`caches.rs`) is 48 fixed env-templated locations. Risk is `safe` (regenerates),
+  `caution` (re-download/reset cost) or `protected` (history, models, settings, Docker/WSL data).
+  Protected entries are measured but never offered for removal. Each target is measured with
+  `scan::measure_path`.
+- **History** (`history.rs`) is `<Tauri app_data_dir>/history.json`, newest first, capped at 100,
+  with temp-file replacement. Only disk scans are recorded; cache discovery is not. Clearing the
+  Activity list deletes this app-owned file only.
+- **Frontend shell** (`App.tsx`) keeps visited views mounted but hidden so scan state survives
+  navigation. Settings are persisted in `localStorage["cyron.settings.v1"]` and resolve
+  system/light/dark into `data-theme` on `<html>` before React mounts (no theme flash).
+- **Analyzer tree** (`features/analyzer/TreeView.tsx`) renders the pruned scan nodes as an ARIA
+  tree in the details rail, expands ancestors of the treemap selection, scrolls it into view, and
+  caps rendered rows at 500. It is the summarized IPC tree, not a full file listing.
+- **Cache request dedupe**: `lib/api.ts` memoizes `list_caches` so Overview and Cleaner share one
+  disk measurement; `invalidateCaches()` forces a fresh pass.
+
+## Conventions
+
+- Keep Phase 1 free of scanned/user-data cleanup, uninstall, process termination and registry
+  writes. The only deletion is clearing Cyron's own history file. Any future destructive capability
+  belongs to Phase 3/4 with preview, confirmation, protected-data enforcement and rollback — never
+  add a hidden user-data deletion path.
+- Match the existing UI language: paper/graphite surfaces, mono micro-labels, square risk badges,
+  no gradients or decorative card slop. Reuse `components/ui.tsx` and tokens.
+- View-specific CSS uses a scoped prefix (`ov-`, `un-`, `az-`, `treemap-`, `cl-`, `act-`, `set-`).
+  Shared layout belongs in `src/styles/app.css`; don't fork primitives per view.
+- Every new non-trivial rule needs a test near the code: Rust tests in the module, frontend tests
+  in `src/lib/*.test.ts`.
+- Validate paths and job ids at the command boundary; never interpolate user input into a shell.
+- Keep docs honest: do not claim benchmarks, screenshots, signed builds or verification that did
+  not run. Record limitations.
+
+## Commands
+
+```powershell
+npm install
+npm run dev:desktop        # Tauri dev window
+npm run build:desktop      # debug exe, no installer
+npm run typecheck
+npm test
+npm run build
+npm run tauri -- build     # release MSI/NSIS (needs bundler download; unverified)
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test real_system -- --nocapture
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test read_only -- --nocapture
+node scripts/verify-dist.mjs
+node scripts/verify-desktop-binary.mjs
+node scripts/smoke-desktop.mjs
+```
+
+## Gotchas
+
+- **MSVC toolchain is mandatory.** Git for Windows ships a coreutils `link.exe` that shadows the
+  real linker. Use `scripts/msvc-env.mjs` (it finds VS through `vswhere`) for any cargo/Tauri
+  command on a machine without a Developer prompt.
+- **Do not trust `estimatedSize`.** Many installers omit it. Show “—” and use *Measure folder* for
+  the real size.
+- **The treemap is a pruned view**, not a complete file list. Aggregated `group` nodes have an
+  empty path and cannot be revealed in Explorer.
+- Scanning a drive root without exclusions can take a long time and hit permission errors; those
+  are reported (max 20). Output and some scan structures are capped, but per-directory entry lists
+  and extension aggregation are not strictly bounded for arbitrarily large inputs.
+- **No network code exists.** Keep it that way unless a feature explicitly requires it, and never
+  add telemetry by default.
+- **Store apps are missing** from the uninstaller. This is known, not a regression.
+- `history.json` and settings are per Windows profile; clearing history removes only Cyron's own
+  log and does not touch scanned or cache files.
+
+## Docs map
+
+- `README.md`: product, setup, verification and limitations.
+- `ROADMAP.md`: phase plan with honest checkboxes.
+- `HANDOFF.md`: current save state, verification results and next directive.
+- `docs/ARCHITECTURE.md`: components, IPC, scan pipeline, safety model.
+- `docs/IMPLEMENTATION_STATUS.md`: Phase 1 acceptance table and evidence.
+- `DESIGN.md`: tokens, themes, component anatomy, treemap palette and accessibility rules.
+- `docs/SECURITY.md`: Phase 1 threat model and future destructive-operation gates.
+- `docs/BUNDLE.md`: build/installer targets, WebView2, signing status and app-data paths.
+- `GATES.md` (local, gitignored): acceptance ledger used for this build session.

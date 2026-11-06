@@ -1,0 +1,87 @@
+/* Cyron design tokens. Ink and paper in light, graphite and signal in dark. */
+:root {
+  color-scheme: light;
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+
+  --bg: #f4f3ef;
+  --bg-inset: #eae8e2;
+  --surface: #fbfaf7;
+  --surface-2: #f5f3ee;
+  --surface-hover: #efeee8;
+  --line: #dedbd2;
+  --line-strong: #c8c4b9;
+
+  --text-strong: #14181a;
+  --text: #34393b;
+  --text-muted: #6c6f6d;
+  --text-faint: #666966;
+
+  --accent: #0e7c66;
+  --accent-strong: #096352;
+  --accent-soft: #e0efea;
+  --accent-contrast: #ffffff;
+
+  --safe: #2c7154;
+  --safe-soft: #e2efe7;
+  --caution: #86590a;
+  --caution-soft: #f6ecd9;
+  --danger: #a3342b;
+  --danger-soft: #f6e2df;
+
+  --focus: #0e7c66;
+  --canvas: #12171a;
+  --canvas-grid: #1d2529;
+  --canvas-text: #f2f1ec;
+
+  --shadow-1: 0 1px 2px rgba(20, 24, 26, 0.06), 0 10px 26px -18px rgba(20, 24, 26, 0.4);
+  --shadow-2: 0 18px 50px -24px rgba(10, 14, 16, 0.45);
+
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius: 8px;
+  --radius-lg: 11px;
+
+  --sidebar-w: 234px;
+  --sidebar-w-rail: 64px;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0d1012;
+  --bg-inset: #090c0d;
+  --surface: #15191c;
+  --surface-2: #191e21;
+  --surface-hover: #1e2427;
+  --line: #262c30;
+  --line-strong: #374046;
+
+  --text-strong: #eceae5;
+  --text: #c6c6c0;
+  --text-muted: #949a9b;
+  --text-faint: #8b9294;
+
+  --accent: #45c7a6;
+  --accent-strong: #6adcbd;
+  --accent-soft: #122f28;
+  --accent-contrast: #04120e;
+
+  --safe: #6ac69b;
+  --safe-soft: #122a20;
+  --caution: #d8a94e;
+  --caution-soft: #2b2314;
+  --danger: #e97b6f;
+  --danger-soft: #2e1917;
+
+  --focus: #45c7a6;
+  --canvas: #0b0f11;
+  --canvas-grid: #1a2327;
+  --canvas-text: #f2f1ec;
+
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.02), 0 12px 30px -22px rgba(0, 0, 0, 0.9);
+  --shadow-2: 0 24px 60px -26px rgba(0, 0, 0, 0.85);
+}
