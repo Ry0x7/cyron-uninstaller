@@ -20,6 +20,7 @@ import type {
   ProcessTerminateResult,
   PurgeReport,
   QuarantineBatch,
+  RegistryRestoreReport,
   RestoreReport,
   ScanOptions,
   ScanResult,
@@ -126,6 +127,8 @@ export const api = {
     call<BrokenEntryPlan>("prepare_broken_inventory_cleanup", { appId }),
   executeBrokenInventoryCleanup: (planId: string, confirmedKeyPath: string) =>
     call<LeftoverCleanReport>("execute_broken_inventory_cleanup", { planId, confirmedKeyPath }),
+  restoreRegistryBackup: (runId: string) =>
+    call<RegistryRestoreReport>("restore_registry_backup", { runId }),
   prepareBatchUninstall: (appIds: string[], quiet = false) =>
     call<BatchUninstallPlan>("prepare_batch_uninstall", { appIds, quiet }),
   executeBatchUninstall: (planId: string) =>

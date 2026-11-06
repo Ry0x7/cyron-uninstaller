@@ -985,3 +985,64 @@ fn registry_backup_verification_detects_malformed_and_empty_files() {
     fs::write(&bad_hex_reg, "Windows Registry Editor Version 5.00\r\n\r\n[HKCU\\Software\\Foo]\r\n\"v\"=hex:zz,yy\r\n").expect("write bad hex");
     assert!(leftovers::verify_registry_backup(&bad_hex_reg).is_err());
 }
+
+#[test]
+fn concurrent_hunter_and_uninstaller_snapshots_stay_isolated() {
+    use cyron_lib::hunter;
+    use cyron_lib::process;
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    // 1. Establish an Uninstaller snapshot in application process snapshots
+    let mut uninstaller_proc_snapshots: std::collections::HashMap<String, process::StoredProcessSnapshot> =
+        std::collections::HashMap::new();
+    let uninstaller_app_id = "machine-64|Google Chrome".to_string();
+    let original_uninstaller_snap = process::StoredProcessSnapshot {
+        app_id: uninstaller_app_id.clone(),
+        install_location: r"C:\Program Files\Google\Chrome\Application".into(),
+        candidate_roots: vec![r"c:\program files\google\chrome\application".into()],
+        timestamp: now,
+        processes: vec![process::AppProcess {
+            pid: 12345,
+            name: "chrome.exe".into(),
+            path: Some(r"C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
+            is_critical: false,
+            title: Some("Google Chrome".into()),
+            creation_time: 987654321,
+        }],
+    };
+    uninstaller_proc_snapshots.insert(uninstaller_app_id.clone(), original_uninstaller_snap.clone());
+
+    // 2. Hunter targets a window for the same app or different app during polling
+    let hunter_target_token = "hunter-target-token-999-1-54321".to_string();
+    let hunter_target = hunter::HunterTargetInfo {
+        hwnd: 0x1234,
+        pid: 54321,
+        process_name: "chrome.exe".into(),
+        process_path: Some(r"C:\Program Files\Google\Chrome\Application\chrome.exe".into()),
+        window_title: Some("Google Chrome New Tab".into()),
+        matched_app_id: Some(uninstaller_app_id.clone()),
+        matched_app_name: Some("Google Chrome".into()),
+        is_critical: false,
+        hunter_target_id: hunter_target_token.clone(),
+        can_terminate: true,
+        creation_time: 123456789,
+    };
+
+    let mut hunter_proc_snapshots = std::collections::HashMap::new();
+    let mut hunter_app_snapshots = std::collections::HashMap::new();
+    hunter::register_target_in_state(&hunter_target, &mut hunter_proc_snapshots, &mut hunter_app_snapshots);
+
+    // 3. Verify that the Uninstaller snapshot was NEVER overwritten or modified!
+    let retained_snap = uninstaller_proc_snapshots.get(&uninstaller_app_id).expect("uninstaller snapshot must still exist");
+    assert_eq!(retained_snap.processes.len(), 1);
+    assert_eq!(retained_snap.processes[0].pid, 12345);
+    assert_eq!(retained_snap.processes[0].creation_time, 987654321);
+    assert_eq!(uninstaller_proc_snapshots.len(), 1);
+
+    // 4. Verify that Hunter stored its snapshot in the isolated hunter map under its unique token
+    assert!(hunter_proc_snapshots.contains_key(&hunter_target_token));
+    let hunter_snap = hunter_proc_snapshots.get(&hunter_target_token).expect("hunter snapshot must exist");
+    assert_eq!(hunter_snap.processes[0].pid, 54321);
+    assert_eq!(hunter_snap.processes[0].creation_time, 123456789);
+}

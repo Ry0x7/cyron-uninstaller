@@ -64,6 +64,8 @@ export function UninstallWizard({
   const [cleanError, setCleanError] = useState<string | null>(null);
   const [brokenPlan, setBrokenPlan] = useState<BrokenEntryPlan | null>(null);
   const [preparingBrokenPlan, setPreparingBrokenPlan] = useState(false);
+  const [restoringRegistry, setRestoringRegistry] = useState(false);
+  const [registryRestoreResult, setRegistryRestoreResult] = useState<string | null>(null);
 
   const activeAppId = useRef<string | null>(null);
   activeAppId.current = app?.id ?? null;
@@ -80,6 +82,7 @@ export function UninstallWizard({
     setUninstallResult(null);
     setLeftoverReport(null);
     setCleanReport(null);
+    setRegistryRestoreResult(null);
     setSelectedCandidateIds(new Set());
     setElapsedSecs(0);
 
@@ -280,6 +283,22 @@ export function UninstallWizard({
     if (risk === "caution") return "caution";
     if (risk === "protected") return "danger";
     return "neutral";
+  };
+
+  const handleRestoreRegistry = async () => {
+    if (!cleanReport?.runId || restoringRegistry) return;
+    setRestoringRegistry(true);
+    setRegistryRestoreResult(null);
+    try {
+      const rep = await api.restoreRegistryBackup(cleanReport.runId);
+      setRegistryRestoreResult(
+        `Successfully restored ${rep.keysRestored} registry key(s) and ${rep.valuesRestored} value(s) from backup.`
+      );
+    } catch (err) {
+      setRegistryRestoreResult(`Registry restoration failed: ${errorMessage(err)}`);
+    } finally {
+      setRestoringRegistry(false);
+    }
   };
 
   const selectedCandidatesList = (leftoverReport?.candidates ?? []).filter((c) =>
@@ -963,6 +982,12 @@ export function UninstallWizard({
             />
           )}
 
+          {registryRestoreResult && (
+            <Banner tone={registryRestoreResult.includes("failed") ? "danger" : "safe"}>
+              {registryRestoreResult}
+            </Banner>
+          )}
+
           <div
             style={{
               padding: 12,
@@ -982,7 +1007,16 @@ export function UninstallWizard({
             </span>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+            {cleanReport?.registryBackupPath && !registryRestoreResult?.includes("Successfully") && (
+              <Button
+                variant="secondary"
+                onClick={handleRestoreRegistry}
+                loading={restoringRegistry}
+              >
+                Restore Registry Now
+              </Button>
+            )}
             <Button variant="primary" onClick={onClose}>
               Done
             </Button>

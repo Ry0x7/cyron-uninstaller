@@ -34,7 +34,15 @@ pub fn resolve_cursor_target(
         if GetCursorPos(&mut pt) == 0 {
             return Ok(None);
         }
+        resolve_target_from_point(pt, cached_apps)
+    }
+}
 
+pub fn resolve_target_from_point(
+    pt: POINT,
+    cached_apps: &[crate::apps::InstalledApp],
+) -> Result<Option<HunterTargetInfo>, String> {
+    unsafe {
         let hwnd_raw = WindowFromPoint(pt);
         if hwnd_raw.is_null() {
             return Ok(None);
@@ -77,11 +85,14 @@ pub fn resolve_cursor_target(
             (None, None)
         };
 
-        let hunter_target_id = if let Some(ref id) = matched_app_id {
-            id.clone()
-        } else {
-            format!("hunter|{}|{}", pid, creation_time)
-        };
+        // Always generate a unique opaque target token to prevent collisions with uninstaller snapshots
+        static TARGET_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let nonce = TARGET_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let now_nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let hunter_target_id = format!("hunter-target-{now_nanos}-{nonce}-{pid}");
 
         let can_terminate = !is_critical && creation_time > 0;
 
@@ -142,8 +153,8 @@ pub fn is_path_in_directory(path_key: &str, dir_key: &str) -> bool {
 
 pub fn register_target_in_state(
     target: &HunterTargetInfo,
-    process_snapshots: &mut HashMap<String, crate::process::StoredProcessSnapshot>,
-    app_snapshots: &mut HashMap<String, crate::apps::InstalledApp>,
+    hunter_snapshots: &mut HashMap<String, crate::process::StoredProcessSnapshot>,
+    hunter_app_snapshots: &mut HashMap<String, crate::apps::InstalledApp>,
 ) {
     if target.pid <= 4 {
         return;
@@ -153,6 +164,10 @@ pub fn register_target_in_state(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+
+    // Prune stale hunter snapshots older than 300s (5-minute TTL)
+    hunter_snapshots.retain(|_, s| now.saturating_sub(s.timestamp) < 300);
+    hunter_app_snapshots.retain(|k, _| hunter_snapshots.contains_key(k));
 
     let parent_dir = target
         .process_path
@@ -176,7 +191,7 @@ pub fn register_target_in_state(
         .map(|d| d.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    // Register verified process snapshot for Hunter targeting
+    // Register verified process snapshot in isolated Hunter snapshot registry
     let snapshot = crate::process::StoredProcessSnapshot {
         app_id: target.hunter_target_id.clone(),
         install_location: install_location.clone(),
@@ -191,41 +206,39 @@ pub fn register_target_in_state(
             creation_time: target.creation_time,
         }],
     };
-    process_snapshots.insert(target.hunter_target_id.clone(), snapshot);
+    hunter_snapshots.insert(target.hunter_target_id.clone(), snapshot);
 
-    // If unregistered app, also register a backend InstalledApp snapshot
-    if target.matched_app_id.is_none() && target.process_path.is_some() {
-        let app = crate::apps::InstalledApp {
-            id: target.hunter_target_id.clone(),
-            name: target
-                .window_title
-                .clone()
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| target.process_name.clone()),
-            version: None,
-            publisher: None,
-            install_location: if install_location.is_empty() {
-                None
-            } else {
-                Some(install_location)
-            },
-            install_date: None,
-            uninstall_string: None,
-            quiet_uninstall_string: None,
-            display_icon: target.process_path.clone(),
-            estimated_size: None,
-            hive: "portable".into(),
-            scope: "user".into(),
-            architecture: "x64".into(),
-            is_protected: target.is_critical,
-            source: "portable".into(),
-            uninstall_support: "missing".into(),
-            confidence: "heuristic".into(),
-            detection_reason: Some(format!("Targeted via Hunter Mode (PID {})", target.pid)),
-            registry_key_name: None,
-        };
-        app_snapshots.insert(target.hunter_target_id.clone(), app);
-    }
+    // Register backend InstalledApp snapshot in isolated Hunter app snapshot registry
+    let app = crate::apps::InstalledApp {
+        id: target.hunter_target_id.clone(),
+        name: target
+            .window_title
+            .clone()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| target.process_name.clone()),
+        version: None,
+        publisher: None,
+        install_location: if install_location.is_empty() {
+            None
+        } else {
+            Some(install_location)
+        },
+        install_date: None,
+        uninstall_string: None,
+        quiet_uninstall_string: None,
+        display_icon: target.process_path.clone(),
+        estimated_size: None,
+        hive: "portable".into(),
+        scope: "user".into(),
+        architecture: "x64".into(),
+        is_protected: target.is_critical,
+        source: "portable".into(),
+        uninstall_support: "missing".into(),
+        confidence: "heuristic".into(),
+        detection_reason: Some(format!("Targeted via Hunter Mode (PID {})", target.pid)),
+        registry_key_name: None,
+    };
+    hunter_app_snapshots.insert(target.hunter_target_id.clone(), app);
 }
 
 #[cfg(test)]

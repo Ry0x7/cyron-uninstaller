@@ -752,7 +752,16 @@ pub async fn terminate_app_processes(
         return Err("Cannot terminate more than 64 processes at once.".into());
     }
 
-    let snapshot = {
+    let snapshot = if app_id.starts_with("hunter-") {
+        let snapshots = state
+            .hunter_snapshots
+            .lock()
+            .map_err(|_| "Hunter process snapshot registry is unavailable.".to_string())?;
+        snapshots
+            .get(&app_id)
+            .cloned()
+            .ok_or_else(|| "Target snapshot expired or process identity changed. Target again.".to_string())?
+    } else {
         let snapshots = state
             .process_snapshots
             .lock()
@@ -882,6 +891,17 @@ pub async fn snapshot_app_identity(
     app_id: String,
 ) -> Result<apps::InstalledApp, String> {
     let app_id_trimmed = app_id.trim().to_string();
+    if app_id_trimmed.starts_with("hunter-") {
+        let snapshots = state
+            .hunter_app_snapshots
+            .lock()
+            .map_err(|_| "Hunter application snapshot registry is unavailable.".to_string())?;
+        return snapshots
+            .get(&app_id_trimmed)
+            .cloned()
+            .ok_or_else(|| format!("Target '{app_id_trimmed}' expired or not found. Target again."));
+    }
+
     let inventory = run_blocking("Application lookup for snapshot", apps::discover_apps).await?;
     let app = inventory
         .apps
@@ -959,38 +979,47 @@ pub async fn prepare_broken_inventory_cleanup(
         return Err("Application ID is required.".into());
     }
 
-    let inventory = run_blocking("Application lookup for broken entry cleanup", apps::discover_apps).await?;
-    let found_app = inventory
-        .apps
-        .iter()
-        .find(|a| a.id == app_id_trimmed)
-        .cloned()
-        .or_else(|| {
-            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
-        })
-        .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
+    let (hive, subkey_name) = if let Some((h, s)) = app_id_trimmed.split_once('|') {
+        (h.to_string(), s.to_string())
+    } else {
+        let inventory = run_blocking("Application lookup for broken entry cleanup", apps::discover_apps).await?;
+        let found_app = inventory
+            .apps
+            .iter()
+            .find(|a| a.id == app_id_trimmed)
+            .ok_or_else(|| format!("Application '{app_id_trimmed}' not found in registry inventory."))?;
+        let sub = found_app.registry_key_name.clone().unwrap_or_else(|| app_id_trimmed.clone());
+        (found_app.hive.clone(), sub)
+    };
 
-    let (subkey_name, registry_key_path) = leftovers::verify_broken_entry_candidate(&found_app)?;
+    // 1. Read live registry entry metadata directly from Windows registry
+    let live_meta = leftovers::read_live_broken_entry_metadata(&hive, &subkey_name)?;
+
+    // 2. Verify it qualifies as genuinely broken right now (never trusting stale cached state)
+    leftovers::verify_live_broken_status(&live_meta)?;
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    let plan_id = format!("broken-plan-{now}-{}", std::process::id());
+    let plan_id = leftovers::generate_collision_resistant_plan_id("broken-plan");
+
     let stored_plan = leftovers::StoredBrokenEntryPlan {
         plan_id: plan_id.clone(),
         app_id: app_id_trimmed.clone(),
-        app_name: found_app.name.clone(),
-        registry_key_path: registry_key_path.clone(),
-        subkey_name: subkey_name.clone(),
-        hive: found_app.hive.clone(),
+        app_name: live_meta.display_name.clone(),
+        registry_key_path: live_meta.registry_key_path.clone(),
+        subkey_name: live_meta.subkey_name.clone(),
+        hive: live_meta.hive.clone(),
+        fingerprint: live_meta.fingerprint.clone(),
         expires_at: now + 300,
     };
 
     let public_plan = leftovers::BrokenEntryPlan {
         plan_id: plan_id.clone(),
         app_id: app_id_trimmed,
-        app_name: found_app.name,
-        registry_key_path,
-        subkey_name,
-        hive: found_app.hive,
+        app_name: live_meta.display_name,
+        registry_key_path: live_meta.registry_key_path,
+        subkey_name: live_meta.subkey_name,
+        hive: live_meta.hive,
+        fingerprint: live_meta.fingerprint,
         expires_at: now + 300,
     };
 
@@ -1038,10 +1067,77 @@ pub async fn execute_broken_inventory_cleanup(
         *cache = None;
     }
 
-    run_blocking("Clean broken inventory entry", move || {
-        leftovers::execute_broken_entry_removal(&plan, &quarantine_root)
+    let plan_clone = plan.clone();
+    let report = run_blocking("Clean broken inventory entry", move || {
+        leftovers::execute_broken_entry_removal(&plan_clone, &quarantine_root)
     })
-    .await?
+    .await??;
+
+    // Log the successful cleanup to cleanup-log.json so it is discoverable in Activity/History
+    if let Ok(data_dir) = app_data_dir(&app) {
+        let at = now_secs();
+        let log = cleanup::CleanupLogEntry {
+            id: format!("clean-broken-{}-{at}", plan.plan_id),
+            at,
+            title: format!("Cleaned broken uninstall registry entry ({})", plan.app_name),
+            targets: vec![plan.registry_key_path.clone()],
+            bytes: 0,
+            files: 0,
+            quarantined: 0,
+            skipped: 0,
+            failed: 0,
+            status: "completed".into(),
+            detail: format!("Created verified .reg backup in quarantine batch {}", plan.plan_id),
+        };
+        let _ = cleanup::append_log(&data_dir, &log);
+    }
+
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn restore_registry_backup(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<leftovers::RegistryRestoreReport, String> {
+    ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
+    let run_id = validate_cleanup_record_id(&run_id)?;
+    let root = cleanup_quarantine_root(&app)?;
+    let data_dir = app_data_dir(&app)?;
+    let backup_file = root.join(&run_id).join("registry_backup.reg");
+
+    if !backup_file.exists() {
+        return Err(format!("No registry backup (.reg) found in quarantine batch '{run_id}'."));
+    }
+
+    // Invalidate cached apps
+    if let Ok(mut cache) = state.cached_apps.lock() {
+        *cache = None;
+    }
+
+    let report = run_blocking("Registry backup restoration", move || {
+        leftovers::restore_registry_backup(&backup_file)
+    })
+    .await??;
+
+    let at = now_secs();
+    let log = cleanup::CleanupLogEntry {
+        id: format!("restore-reg-{run_id}-{at}"),
+        at,
+        title: "Restored registry backup from quarantine".into(),
+        targets: vec![format!("Batch {run_id}")],
+        bytes: 0,
+        files: 0,
+        quarantined: 0,
+        skipped: 0,
+        failed: report.errors.len() as u64,
+        status: if report.errors.is_empty() { "completed" } else { "failed" }.into(),
+        detail: format!("Restored {} keys and {} values from backup", report.keys_restored, report.values_restored),
+    };
+    let _ = cleanup::append_log(&data_dir, &log);
+
+    Ok(report)
 }
 
 #[tauri::command]
@@ -1492,10 +1588,10 @@ pub fn resolve_cursor_target(
     let target = crate::hunter::resolve_cursor_target(&cached_apps)?;
 
     if let Some(ref t) = target {
-        if let (Ok(mut proc_snaps), Ok(mut app_snaps)) =
-            (state.process_snapshots.lock(), state.app_snapshots.lock())
+        if let (Ok(mut h_proc_snaps), Ok(mut h_app_snaps)) =
+            (state.hunter_snapshots.lock(), state.hunter_app_snapshots.lock())
         {
-            crate::hunter::register_target_in_state(t, &mut proc_snaps, &mut app_snaps);
+            crate::hunter::register_target_in_state(t, &mut h_proc_snaps, &mut h_app_snaps);
         }
     }
 

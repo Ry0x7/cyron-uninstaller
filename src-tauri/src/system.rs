@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_BINARY};
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_BINARY};
 use winreg::RegKey;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,36 +197,63 @@ pub fn is_critical_startup_entry(name: &str, cmd: &str) -> bool {
         || lower_cmd.contains("msseces.exe")
 }
 
-fn get_startup_approved_state(entry_name: &str, location_type: &str) -> bool {
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+fn get_windows_filetime_now() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    // 100-nanosecond intervals since January 1, 1601 (UTC)
+    (nanos / 100) as u64 + 116_444_736_000_000_000u64
+}
+
+fn is_hklm_startup_writable() -> bool {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    hklm.open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+        KEY_SET_VALUE,
+    )
+    .is_ok()
+}
+
+fn get_startup_approved_state(entry_name: &str, is_hklm: bool, location_type: &str) -> (bool, Option<Vec<u8>>) {
+    let root = if is_hklm {
+        RegKey::predef(HKEY_LOCAL_MACHINE)
+    } else {
+        RegKey::predef(HKEY_CURRENT_USER)
+    };
+
     let subkey_name = match location_type {
         "folder" => r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder",
         "run32" => r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32",
         _ => r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
     };
 
-    if let Ok(key) = hkcu.open_subkey(subkey_name) {
+    if let Ok(key) = root.open_subkey(subkey_name) {
         if let Ok(raw) = key.get_raw_value(entry_name) {
             if !raw.bytes.is_empty() {
-                // If first byte is 0x03 or odd, it is disabled by Windows Task Manager / Explorer
-                return raw.bytes[0] % 2 == 0;
+                // In Windows StartupApproved:
+                // First byte: 0x02 = Enabled, 0x03 = Disabled by user (any odd byte is disabled)
+                let enabled = raw.bytes[0] % 2 == 0;
+                return (enabled, Some(raw.bytes));
             }
         }
     }
-    true // Enabled by default if no approval entry exists
+    (true, None) // Enabled by default if no approval entry exists
 }
 
 pub fn list_startup_items() -> Vec<StartupItem> {
     let mut items = Vec::new();
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let hklm_writable = is_hklm_startup_writable();
 
     // 1. HKCU Run
     if let Ok(run_key) = hkcu.open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run") {
         for (name, v) in run_key.enum_values().flatten() {
             let cmd = v.to_string();
             let is_protected = is_critical_startup_entry(&name, &cmd);
-            let enabled = get_startup_approved_state(&name, "run");
+            let (enabled, _) = get_startup_approved_state(&name, false, "run");
             items.push(StartupItem {
                 id: format!("hkcu-run-{}", name),
                 name,
@@ -263,7 +290,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
         for (name, v) in run_key.enum_values().flatten() {
             let cmd = v.to_string();
             let is_protected = is_critical_startup_entry(&name, &cmd);
-            let enabled = get_startup_approved_state(&name, "run");
+            let (enabled, _) = get_startup_approved_state(&name, true, "run");
             items.push(StartupItem {
                 id: format!("hklm-run-{}", name),
                 name,
@@ -272,7 +299,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
                 enabled,
                 publisher: None,
                 is_protected,
-                can_toggle: !is_protected,
+                can_toggle: !is_protected && hklm_writable,
             });
         }
     }
@@ -300,7 +327,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
         for (name, v) in run_key.enum_values().flatten() {
             let cmd = v.to_string();
             let is_protected = is_critical_startup_entry(&name, &cmd);
-            let enabled = get_startup_approved_state(&name, "run32");
+            let (enabled, _) = get_startup_approved_state(&name, true, "run32");
             items.push(StartupItem {
                 id: format!("hklm-wow-run-{}", name),
                 name,
@@ -309,7 +336,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
                 enabled,
                 publisher: None,
                 is_protected,
-                can_toggle: !is_protected,
+                can_toggle: !is_protected && hklm_writable,
             });
         }
     }
@@ -325,7 +352,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
                         let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
                         let is_protected = is_critical_startup_entry(&stem, &path.to_string_lossy());
-                        let enabled = get_startup_approved_state(&file_name, "folder");
+                        let (enabled, _) = get_startup_approved_state(&file_name, false, "folder");
                         items.push(StartupItem {
                             id: format!("startup-user-{}", stem),
                             name: stem,
@@ -356,7 +383,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
                         let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
                         let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
                         let is_protected = is_critical_startup_entry(&stem, &path.to_string_lossy());
-                        let enabled = get_startup_approved_state(&file_name, "folder");
+                        let (enabled, _) = get_startup_approved_state(&file_name, true, "folder");
                         items.push(StartupItem {
                             id: format!("startup-common-{}", stem),
                             name: stem,
@@ -365,7 +392,7 @@ pub fn list_startup_items() -> Vec<StartupItem> {
                             enabled,
                             publisher: None,
                             is_protected,
-                            can_toggle: !is_protected,
+                            can_toggle: !is_protected && hklm_writable,
                         });
                     }
                 }
@@ -386,12 +413,18 @@ pub fn set_startup_item_enabled(id: &str, enabled: bool) -> Result<StartupItem, 
     }
 
     if !item.can_toggle {
-        return Err("This startup item cannot be modified without elevation or is a temporary one-time startup task.".into());
+        if item.location.contains("HKLM") || item.location.contains("All Users") {
+            return Err("Modifying machine-wide startup items requires administrator privileges.".into());
+        } else if item.location.contains("RunOnce") {
+            return Err("RunOnce entries are temporary one-time startup tasks and cannot be toggled.".into());
+        } else {
+            return Err("This startup item cannot be modified.".into());
+        }
     }
 
+    let is_hklm = item.location.contains("HKLM") || item.location.contains("All Users");
     let is_folder = item.location.contains("Startup");
     let is_wow32 = item.location.contains("WOW6432Node");
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     let subkey_name = if is_folder {
         r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
@@ -401,24 +434,17 @@ pub fn set_startup_item_enabled(id: &str, enabled: bool) -> Result<StartupItem, 
         r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
     };
 
-    let (approval_key, _) = hkcu
+    let root = if is_hklm {
+        RegKey::predef(HKEY_LOCAL_MACHINE)
+    } else {
+        RegKey::predef(HKEY_CURRENT_USER)
+    };
+
+    let (approval_key, _) = root
         .create_subkey(subkey_name)
         .map_err(|e| format!("Could not open or create StartupApproved registry key: {e}"))?;
 
-    // In Windows StartupApproved:
-    // 12-byte binary value.
-    // First byte: 0x02 = Enabled, 0x03 = Disabled by user.
-    // Timestamp follows in subsequent bytes.
-    let mut data = vec![0u8; 12];
-    data[0] = if enabled { 0x02 } else { 0x03 };
-
-    let reg_val = winreg::RegValue {
-        vtype: REG_BINARY,
-        bytes: data,
-    };
-
     let target_name = if is_folder {
-        // If folder item, use file name with extension if available
         let p = std::path::Path::new(&item.command);
         p.file_name()
             .map(|f| f.to_string_lossy().to_string())
@@ -427,9 +453,45 @@ pub fn set_startup_item_enabled(id: &str, enabled: bool) -> Result<StartupItem, 
         item.name.clone()
     };
 
-    approval_key
-        .set_raw_value(&target_name, &reg_val)
-        .map_err(|e| format!("Could not write startup approval state: {e}"))?;
+    // Query existing raw value to preserve exact original bytes and structure
+    let existing_raw = approval_key.get_raw_value(&target_name).ok();
+
+    if let Some(mut raw) = existing_raw {
+        // Preserve all existing binary bytes, only toggle byte 0 and update timestamp in bytes 4..12
+        if raw.bytes.is_empty() {
+            raw.bytes = vec![0u8; 12];
+        } else if raw.bytes.len() < 12 {
+            raw.bytes.resize(12, 0);
+        }
+        raw.bytes[0] = if enabled { 0x02 } else { 0x03 };
+        let ft = get_windows_filetime_now();
+        raw.bytes[4..12].copy_from_slice(&ft.to_le_bytes());
+
+        let reg_val = winreg::RegValue {
+            vtype: REG_BINARY,
+            bytes: raw.bytes,
+        };
+        approval_key
+            .set_raw_value(&target_name, &reg_val)
+            .map_err(|e| format!("Could not write startup approval state: {e}"))?;
+    } else if !enabled {
+        // Create standard 12-byte payload with current FILETIME
+        let mut data = vec![0u8; 12];
+        data[0] = 0x03; // Disabled
+        let ft = get_windows_filetime_now();
+        data[4..12].copy_from_slice(&ft.to_le_bytes());
+
+        let reg_val = winreg::RegValue {
+            vtype: REG_BINARY,
+            bytes: data,
+        };
+        approval_key
+            .set_raw_value(&target_name, &reg_val)
+            .map_err(|e| format!("Could not write startup approval state: {e}"))?;
+    } else {
+        // Enabled and no prior approval entry: deleting the value restores the pristine unmanaged Windows default
+        let _ = approval_key.delete_value(&target_name);
+    }
 
     let mut updated = item;
     updated.enabled = enabled;

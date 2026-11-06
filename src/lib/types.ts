@@ -617,7 +617,14 @@ export interface BrokenEntryPlan {
   registryKeyPath: string;
   subkeyName: string;
   hive: string;
+  fingerprint: string;
   expiresAt: number;
+}
+
+export interface RegistryRestoreReport {
+  keysRestored: number;
+  valuesRestored: number;
+  errors: string[];
 }
 
 export interface SystemSpecs {

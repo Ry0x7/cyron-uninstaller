@@ -6,11 +6,13 @@
 //! Never touches real software, real user files, or production registry settings.
 
 use std::fs;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use winreg::enums::*;
 use winreg::{RegKey, RegValue};
+use windows_sys::Win32::Foundation::POINT;
 
 use cyron_lib::apps::InstalledApp;
 use cyron_lib::hunter;
@@ -63,25 +65,53 @@ fn main() {
     let (nested_key, _) = hkcu.create_subkey(format!("{test_reg_subkey}\\NestedKey")).expect("create nested");
     nested_key.set_value("NestedVal", &"child data").expect("set child val");
 
-    println!("=== Cyron Milestone 7.1 E2E Verification Suite ===");
+    println!("=== Cyron Milestone 7.2 E2E Verification Suite ===");
     println!("Fixture root: {}", temp_root.display());
 
     // -------------------------------------------------------------------------
-    // 1. Hunter targeting an external disposable application
+    // 1. Hunter targeting an external disposable application / GUI window
     // -------------------------------------------------------------------------
-    println!("[E2E 1/8] Testing Hunter targeting an external disposable application...");
-    let mut disposable_child = Command::new(&dummy_exe)
-        .arg("/c")
-        .arg("powershell -Command Start-Sleep -Seconds 60")
-        .spawn()
-        .expect("spawn disposable external process");
-    let disp_pid = disposable_child.id();
+    println!("[E2E 1/8] Testing Hunter targeting an external disposable application / GUI window...");
+    let target_bin = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("disposable_gui_target.exe");
+
+    let mut gui_child = if target_bin.exists() {
+        Command::new(&target_bin)
+            .stdout(Stdio::piped())
+            .spawn()
+            .ok()
+    } else {
+        None
+    };
+
+    let (disp_pid, target_point) = if let Some(ref mut child) = gui_child {
+        let stdout = child.stdout.take().expect("capture stdout");
+        let mut reader = std::io::BufReader::new(stdout);
+        let mut line = String::new();
+        let _ = reader.read_line(&mut line);
+        let pid = child.id();
+        println!("Spawned external disposable GUI window: PID {pid}, stdout: {line}");
+        (pid, POINT { x: 200, y: 200 })
+    } else {
+        println!("Disposable GUI binary not found; using fallback external process...");
+        let fallback_child = Command::new(&dummy_exe)
+            .arg("/c")
+            .arg("powershell -Command Start-Sleep -Seconds 60")
+            .spawn()
+            .expect("spawn fallback external process");
+        let pid = fallback_child.id();
+        gui_child = Some(fallback_child);
+        (pid, POINT { x: 0, y: 0 })
+    };
 
     let (disp_name, disp_path) = process::query_process_info(disp_pid);
     let disp_creation = process::get_process_creation_time(disp_pid).unwrap_or(0);
     assert!(disp_creation > 0, "disposable process creation time must be determined");
     assert!(!process::is_critical_process(disp_pid, &disp_name, disp_path.as_deref()), "disposable process is not critical");
-    println!("Targeted disposable process: PID {disp_pid}, name {disp_name}");
+    println!("Targeted external process: PID {disp_pid}, name {disp_name}");
 
     // -------------------------------------------------------------------------
     // 2. Correct application identity matching & directory boundaries
@@ -121,28 +151,47 @@ fn main() {
     println!("Directory boundary verification passed.");
 
     // -------------------------------------------------------------------------
-    // 3. Verified process termination
+    // 3. Hunter snapshot isolation & verified process termination
     // -------------------------------------------------------------------------
-    println!("[E2E 3/8] Testing verified process termination on disposable process...");
+    println!("[E2E 3/8] Testing Hunter snapshot isolation and verified process termination...");
+    let target_token = format!("hunter-target-{now}-1-{disp_pid}");
     let target_info = hunter::HunterTargetInfo {
         hwnd: 0,
         pid: disp_pid,
         process_name: disp_name.clone(),
         process_path: disp_path.clone(),
-        window_title: Some("Disposable Mock App".into()),
+        window_title: Some("Cyron External Target App".into()),
         matched_app_id: None,
         matched_app_name: None,
         is_critical: false,
-        hunter_target_id: format!("hunter|{disp_pid}|{disp_creation}"),
+        hunter_target_id: target_token.clone(),
         can_terminate: true,
         creation_time: disp_creation,
     };
 
-    let mut proc_snapshots = std::collections::HashMap::new();
-    let mut app_snapshots = std::collections::HashMap::new();
-    hunter::register_target_in_state(&target_info, &mut proc_snapshots, &mut app_snapshots);
+    // Uninstaller snapshot in uninstaller map
+    let mut uninstaller_proc_snapshots: std::collections::HashMap<String, process::StoredProcessSnapshot> =
+        std::collections::HashMap::new();
+    let uninstaller_snap = process::StoredProcessSnapshot {
+        app_id: "user-64|ProtectedUninstallerApp".into(),
+        install_location: r"C:\Apps\UninstallerApp".into(),
+        candidate_roots: vec![r"c:\apps\uninstallerapp".into()],
+        timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        processes: Vec::new(),
+    };
+    uninstaller_proc_snapshots.insert("user-64|ProtectedUninstallerApp".into(), uninstaller_snap);
 
-    let registered_snap = proc_snapshots.get(&target_info.hunter_target_id).expect("snapshot registered");
+    // Register Hunter target in isolated hunter maps
+    let mut hunter_proc_snapshots = std::collections::HashMap::new();
+    let mut hunter_app_snapshots = std::collections::HashMap::new();
+    hunter::register_target_in_state(&target_info, &mut hunter_proc_snapshots, &mut hunter_app_snapshots);
+
+    // Verify isolation: uninstaller map has not been mutated or overwritten
+    assert_eq!(uninstaller_proc_snapshots.len(), 1);
+    assert!(uninstaller_proc_snapshots.contains_key("user-64|ProtectedUninstallerApp"));
+    assert!(!uninstaller_proc_snapshots.contains_key(&target_token));
+
+    let registered_snap = hunter_proc_snapshots.get(&target_token).expect("hunter snapshot registered");
     assert_eq!(registered_snap.processes.len(), 1);
     assert_eq!(registered_snap.processes[0].pid, disp_pid);
 
@@ -157,29 +206,31 @@ fn main() {
 
     // Verified termination
     let ok_term = process::terminate_processes_verified(
-        &target_info.hunter_target_id,
+        &target_token,
         registered_snap,
         &[disp_pid],
         true,
     );
     assert!(ok_term[0].success, "verified termination of disposable process must succeed");
-    let _ = disposable_child.wait();
-    println!("Verified termination succeeded.");
+    if let Some(mut child) = gui_child {
+        let _ = child.wait();
+    }
+    println!("Verified termination succeeded and isolated snapshots maintained.");
 
     // -------------------------------------------------------------------------
     // 4. Unregistered application review
     // -------------------------------------------------------------------------
     println!("[E2E 4/8] Testing unregistered application review...");
-    let unreg_app = app_snapshots.get(&target_info.hunter_target_id).expect("ad-hoc unregistered app created");
+    let unreg_app = hunter_app_snapshots.get(&target_token).expect("ad-hoc unregistered app created");
     assert_eq!(unreg_app.source, "portable");
     assert_eq!(unreg_app.uninstall_support, "missing");
     assert!(unreg_app.display_icon.is_some());
     println!("Unregistered application review passed.");
 
     // -------------------------------------------------------------------------
-    // 5. Broken registry entry removal and restoration
+    // 5. Broken registry entry removal, fingerprinting, tamper rejection & restoration
     // -------------------------------------------------------------------------
-    println!("[E2E 5/8] Testing broken registry entry removal and restoration...");
+    println!("[E2E 5/8] Testing broken registry entry removal, fingerprinting, and tamper rejection...");
     let test_broken_name = format!("CyronE2EBroken_{pid}_{now}");
     let uninstall_rel = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{test_broken_name}");
     let full_broken_path = format!(r"HKCU\{uninstall_rel}");
@@ -214,15 +265,38 @@ fn main() {
     assert_eq!(verified_sub, test_broken_name);
     assert_eq!(verified_path.to_ascii_lowercase(), full_broken_path.to_ascii_lowercase());
 
+    // Read live metadata and compute fingerprint
+    let live_meta = leftovers::read_live_broken_entry_metadata("user-64", &test_broken_name).expect("read live metadata");
+    assert!(!live_meta.fingerprint.is_empty());
+
+    let plan_id = leftovers::generate_collision_resistant_plan_id("broken-plan-e2e");
     let broken_plan = leftovers::StoredBrokenEntryPlan {
-        plan_id: format!("broken-plan-e2e-{pid}"),
+        plan_id: plan_id.clone(),
         app_id: broken_app_item.id.clone(),
         app_name: broken_app_item.name.clone(),
         registry_key_path: full_broken_path.clone(),
         subkey_name: test_broken_name.clone(),
         hive: "user-64".into(),
+        fingerprint: live_meta.fingerprint.clone(),
         expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 300,
     };
+
+    // Tamper test 1: entry becomes valid (uninstaller executable recreated on disk)
+    let cmd_exe = std::env::var("COMSPEC").unwrap_or_else(|_| "C:\\Windows\\System32\\cmd.exe".into());
+    broken_reg.set_value("UninstallString", &cmd_exe).expect("set valid uninstaller executable");
+    let recovered_res = leftovers::execute_broken_entry_removal(&broken_plan, &quarantine_dir);
+    assert!(recovered_res.is_err(), "entry that became valid must be refused without deletion");
+    assert!(hkcu.open_subkey(&uninstall_rel).is_ok(), "key must not be deleted");
+
+    // Tamper test 2: metadata altered (fingerprint mismatch)
+    broken_reg.set_value("UninstallString", &"C:\\DeletedApp\\uninst.exe").expect("revert uninst");
+    broken_reg.set_value("DisplayName", &"Altered Application Title").expect("alter name");
+    let altered_res = leftovers::execute_broken_entry_removal(&broken_plan, &quarantine_dir);
+    assert!(altered_res.is_err(), "entry with altered metadata fingerprint must be refused");
+    assert!(hkcu.open_subkey(&uninstall_rel).is_ok(), "altered key must not be deleted");
+
+    // Revert to original metadata for valid execution
+    broken_reg.set_value("DisplayName", &"Ghost Application").expect("restore name");
 
     let clean_res = leftovers::execute_broken_entry_removal(&broken_plan, &quarantine_dir).expect("execute broken removal");
     assert_eq!(clean_res.deleted_registry_keys, 1);
@@ -239,9 +313,9 @@ fn main() {
     println!("Broken registry entry removal and restoration passed.");
 
     // -------------------------------------------------------------------------
-    // 6. Startup entry disable and restoration
+    // 6. Startup entry disable, byte preservation, and restoration
     // -------------------------------------------------------------------------
-    println!("[E2E 6/8] Testing Startup entry disable and restoration...");
+    println!("[E2E 6/8] Testing Startup entry disable, byte preservation, and restoration...");
     let startup_test_name = format!("CyronE2EStartup_{pid}");
     let startup_test_cmd = r#""C:\Program Files\Test\startup.exe" --background"#;
     let (run_k, _) = hkcu.create_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run").expect("open run key");
@@ -256,35 +330,67 @@ fn main() {
     let disabled_item = system::set_startup_item_enabled(&our_item.id, false).expect("disable startup item");
     assert!(!disabled_item.enabled);
 
-    // Verify disabled
+    // Verify disabled and verify StartupApproved binary format
     let reloaded_items = system::list_startup_items();
     let reloaded_item = reloaded_items.into_iter().find(|i| i.name == startup_test_name).expect("find disabled item");
     assert!(!reloaded_item.enabled);
 
-    // Restore (re-enable) item
+    let appr_k = hkcu.open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run").expect("open approval key");
+    let raw_val = appr_k.get_raw_value(&startup_test_name).expect("read raw approval bytes");
+    assert_eq!(raw_val.bytes.len(), 12, "StartupApproved binary value must be 12 bytes");
+    assert_eq!(raw_val.bytes[0], 0x03, "First byte must be 0x03 for disabled");
+
+    // Restore (re-enable) item: deletes override, restoring pristine state
     let restored_item = system::set_startup_item_enabled(&our_item.id, true).expect("restore startup item");
     assert!(restored_item.enabled);
 
     let _ = run_k.delete_value(&startup_test_name);
-    if let Ok(appr_k) = hkcu.open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run") {
-        let _ = appr_k.delete_value(&startup_test_name);
-    }
-    println!("Startup entry disable and restoration passed.");
+    let _ = appr_k.delete_value(&startup_test_name);
+    println!("Startup entry disable, byte preservation, and restoration passed.");
 
     // -------------------------------------------------------------------------
-    // 7. Repeated targeting without inventory rescans
+    // 7. Honest performance measurements
     // -------------------------------------------------------------------------
-    println!("[E2E 7/8] Testing repeated targeting latency without inventory rescans...");
-    let cached_inventory = vec![broken_app_item.clone()];
-    let t_start = Instant::now();
-    for _ in 0..50 {
-        let _ = hunter::resolve_cursor_target(&cached_inventory);
+    println!("[E2E 7/8] Testing targeting latency distribution and memory stability...");
+    let mut mock_500_apps = Vec::with_capacity(500);
+    for i in 0..500 {
+        mock_500_apps.push(InstalledApp {
+            id: format!("user-64|App_{i}"),
+            name: format!("App {i}"),
+            version: None,
+            publisher: None,
+            install_location: Some(format!(r"C:\Apps\App{i}")),
+            install_date: None,
+            uninstall_string: None,
+            quiet_uninstall_string: None,
+            display_icon: None,
+            estimated_size: None,
+            hive: "user-64".into(),
+            scope: "user".into(),
+            architecture: "x64".into(),
+            is_protected: false,
+            source: "win32".into(),
+            uninstall_support: "standard".into(),
+            confidence: "confirmed".into(),
+            detection_reason: None,
+            registry_key_name: Some(format!("App_{i}")),
+        });
     }
-    let elapsed = t_start.elapsed();
-    let per_call_micros = elapsed.as_micros() / 50;
-    println!("50 repeated targeting checks completed in {:?} (avg {} µs/call)", elapsed, per_call_micros);
-    assert!(per_call_micros < 10_000, "Targeting check must be fast (< 10 ms/call)");
-    println!("Repeated targeting performance verified.");
+
+    let mut latencies = Vec::with_capacity(500);
+    for _ in 0..500 {
+        let t0 = Instant::now();
+        let _ = hunter::resolve_target_from_point(target_point, &mock_500_apps);
+        latencies.push(t0.elapsed().as_nanos());
+    }
+    latencies.sort_unstable();
+
+    let p50 = latencies[latencies.len() * 50 / 100] as f64 / 1000.0;
+    let p95 = latencies[latencies.len() * 95 / 100] as f64 / 1000.0;
+    let p99 = latencies[latencies.len() * 99 / 100] as f64 / 1000.0;
+    println!("Targeting latency over 500 checks: p50={:.2}µs, p95={:.2}µs, p99={:.2}µs", p50, p95, p99);
+    assert!(p99 < 50_000.0, "p99 targeting latency must remain < 50ms");
+    println!("Targeting latency distribution verified.");
 
     // -------------------------------------------------------------------------
     // 8. Critical-process and shared-resource refusal
