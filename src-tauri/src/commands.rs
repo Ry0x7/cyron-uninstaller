@@ -1138,18 +1138,7 @@ pub async fn restore_registry_backup(
     .await??;
 
     // Clean up batch or update manifest after successful restoration
-    if let Some(mut m) = cleanup::read_manifest(&batch_dir) {
-        if m.items.is_empty() {
-            let _ = std::fs::remove_file(batch_dir.join("registry_backup.reg"));
-            let _ = std::fs::remove_file(batch_dir.join(cleanup::JOURNAL_FILE));
-            let _ = std::fs::remove_file(batch_dir.join(cleanup::MANIFEST));
-            let _ = std::fs::remove_dir(&batch_dir);
-        } else {
-            let _ = std::fs::remove_file(batch_dir.join("registry_backup.reg"));
-            m.registry_backup = None;
-            let _ = cleanup::write_manifest(&batch_dir, &m);
-        }
-    }
+    let _ = cleanup::cleanup_restored_registry_batch(&batch_dir);
 
     let at = now_secs();
     let log = cleanup::CleanupLogEntry {
