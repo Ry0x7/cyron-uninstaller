@@ -95,3 +95,32 @@ node scripts/verify-release-bundles.mjs
 Keep documentation accurate and honest:
 - Never claim benchmarks, signed binaries, or verification passes that were not actually executed.
 - Record any platform limitations or known constraints in `docs/ARCHITECTURE.md` and `HANDOFF.md`.
+
+---
+
+## Git Workflow: Strict No-Rebase Policy
+
+> [!CAUTION]
+> **Rebasing is strictly prohibited on Cyron Uninstaller.**
+> All shared branches, pull requests, and releases enforce an immutable, merge-only or squash-only history.
+
+### Why Rebasing is Forbidden:
+1. **Cryptographic Release Provenance**: Cyron maintains verifiable Authenticode signatures, release hashes, and Git commit SHA records. Rebasing rewrites commit hashes, breaking published signatures, reproducible build verification, and historical audit trails.
+2. **Auditability of Safety Gates**: Destructive operation safety (confirmation plans, process protections, registry backups) relies on an unbroken historical ledger.
+3. **Branch Protection Enforced**: Force pushes (`git push --force`) and deletions are permanently disabled on `main` via GitHub branch protection.
+4. **GitHub Merge Configuration**: Rebase merges (`allow_rebase_merge: false`) are permanently disabled in GitHub repository settings. Pull requests are integrated exclusively using **Create a merge commit** (`--no-ff`) or **Squash and merge**.
+
+### Local Enforcement:
+- The repository installs a local `pre-rebase` hook via `npm install` (`npm run prepare` / `scripts/setup-git-hooks.ps1`) that automatically intercepts and blocks `git rebase` commands.
+- Local git pull behavior is set to merge (`git config pull.rebase false`).
+- To integrate updates from `main` into your feature branch, use `git merge main` (never `git rebase main`).
+
+---
+
+## License and Intellectual Property
+
+Cyron Uninstaller is source-available software with all rights reserved on code reuse. See [LICENSE](LICENSE) for the full legal terms.
+
+- **Public Viewing and Auditing**: You are welcome to view, study, audit, and compile the code locally for personal evaluation.
+- **Strict Prohibition on Reuse**: You may **NOT** copy, extract, adapt, incorporate, or reuse any part of this codebase, design, or architecture in any other commercial or non-commercial product, application, library, or derivative project without prior written permission from Ry0x7.
+- **Contributions**: Pull requests submitted to this repository grant the project owner the right to incorporate and distribute the changes under the project's license terms.

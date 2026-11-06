@@ -1,0 +1,35 @@
+Cyron Source-Available License (No Reuse)
+
+Copyright (c) 2026 Ry0x7. All rights reserved.
+
+This source code is made publicly available for viewing, inspection, security auditing,
+and local compilation for personal use.
+
+TERMS AND RESTRICTIONS:
+
+1. PROHIBITION OF REUSE:
+   You may NOT copy, reuse, modify, merge, adapt, incorporate, or extract any portion
+   of this source code, architecture, design, or binary into any other project, product,
+   service, application, library, or derivative work, whether commercial or non-commercial,
+   without explicit prior written permission from the copyright holder (Ry0x7).
+
+2. PROHIBITION OF REDISTRIBUTION:
+   You may NOT redistribute, republish, mirror, sell, rent, lease, sublicense, or distribute
+   modified or unmodified copies of this source code or compiled binaries, except via official
+   forks on GitHub intended solely for submitting pull requests directly back to this repository.
+
+3. PERMITTED USE:
+   You are permitted to view, inspect, audit, and compile this software locally for personal,
+   non-commercial evaluation and testing, or for authoring pull requests intended for contribution
+   back to the upstream repository.
+
+4. NO TRADEMARK OR PATENT GRANT:
+   No trademark, patent, or branding rights are granted under this license.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

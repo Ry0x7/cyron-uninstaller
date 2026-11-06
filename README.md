@@ -171,3 +171,10 @@ npm run verify:signatures                              # Authenticode signature 
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): Release packaging and VM verification steps.
 - [docs/BUNDLE.md](docs/BUNDLE.md): Installer targets, WebView2 requirements, and app data paths.
 - [CONTRIBUTING.md](CONTRIBUTING.md): Code standards, safety invariants, and contribution workflow.
+
+---
+
+## License & Git Workflow Policy
+
+- **Source-Available / No-Reuse License**: Cyron Uninstaller is source-available for viewing, security auditing, and personal compilation under the [Cyron Source-Available License](LICENSE). **Code reuse, redistribution, or extraction into any other project or commercial product is strictly prohibited** without prior written permission from the author (Ry0x7).
+- **Strict No-Rebase Policy**: Rebasing (`git rebase`) is permanently prohibited across all shared branches and pull requests to preserve immutable cryptographic release provenance, Authenticode signatures, and audit trails. GitHub enforces `allow_rebase_merge: false` and branch protection disallowing force-pushes (`allow_force_pushes: false`). Local clones enforce this via the repository's `pre-rebase` hook (`scripts/setup-git-hooks.ps1`). Integration must always use merge commits (`git merge --no-ff`) or squash merges.

@@ -3,6 +3,7 @@ name = "cyron"
 version = "0.1.0"
 description = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
 authors = ["Ry0x7"]
+license-file = "../LICENSE"
 edition = "2021"
 rust-version = "1.77"
 

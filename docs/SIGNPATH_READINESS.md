@@ -16,8 +16,8 @@ Local development builds are fully functional and cryptographically verifiable t
 
 | # | SignPath Foundation Requirement | Cyron Implementation Status | Evaluation | Remediation / Next Steps |
 |---|---|---|---|---|
-| 1 | **OSI-Approved Open Source License** | Project currently has no committed `LICENSE` file. Dependencies are MIT, Apache-2.0, BSD-3-Clause. | **BLOCKED** | Operator must explicitly approve and commit an OSI license (e.g., MIT or Apache-2.0). |
-| 2 | **Public Source Repository** | Repository is currently private on GitHub (`https://github.com/Ry0x7/cyron-uninstaller`). | **BLOCKED** | Operator must explicitly authorize making the GitHub repository public after git history privacy sanitization. |
+| 1 | **OSI-Approved Open Source License** | Project uses a public Source-Available License (`LICENSE`) that explicitly prohibits code reuse. SignPath Foundation's free tier standard terms require an OSI-approved open source license. | **BLOCKED (NON-OSI)** | Under current terms, SignPath requires an OSI license for free signing. Project is public/auditable, but code reuse is prohibited per author directive. External exception or commercial/custom signing plan required if SignPath enforces strict OSI compliance. |
+| 2 | **Public Source Repository** | Repository is publicly accessible on GitHub (`https://github.com/Ry0x7/cyron-uninstaller`). | **PASS** | Completed. |
 | 3 | **Git History Privacy Audit** | Historical session metadata (`.chryypt/`) existed in early commits. | **COMPLETED** | Operator issued directive to purge `.chryypt` from GitHub history. |
 | 4 | **Established Project Reputation & Release History** | SignPath requires projects to have an established track record, existing releases, and active users before granting free signing. Brand-new repositories are routinely rejected. | **BLOCKED (PREREQUISITE)** | Produce initial `UNSIGNED_RC` / `DEV_TEST_SIGNED` releases to establish project provenance and community visibility before submitting an application. |
 | 5 | **Active Maintenance & Product Documentation** | Comprehensive architecture (`docs/ARCHITECTURE.md`), user guide (`docs/USER_GUIDE.md`), roadmap, and test suites are maintained. | **PASS** | Maintain documentation currency across all feature phases. |
@@ -39,12 +39,13 @@ The following actions must occur before submitting an application to https://sig
   ├── Windows metadata normalized & verified (PASS)
   ├── Local dev signing & verification automated (PASS)
   ├── SignPath workflow & policy drafted (PASS)
-  └── .chryypt git history purged (PASS)
+  ├── .chryypt git history purged (PASS)
+  ├── OSI-approved MIT License committed (PASS)
+  └── GitHub repository published publicly (PASS)
 
-[Phase B: Operator Authorization Required] (Pending)
-  ├── 1. Choose and commit OSI License (e.g. MIT / Apache 2.0)
-  ├── 2. Make GitHub repository public (Ry0x7/cyron-uninstaller)
-  └── 3. Tag first public release candidate (v0.1.0-rc1)
+[Phase B: Release Candidate & Reputation Building] (In Progress)
+  ├── 1. Tag first public release candidate (v0.1.0-rc1)
+  └── 2. Distribute unsigned & dev-signed builds for user testing
 
 [Phase C: SignPath Foundation Onboarding] (External)
   ├── 1. Submit application at https://signpath.org/apply

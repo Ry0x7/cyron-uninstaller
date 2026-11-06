@@ -113,6 +113,7 @@ bundles (`RELEASE_BUNDLES_OK`).
 - Every new non-trivial rule needs a test near the code: Rust tests in the module, frontend tests
   in `src/lib/*.test.ts`.
 - Validate paths and job ids at the command boundary; never interpolate user input into a shell.
+- **Git workflow rule: Rebasing is strictly prohibited.** All branch integration must use standard merge commits (`git merge --no-ff`) or squash merges. Never run `git rebase` or force-push; this preserves immutable commit provenance, cryptographic hashes, and release audit trails. Local clones enforce this via the `pre-rebase` hook (`scripts/setup-git-hooks.ps1`).
 - Keep docs honest: do not claim benchmarks, screenshots, signed builds or verification that did
   not run. Record limitations.
 
