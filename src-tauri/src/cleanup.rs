@@ -1134,7 +1134,25 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
             }
         }
     }
+
     Ok(report)
+}
+
+/// Cleans up quarantine batch files or updates manifest after registry restoration.
+pub fn cleanup_restored_registry_batch(dir: &Path) -> Result<(), String> {
+    if let Some(mut m) = read_manifest(dir) {
+        if m.items.is_empty() {
+            let _ = fs::remove_file(dir.join("registry_backup.reg"));
+            let _ = fs::remove_file(dir.join(JOURNAL_FILE));
+            let _ = fs::remove_file(dir.join(MANIFEST));
+            let _ = fs::remove_dir(dir);
+        } else {
+            let _ = fs::remove_file(dir.join("registry_backup.reg"));
+            m.registry_backup = None;
+            let _ = write_manifest(dir, &m);
+        }
+    }
+    Ok(())
 }
 
 fn batch_dir(root: &Path, run_id: &str) -> Result<PathBuf, String> {
