@@ -198,7 +198,7 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
    - Live metadata and broken status are re-read and re-verified immediately before deletion; altered, tampered, recovered, or no-longer-broken entries are refused without deletion (defeats TOCTOU races).
    - Generates collision-resistant plan IDs (`generate_collision_resistant_plan_id`) combining process ID, monotonic timestamps, and crypto nonces.
    - Creates a verified multi-type `.reg` backup in quarantine, writes a durable write-ahead recovery journal (`recovery_journal.jsonl`) and manifest (`manifest.json`), and respects backend read-only mode.
-   - Supports verified in-app restoration of quarantined registry backups via native `reg.exe import` (`restore_registry_backup` IPC command).
+   - Supports verified in-app restoration of quarantined registry backups via native `winreg` restoration (`restore_registry_backup` IPC command) with SHA-256 checksum binding, section scope restriction, and silent overwrite prevention.
    - System-protected entries, root uninstall keys, altered paths, and replay attacks are refused.
    - Hunter Mode separates cursor targeting from application discovery; targets match against cached in-memory apps in under 1 µs, eliminating repeating disk/registry scans.
    - Hunter process snapshots and app snapshots are completely isolated into dedicated state maps (`hunter_snapshots`, `hunter_app_snapshots`) using unique opaque tokens (`hunter-target-<nanos>-<nonce>-<pid>`), ensuring concurrent Hunter cursor polling never overwrites or mutates active Uninstaller process snapshots.

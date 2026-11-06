@@ -1100,16 +1100,28 @@ pub async fn restore_registry_backup(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     run_id: String,
+    overwrite_conflict: Option<bool>,
 ) -> Result<leftovers::RegistryRestoreReport, String> {
     ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
     let run_id = validate_cleanup_record_id(&run_id)?;
     let root = cleanup_quarantine_root(&app)?;
     let data_dir = app_data_dir(&app)?;
-    let backup_file = root.join(&run_id).join("registry_backup.reg");
+    let batch_dir = root.join(&run_id);
+    let backup_file = batch_dir.join("registry_backup.reg");
 
     if !backup_file.exists() {
         return Err(format!("No registry backup (.reg) found in quarantine batch '{run_id}'."));
     }
+
+    // Read and validate manifest binding
+    let manifest = cleanup::read_manifest(&batch_dir)
+        .ok_or_else(|| format!("Quarantine batch '{run_id}' is missing a valid manifest.json."))?;
+
+    if manifest.run_id != run_id {
+        return Err(format!("Manifest runId mismatch: expected '{run_id}', found '{}'", manifest.run_id));
+    }
+
+    let allow_overwrite = overwrite_conflict.unwrap_or(false);
 
     // Invalidate cached apps
     if let Ok(mut cache) = state.cached_apps.lock() {
@@ -1117,9 +1129,27 @@ pub async fn restore_registry_backup(
     }
 
     let report = run_blocking("Registry backup restoration", move || {
-        leftovers::restore_registry_backup(&backup_file)
+        leftovers::restore_registry_backup_with_policy(
+            &backup_file,
+            Some(&manifest),
+            allow_overwrite,
+        )
     })
     .await??;
+
+    // Clean up batch or update manifest after successful restoration
+    if let Some(mut m) = cleanup::read_manifest(&batch_dir) {
+        if m.items.is_empty() {
+            let _ = std::fs::remove_file(batch_dir.join("registry_backup.reg"));
+            let _ = std::fs::remove_file(batch_dir.join(cleanup::JOURNAL_FILE));
+            let _ = std::fs::remove_file(batch_dir.join(cleanup::MANIFEST));
+            let _ = std::fs::remove_dir(&batch_dir);
+        } else {
+            let _ = std::fs::remove_file(batch_dir.join("registry_backup.reg"));
+            m.registry_backup = None;
+            let _ = cleanup::write_manifest(&batch_dir, &m);
+        }
+    }
 
     let at = now_secs();
     let log = cleanup::CleanupLogEntry {

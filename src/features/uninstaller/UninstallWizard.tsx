@@ -66,6 +66,7 @@ export function UninstallWizard({
   const [preparingBrokenPlan, setPreparingBrokenPlan] = useState(false);
   const [restoringRegistry, setRestoringRegistry] = useState(false);
   const [registryRestoreResult, setRegistryRestoreResult] = useState<string | null>(null);
+  const [registryConflict, setRegistryConflict] = useState(false);
 
   const activeAppId = useRef<string | null>(null);
   activeAppId.current = app?.id ?? null;
@@ -285,17 +286,22 @@ export function UninstallWizard({
     return "neutral";
   };
 
-  const handleRestoreRegistry = async () => {
+  const handleRestoreRegistry = async (overwrite = false) => {
     if (!cleanReport?.runId || restoringRegistry) return;
     setRestoringRegistry(true);
     setRegistryRestoreResult(null);
     try {
-      const rep = await api.restoreRegistryBackup(cleanReport.runId);
+      const rep = await api.restoreRegistryBackup(cleanReport.runId, overwrite);
       setRegistryRestoreResult(
         `Successfully restored ${rep.keysRestored} registry key(s) and ${rep.valuesRestored} value(s) from backup.`
       );
+      setRegistryConflict(false);
     } catch (err) {
-      setRegistryRestoreResult(`Registry restoration failed: ${errorMessage(err)}`);
+      const msg = errorMessage(err);
+      setRegistryRestoreResult(`Registry restoration failed: ${msg}`);
+      if (msg.toLowerCase().includes("conflict") || msg.toLowerCase().includes("already exists")) {
+        setRegistryConflict(true);
+      }
     } finally {
       setRestoringRegistry(false);
     }
@@ -1009,13 +1015,23 @@ export function UninstallWizard({
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             {cleanReport?.registryBackupPath && !registryRestoreResult?.includes("Successfully") && (
-              <Button
-                variant="secondary"
-                onClick={handleRestoreRegistry}
-                loading={restoringRegistry}
-              >
-                Restore Registry Now
-              </Button>
+              registryConflict ? (
+                <Button
+                  variant="danger"
+                  onClick={() => handleRestoreRegistry(true)}
+                  loading={restoringRegistry}
+                >
+                  Overwrite & Restore
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  onClick={() => handleRestoreRegistry(false)}
+                  loading={restoringRegistry}
+                >
+                  Restore Registry Now
+                </Button>
+              )
             )}
             <Button variant="primary" onClick={onClose}>
               Done

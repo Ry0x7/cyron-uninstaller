@@ -85,14 +85,15 @@ pub fn resolve_target_from_point(
             (None, None)
         };
 
-        // Always generate a unique opaque target token to prevent collisions with uninstaller snapshots
+        // Always generate a unique opaque target token using OS-backed cryptographic entropy
         static TARGET_NONCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let nonce = TARGET_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let count = TARGET_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let now_nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let hunter_target_id = format!("hunter-target-{now_nanos}-{nonce}-{pid}");
+        let crypto_nonce = crate::leftovers::generate_crypto_nonce(8);
+        let hunter_target_id = format!("hunter-target-{now_nanos}-{count}-{pid}-{crypto_nonce}");
 
         let can_terminate = !is_critical && creation_time > 0;
 

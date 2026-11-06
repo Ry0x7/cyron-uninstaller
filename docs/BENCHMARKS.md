@@ -57,11 +57,12 @@ Measured on Windows 11 x64 using `src-tauri/examples/hunter_benchmark.rs` and `s
 
 | Operation | Sample Count | Min | Mean | p50 (Median) | p95 | p99 |
 |---|---|---|---|---|---|---|
-| **Win32 Window Resolution** (`WindowFromPoint` + `GetWindowThreadProcessId` + `QueryFullProcessImageNameW`) | 100 iterations | 0.3 µs | 0.8 µs | 0.7 µs | 1.5 µs | 2.1 µs |
-| **In-Memory Target Matching** (`resolve_target_from_point` with cached inventory) | 100 iterations | 520.1 µs | 745.2 µs | 737.4 µs | 860.5 µs | 1,180.2 µs |
-| **Cold Uncached Application Discovery** (`apps::discover_apps()`) | 5 runs | 38.2 ms | 43.1 ms | 42.8 ms | 47.9 ms | 51.4 ms |
+| **Win32 Window Resolution** (`WindowFromPoint` + `GetWindowThreadProcessId` + `QueryFullProcessImageNameW`) | 1,000 iterations | 0.5 µs | 1.9 µs | 0.6 µs | 1.0 µs | 49.2 µs |
+| **In-Memory Target Matching** (`resolve_target_from_point` with cached inventory) | 1,000 iterations | 638.8 µs | 751.3 µs | 674.8 µs | 1,215.0 µs | 1,420.9 µs |
+| **Cold Uncached Application Discovery** (`apps::discover_apps()`) | Full scan | 38.2 ms | 56.4 ms | 62.0 ms | 70.1 ms | 78.5 ms |
 
 ### Key Benchmark Findings:
-1. **Targeting Responsiveness:** By separating cursor targeting from disk-wide application discovery and matching against in-memory cached inventory (`state.cached_apps`), targeting latency is reduced from ~43 ms per poll to under 1 ms (p50: 737 µs), achieving over a **50× speedup**.
-2. **Win32 Cursor Inspection Overhead:** Win32 `WindowFromPoint` and process image queries consume less than 1 µs median, allowing smooth 60–120 FPS cursor tracking with zero UI stutter.
-3. **Memory Footprint Stability:** Working set memory growth measured before and after 100 rapid targeting resolution cycles: **0 KB delta** (zero memory leaks, stable allocations).
+1. **Targeting Responsiveness:** By separating cursor targeting from disk-wide application discovery and matching against in-memory cached inventory (`state.cached_apps`), backend matching executes in under 1 ms (p50: ~675 µs), eliminating 60+ ms repeated inventory re-scans.
+2. **Win32 Cursor Inspection Overhead:** Native Win32 `WindowFromPoint` and process queries consume ~0.6 µs median backend execution time, keeping CPU impact minimal for the 200 ms non-overlapping UI polling loop.
+3. **Memory Footprint Stability:** Measured across 1,000 continuous targeting checks, working set memory variance remains strictly bounded within operating system paging and allocator pooling bounds (< 5 MB variance).
+4. **IPC Throttling Boundary:** Native backend targeting is sub-millisecond; total IPC round-trip adds ~1-3 ms serialization and dispatch in WebView2, throttled at 200 ms non-overlapping intervals in the UI layer.

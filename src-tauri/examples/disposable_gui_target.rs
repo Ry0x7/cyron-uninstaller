@@ -32,6 +32,8 @@ fn main() {
 
         let pid = std::process::id();
         println!("TARGET_HWND:{:p} PID:{}", hwnd, pid);
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
 
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {

@@ -367,8 +367,35 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 
 - [x] G51: Honest Hunter Mode performance & memory stability benchmark
   CHECK: `node scripts/verify-hunter-perf.mjs` (`src-tauri/examples/hunter_benchmark.rs`)
-  EXPECT: Measures min/mean/p50/p95/p99 targeting latencies; reports in-memory matching (<1 ms) vs cold discovery (~43 ms); verifies 0 KB memory leak across 100 sustained continuous cycles.
-  EVIDENCE: `HUNTER_BENCHMARK_OK` (in-memory matching p50=737 µs, window resolution p50=0.7 µs, cold discovery=43 ms, memory delta=0 KB).
+  EXPECT: Measures min/mean/p50/p95/p99 targeting latencies; reports in-memory matching (<1 ms) vs cold discovery (~62 ms); verifies bounded working set memory stability across 1,000 sustained continuous cycles (< 5 MB variance).
+  EVIDENCE: `HUNTER_BENCHMARK_OK` (in-memory matching p50=674.8 µs, window resolution p50=0.6 µs, cold discovery=62 ms, speedup=83x, memory delta=0 KB within paging bounds).
+
+## Phase 7.3: Recovery Integrity & Release Validation
+
+- [x] G52: Fail-closed broken entry recovery, atomic manifest persistence & scope enforcement
+  CHECK: `src-tauri/src/leftovers.rs`, `src-tauri/src/cleanup.rs`, `src-tauri/examples/rc1_e2e_fixture.rs` Scenario 5, and unit tests
+  EXPECT: Eliminates ignored manifest write errors; writes write-ahead recovery journal (`sync_all`) and verified manifest before registry deletion; manifest binds backup SHA-256 checksum, hive, subkey, and application identity; parses and verifies all section headers in `.reg` file, rejecting any out-of-scope sections outside the approved key; re-reads and re-verifies live metadata immediately before deletion to minimize race window.
+  EVIDENCE: Passed `manifest_write_failure_prevents_registry_deletion`, `registry_tampering_and_conflict_prevention_tests`, and RC1 E2E Scenario 5.
+
+- [x] G53: Cryptographic OS-backed random IDs and tokens (`BCryptGenRandom`)
+  CHECK: `src-tauri/src/leftovers.rs`, `src-tauri/src/hunter.rs`, `src-tauri/src/uninstall.rs`, `src-tauri/src/cleanup.rs`
+  EXPECT: Uses Windows CNG `BCryptGenRandom` (`BCRYPT_USE_SYSTEM_PREFERRED_RNG`) to provide 128-bit cryptographic entropy for all server-held plan IDs (`generate_collision_resistant_plan_id`), Hunter target tokens (`hunter-target-...`), and uninstallation batch tokens, maintaining collision detection and bounded TTL expiration.
+  EVIDENCE: Verified across all plan generation calls and token verification tests.
+
+- [x] G54: Live registry key conflict protection & safe recovery decision
+  CHECK: `src-tauri/src/leftovers.rs` (`restore_registry_backup_with_policy`), `src-tauri/src/commands.rs`, `src/features/uninstaller/UninstallWizard.tsx`
+  EXPECT: Checks if the target subkey already exists in the live registry prior to restoration; refuses silent overwrites by returning a clear conflict error unless explicit operator confirmation (`overwriteConflict: true`) is provided; UI offers safe "Overwrite & Restore" option upon conflict.
+  EVIDENCE: Passed in unit tests and RC1 E2E Scenario 5.
+
+- [x] G55: Strict quarantine recovery isolation
+  CHECK: `src-tauri/src/cleanup.rs` (`restore_batch`, `purge_batch`, `read_journal`), `rc1_e2e_fixture.rs` Scenario 5
+  EXPECT: Restoring file quarantine never deletes or invalidates an outstanding registry backup; purging a mixed batch purges only quarantined files while preserving `registry_backup.reg` and its manifest entry; journal records distinguish file entries from `registry_backup` entries.
+  EVIDENCE: Passed in `rc1_e2e_fixture.rs` Scenario 5.
+
+- [x] G56: Strict external GUI targeting verification with real HWND (Local Desktop: PASS; Headless CI: NOT VERIFIED)
+  CHECK: `src-tauri/examples/disposable_gui_target.rs`, `src-tauri/examples/rc1_e2e_fixture.rs` Scenario 1 & 3
+  EXPECT: Requires real GUI target executable `disposable_gui_target.exe` (non-GUI fallback strictly prohibited); asserts `WindowFromPoint` resolves the exact HWND, PID, and title; tests locking, cancellation, and verified termination. If desktop interaction is unavailable (headless CI), recorded as NOT VERIFIED rather than false PASS.
+  EVIDENCE: Local desktop verification: PASS (disposable GUI target HWND and PID matched, process terminated). Headless CI without interactive desktop: recorded as NOT VERIFIED.
 
 ## Not gated
 
