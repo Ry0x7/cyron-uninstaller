@@ -105,7 +105,7 @@ function Sidebar({
         </span>
         <span className="brand-text">
           <span className="brand-name">Cyron</span>
-          <span className="brand-sub">Phase 01 · Read-only</span>
+          <span className="brand-sub">Read-only analysis</span>
         </span>
       </button>
 
@@ -136,7 +136,7 @@ function Sidebar({
           <IconShield size={14} />
           <span>
             <strong>No deletions</strong>
-            Phase 1 scans only. Files stay untouched.
+Read-only scans. Files stay untouched.
           </span>
         </div>
 

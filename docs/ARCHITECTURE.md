@@ -2,12 +2,11 @@
 
 ## Purpose and boundary
 
-Cyron is a Tauri v2 desktop application for Windows. Phase 1 is read-only with respect to
-scanned/user data: the backend enumerates applications, measures folders, scans a disk tree and
-reports volumes. It does not clean scanned files, uninstall software, terminate processes or write
-registry values. `clear_history` removes only Cyron's own `history.json`, and history replacement
-can remove only a Cyron-created temporary file. The UI reflects that boundary instead of showing
-disabled fake cleanup/uninstall actions.
+Cyron is a Tauri v2 desktop application for Windows. It is read-only with respect to scanned/user
+data: the backend enumerates applications, measures folders, scans a disk tree, verifies duplicate
+files and reports storage categories and volumes. It does not clean scanned files, uninstall
+software, terminate processes or write registry values. `clear_history` removes only Cyron's own
+`history.json`, and history replacement can remove only a Cyron-created temporary file.
 
 The product target is a Revo Uninstaller + BleachBit + WinDirStat replacement with better risk
 communication for non-technical users. Phase 3 adds cleaning, Phase 4 the uninstall engine.
@@ -18,16 +17,19 @@ communication for non-technical users. Phase 3 adds cleaning, Phase 4 the uninst
 | --- | --- |
 | Window/shell | Tauri v2, one native window (`main`), 1320×860, minimum 1000×680 |
 | Frontend | React 19 + TypeScript, Vite 7, no router |
-| Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys` |
-| Storage | localStorage (preferences), `history.json` in the Tauri app-data dir |
-| Frontend tests | Vitest, 32 tests |
-| Backend tests | `cargo test`; latest reported run: 38 passed, 1 ignored, plus the real-system integration test passed |
+| Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
+| Storage | localStorage (preferences, tree width), `history.json` in the Tauri app-data dir |
+| Frontend tests | Vitest, 51 tests in 6 files |
+| Backend tests | `cargo test`: 84 passed (73 unit, 5 read-only, 1 real-system, 5 stress), 3 ignored |
 
-Native WebView2 APIs used by the backend:
+Native APIs used by the backend:
 
 - `GetFileInformationByHandleEx(FileIdBothDirectoryInfo)` for directory enumeration.
+- Raw volume reads (`\\.\X:`) plus `DeviceIoControl`/`FSCTL_GET_NTFS_VOLUME_DATA`-style metadata for
+  MFT scanning.
 - `GetLogicalDrives`, `GetDriveTypeW`, `GetVolumeInformationW`, `GetDiskFreeSpaceExW` for volumes.
 - Win32 registry access through `winreg` for installed applications.
+- `GetTokenInformation` for an elevation check (the app never requests elevation).
 
 ## Repository layout
 
@@ -39,12 +41,13 @@ src/
   components/Icons.tsx        inline SVG icon set
   features/overview/          storage, applications, cleanup, recent activity
   features/uninstaller/       read-only inventory + application drawer
-  features/analyzer/          scan controls, Treemap, selection rail
+  features/analyzer/          scan controls, treemap, tree, filters, duplicates, storage
   features/cleaner/           cache inventory and risk explanation (preview only)
   features/activity/          local scan history
   features/settings/          theme, scan scope, exclusions, safety copy
   lib/api.ts                  typed invoke wrapper + cached cache-inventory request
   lib/types.ts                shared IPC contract (camelCase)
+  lib/analyzerFilters.ts      tree/file filtering, sorting and filtered totals
   lib/treemap.ts              squarified treemap layout
   lib/categories.ts           extension → category → color
   lib/risk.ts                 safe / caution / protected vocabulary
@@ -55,14 +58,20 @@ src/
 src-tauri/
   src/apps.rs                 uninstall-registry discovery
   src/fs.rs                   native directory enumeration + std::fs fallback
-  src/scan.rs                 bounded scanner and folder measurement
+  src/mft.rs                  NTFS MFT reader and subtree construction
+  src/scan.rs                 streaming walker, method selection, aggregation
+  src/duplicates.rs           size buckets, partial + full hashing
+  src/storage.rs              categories, age buckets, insights
   src/caches.rs               cache catalog, env expansion, measurement
   src/volumes.rs              local volume capacity
   src/history.rs              app-data history persistence
-  src/commands.rs             validated Tauri command layer
+  src/commands.rs             validated Tauri command layer and scan registry
   src/lib.rs                  state, dialog plugin, command registration
   tests/real_system.rs        live registry/cache/scan integration test
-scripts/                      MSVC env shim, build/bundle/binary/smoke checks
+  tests/read_only.rs          destructive-API audit and safety tests
+  tests/stress_scan.rs        wide/deep/denied/cancellation stress tests
+  examples/scan_bench.rs      benchmark binary used by scripts/bench-scan.mjs
+scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark checks
 ```
 
 ## Backend modules
@@ -71,12 +80,15 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke checks
 | --- | --- |
 | `apps.rs` | Enumerates `HKLM`/`HKCU` uninstall keys in the 64-bit view and the `WOW6432Node` 32-bit view, parses values, filters non-products, flags protected system locations, deduplicates duplicate registrations and sorts by name. |
 | `fs.rs` | Opens a directory with `FILE_LIST_DIRECTORY` + `FILE_FLAG_BACKUP_SEMANTICS` and reads `FILE_ID_BOTH_DIR_INFO` batches. Returns name, attributes, logical size, `AllocationSize`, file id and last-write time. Falls back to `std::fs` when the native path fails or exceeds an 8 MiB listing buffer. |
-| `scan.rs` | Depth-first walk with depth/error/stat-output/tree limits. Applies exclusions, hidden/system filtering and reparse skipping; aggregates totals, extension stats and largest files; tracks hard-link ids up to one million; emits throttled progress; honours a cancellation flag; prunes the tree that crosses IPC. `measure_path` reuses the walker without a tree or cancellation. Some per-directory entries/subdirectories and the extension map still scale with input, so memory is not strictly bounded for arbitrarily large directories/scans. |
+| `mft.rs` | Reads the NTFS boot sector and `$MFT` run list, validates record counts against a derived memory budget, applies update-sequence fixups, parses `FILE_NAME`/`$DATA`/`$STANDARD_INFORMATION`, deduplicates hard links with a record bitset, and builds the requested subtree. Cancellation and progress are polled during parsing. Any failure returns a fallback reason. |
+| `scan.rs` | Chooses the scan method, then runs the streaming directory walk: depth/error/stat-output/tree caps, exclusions, hidden/system filtering, reparse skipping, totals, extension stats, largest files, hard-link tracking, throttled progress and cancellation. Builds `StorageReport` alongside the tree. `measure_path` reuses the walker without a tree or cancellation. |
+| `duplicates.rs` | Walks a root for files at or above `minSize`, groups by size, confirms groups with 4 KiB head/tail SHA-256, then full streaming SHA-256. Tracks hard links by file id, polls cancellation, emits `cyron-duplicate-progress`, caps candidates/groups/files and reports truncation. |
+| `storage.rs` | Classifies bytes into ten categories by known root and extension, marks known vs inferred confidence, buckets files by age, and derives up to six explained insights (large, old, developer-heavy). |
 | `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `commands.rs` | Path/job validation, background execution, scan cancel registry, event emission, history recording, Explorer reveal and measurement commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState { scans: Mutex<HashMap<job_id, Arc<AtomicBool>>> }` and the nine commands. |
+| `commands.rs` | Path/job validation, background execution, the scan and duplicate-scan cancel registries, event emission, history recording, Explorer reveal and measurement commands. |
+| `lib.rs` | Registers the dialog plugin, `AppState { scans, duplicate_scans }` and the eleven commands. |
 
 ## IPC surface
 
@@ -88,22 +100,28 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `list_installed_apps` | — | `AppInventory { apps, warnings }` | Runs on a blocking thread. |
 | `list_volumes` | — | `VolumeInfo[]` | Cheap synchronous Win32 queries. |
 | `list_caches` | — | `CacheInventory` | Blocking thread. Not written to history. |
-| `start_scan` | `jobId`, `path`, `options` | `ScanResult` | Runs on a blocking thread; emits `cyron-scan-progress`. |
+| `start_scan` | `jobId`, `path`, `options` | `ScanResult` | Blocking thread; emits `cyron-scan-progress`. `options.method` is `auto`, `mft` or `directory`. |
 | `cancel_scan` | `jobId` | — | Sets the registered flag; unknown ids are ignored. |
+| `start_duplicate_scan` | `jobId`, `path`, `options` | `DuplicateReport` | Blocking thread; emits `cyron-duplicate-progress`. Options: `minSize`, `includeHidden`, `exclusions[]`. |
+| `cancel_duplicate_scan` | `jobId` | — | Sets the registered duplicate flag. |
 | `measure_path` | `path` | `Measured` | Directory only; no tree and no progress events. |
 | `reveal_path` | `path` | — | Requires an existing path; opens `explorer.exe` with `/select,` for files. |
 | `get_history` | — | `HistoryEntry[]` | Newest first. |
-| `clear_history` | — | — | Removes `history.json`; a missing file is not an error. This is the only user-visible deletion in the
-current command surface, and it is limited to Cyron's own history file. |
+| `clear_history` | — | — | Removes `history.json`; a missing file is not an error. The only user-visible deletion in the current command surface, limited to Cyron's own history file. |
 
-Progress event payload (`cyron-scan-progress`):
+Both scan registries reject a job id that is already running instead of replacing its cancellation
+flag, so a cancel call cannot target a flag that no longer controls the running task.
+
+Progress event payloads:
 
 ```text
-{ jobId, files, dirs, bytes, currentDir }
+cyron-scan-progress       { jobId, files, dirs, bytes, currentDir }
+cyron-duplicate-progress   { jobId, phase(index|partial|full), files, bytesHashed, currentPath }
 ```
 
-It is emitted at most every 120 ms and once more when the scan ends. The UI filters events by the
-active job id so a cancelled or superseded scan cannot overwrite the current view.
+Scan progress is emitted at most every 120 ms and once more when the scan ends; duplicate progress
+is throttled to 150 ms. The UI filters events by the active job id so a cancelled or superseded run
+cannot overwrite the current view.
 
 ## Data model
 
@@ -112,12 +130,22 @@ InstalledApp       id, name, version, publisher, installLocation, installDate,
                    uninstallString, quietUninstallString, displayIcon, estimatedSize,
                    hive, scope, architecture, isProtected
 
-ScanOptions        includeHidden, exclusions[], collectTree, maxDepth
+ScanOptions        includeHidden, exclusions[], collectTree, maxDepth, method
 ScanNode           name, path, kind(dir|file|group), size, allocated, fileCount,
                    dirCount, modified, children[]
 ScanResult         jobId, rootPath, root, totalSize, totalAllocated, fileCount,
                    dirCount, dedupedFiles, skippedReparse, errors[], extensionStats[],
-                   largestFiles[], elapsedMs, cancelled, truncated
+                   largestFiles[], outcome, method, methodNote, storage,
+                   elapsedMs, cancelled, truncated
+StorageReport      categories[]{key,label,detail,bytes,fileCount,known}, ageBuckets[],
+                   insights[]{kind,title,detail,bytes,fileCount,samplePath}
+ScanMethod         auto | mft | directory
+
+DuplicateOptions   minSize, includeHidden, exclusions[]
+DuplicateGroup     id, size, wasted, files[]{path,size,allocated,modified,hardLink}
+DuplicateReport    jobId, rootPath, groups[], totalGroups, totalFiles, totalWasted,
+                   candidateFiles, hashedFiles, scannedFiles, errors[], elapsedMs,
+                   cancelled, truncated
 
 CacheTarget        id, tool, label, path, exists, size, allocated, fileCount, dirCount,
                    risk(safe|caution|protected), category(ai|ide|packages|containers|windows),
@@ -129,50 +157,46 @@ HistoryEntry       id, kind, title, detail, at, bytes, items,
                    status(completed|cancelled|failed)
 ```
 
-`size` is logical file length. `allocated` is the allocation from the native directory record;
-under the `std::fs` fallback it is approximated using logical size. Native file ids deduplicate
-allocated bytes up to the one-million-id tracking cap; fallback entries and later ids beyond that
-cap cannot guarantee hard-link deduplication.
+`size` is logical file length. `allocated` is the allocation from the native directory record or
+MFT `$DATA`; under the `std::fs` fallback it is approximated using logical size. Native file ids
+deduplicate allocated bytes up to the one-million-id tracking cap; the MFT reader counts each
+record once.
 
-## Installed-application discovery
+## Scan methods
 
-Registry roots read through the 64-bit view (`KEY_WOW64_64KEY`):
+### Selection
 
-- `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
-- `HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
-- `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
-- `HKCU\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
+`method: auto` selects MFT only when the root is a drive root (`C:\`, not `C:\Windows`). MFT reads
+the volume's whole record set, so subfolder scans are measurably slower with it (System32: 0.28 s
+walk vs 3.91 s MFT). An explicit `mft` request is honoured and falls back with a reason when the
+volume cannot be read. `method`, `methodNote` and `outcome` in `ScanResult` always describe what
+actually ran.
 
-Each subkey becomes a candidate with `id = "<hive>|<key name>"`. An entry is hidden when it has no
-display name, is a system component, has a parent key, is an update/hotfix/security update, starts
-with “Update for”, or is only a `KB` number. Duplicate registrations are merged by lowercase name
-+ version + normalized install location, preferring `machine-64`, then `machine-32`, then user
-entries. `isProtected` is a UI hint for entries under `%WINDIR%` or Windows-branded components; it
-does not grant any operation (Phase 1 has none). `EstimatedSize` is read as a DWORD or a string of
-kilobytes and reported as bytes; a missing value stays `null` rather than being guessed.
+### MFT reader
 
-Windows Store/MSIX applications are not enumerated in Phase 1. Application icons are not extracted.
+1. Open `\\.\X:` with read access. Failure (typically not elevated) returns a fallback reason.
+2. Read the NTFS boot sector for bytes/sector, sectors/cluster and the `$MFT` cluster.
+3. Read record 0, parse its `$DATA` run list, and read the `$MFT` record count from the volume.
+4. Reject a record count above the derived budget (768 MiB / per-record cost = 4,910,404 records)
+   **before** allocating, then allocate once.
+5. Stream records through one fixed 1,024-byte buffer, applying the update-sequence fixup with a
+   fixed 16-slot stack array, and parse file name, data and standard-information attributes.
+6. Mark seen records in a bitset so hard links do not inflate totals; retain at most 200 children
+   per directory and 100,000 tree nodes.
+7. Accumulate the requested subtree depth-first, then emit the same `ScanResult` shape as the walk.
 
-## Filesystem scanner
+Cancellation is polled every 4,096 records and during subtree accumulation. A cancelled MFT scan
+returns a cancelled result rather than an error.
 
-### Enumeration
+### Directory walk
 
 `fs::read_dir` opens the directory with `FILE_LIST_DIRECTORY` and shared read/write/delete access,
 then calls `GetFileInformationByHandleEx` with `FileIdBothDirectoryInfo`. The first call of each
 handle uses `FileIdBothDirectoryRestartInfo`; subsequent calls continue the listing. The 64 KiB
 buffer is 8-byte aligned (`Vec<u64>`), grows on `ERROR_MORE_DATA`/`ERROR_BUFFER_OVERFLOW` up to
-8 MiB and fails into the `std::fs` fallback beyond that. Each record yields:
+8 MiB and fails into the `std::fs` fallback beyond that.
 
-- `EndOfFile` as logical size;
-- `AllocationSize` as disk allocation (cluster-aware, sparse/compressed aware);
-- `FileId` as a stable per-volume identity for hard-link deduplication;
-- attributes for directory, hidden, system and reparse checks;
-- `LastWriteTime` converted from FILETIME to Unix seconds.
-
-The fallback reports logical size as allocated and provides no file id; it is marked implicitly by
-`file_id = None`, so hard links can only be deduplicated on the native path.
-
-### Walk rules
+Walk rules:
 
 1. Refuse to walk a non-directory and record one error.
 2. Skip hidden/system entries when `includeHidden` is false.
@@ -185,40 +209,75 @@ The fallback reports logical size as allocated and provides no file id; it is ma
 6. Count every directory visited in `dirCount`; a directory's own `dirCount` excludes itself.
 7. Poll the cancellation flag before each directory and each entry. A cancelled scan returns the
    partial tree and `cancelled: true` instead of an error.
+8. Stream entries: each directory's entries are processed as they are read, not collected into a
+   vector first.
 
-### Sizes and hard links
+### Sizes, hard links and bounds
 
 Files increment `fileCount` and logical `size` every time a path is seen. The file id is inserted
-into a scan-wide `HashSet<u64>` up to a cap of 1,000,000 ids; only the first occurrence adds
-`AllocationSize` to `allocated`. Repeats increment `dedupedFiles`. Once the cap is reached, existing
-ids are still recognized but new ids are not retained, one warning is recorded, and later links
-with new ids may be counted more than once. Extension size totals use the unique flag while ids are
-tracked; extension file counts include every path. Junction targets are never walked. The `std::fs`
-fallback has no file id, so hard-link deduplication cannot be guaranteed for those entries.
+into a scan-wide set up to 1,000,000 ids; only the first occurrence adds allocation to
+`allocated`, and repeats increment `dedupedFiles`. Once the cap is reached, existing ids are still
+recognized, one warning is recorded, and later links with new ids may count more than once. The
+`std::fs` fallback has no file id and cannot dedupe.
 
-### Output caps and IPC tree
+The walk retains at most 40 individual file nodes per folder plus an aggregate group, 200 children
+per folder in the IPC tree, 100,000 nodes in total, 4,096 extension keys (with an overflow bucket
+for the rest), the top 24 extension stats and the top 100 largest files. Aggregate totals cover the
+whole walk.
 
-- At most 40 individual file nodes are retained per directory, plus an aggregate group for the
-  smaller file nodes. Directory children are collected separately and are not capped during the
-  walk.
-- `prune_tree` keeps at most 200 children per directory in the IPC result, keeps the largest,
-  aggregates the rest into a `group` node, clears children below depth 8 and sets `truncated` when
-  anything is dropped.
-- Returned extension statistics are limited to the top 24 and largest files to the top 100 by
-  logical size. Totals are computed across the full walk before pruning. The underlying extension
-  map and per-directory entry vector are not capped, so the scanner does not guarantee a strict
-  upper memory bound for an arbitrarily large scan.
-
-### Progress
+### Progress and measurement
 
 `maybe_progress` runs at directory entry and every 512 files within a large single directory; it
 is throttled to 120 ms. A final forced event closes the scan. Counters are real walker counters,
-not estimates. `elapsedMs` is measured with `Instant`.
+not estimates. `elapsedMs` is measured with `Instant`. `measure_path` uses the walker without tree
+construction, progress or cancellation and backs *Measure folder* plus every cache measurement.
 
-### Measurement
+## Duplicate verification
 
-`measure_path` uses the same walker without tree construction, progress or cancellation. It backs
-the Uninstaller's *Measure folder* action and every cache target measurement.
+1. Walk the root (same exclusion, hidden and reparse rules), collecting files at or above the
+   minimum size (default 1 MiB), capped at 1,000,000 candidates.
+2. Group candidates by exact byte size; size-unique files are dropped without a read.
+3. For each size group with more than one file, hash the first and last 4 KiB (plus a full hash for
+   files smaller than 8 KiB). This separates most same-size files cheaply.
+4. Full-content streaming SHA-256 (1 MiB buffer) confirms each remaining subgroup.
+5. Emit groups with `wasted = size × (non-hard-link copies − 1)`. Hard links are listed but do not
+   add recoverable bytes. A file that changes size or timestamp during hashing is reported rather
+   than trusted.
+6. Caps: 200 groups and 50 files per group in the report, with `truncated: true`. Cancellation
+   returns what was proven so far and `cancelled: true`.
+
+The feature is read-only; there is no delete, move or quarantine command.
+
+## Storage intelligence
+
+`storage.rs` classifies every scanned byte into one of ten fixed keys (applications, games,
+downloads, documents, media, system, developer, ai, caches, other). Classification uses the path
+relative to the scan root and known folder names (`Program Files`, `SteamLibrary`, `Downloads`,
+`Documents`, `.cargo`, `.ollama`, `AppData\Local\Docker`, etc.) plus extension families. Each
+category carries `known: bool`: false when any bytes were inferred rather than matched to a known
+location. Age buckets are 0–30, 31–90, 91–365, 365+ and unknown. Insights highlight large files,
+old files, developer-heavy folders and AI/model storage with a size and a sample path. Category
+descriptions come from `category_meta`, so the UI never shows a category without an explanation of
+what it contains.
+
+## Installed-application discovery
+
+Registry roots read through the 64-bit view (`KEY_WOW64_64KEY`):
+
+- `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
+- `HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
+- `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
+- `HKCU\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`
+
+Each subkey becomes a candidate with `id = "<hive>|<key name>"`. An entry is hidden when it has no
+display name, is a system component, has a parent key, is an update/hotfix/security update, starts
+with "Update for", or is only a `KB` number. Duplicate registrations are merged by lowercase name
++ version + normalized install location, preferring `machine-64`, then `machine-32`, then user
+entries. `isProtected` is a UI hint for entries under `%WINDIR%` or Windows-branded components; it
+does not grant any operation. `EstimatedSize` is read as a DWORD or a string of kilobytes and
+reported as bytes; a missing value stays `null` rather than being guessed.
+
+Windows Store/MSIX applications are not enumerated. Application icons are not extracted.
 
 ## Cache catalog
 
@@ -260,27 +319,34 @@ pass; `invalidateCaches()` forces the next request to run again.
 
 - **Overview** joins volumes, application inventory, cache inventory and history. All figures come
   from those responses; loading, error and empty states are explicit.
-- **Uninstaller** filters/sorts the registry inventory, shows missing sizes as “—” and opens a
+- **Uninstaller** filters/sorts the registry inventory, shows missing sizes as "—" and opens a
   drawer with metadata, real folder measurement and Explorer reveal.
-- **Analyzer** starts from volumes or the native folder picker (`@tauri-apps/plugin-dialog`),
-  subscribes to progress events filtered by a generated UUID, supports cancel and cancels on
-  unmount. Results are nodes held in a stack for breadcrumbs.
+- **Analyzer** starts from volumes or the native folder picker, subscribes to progress events
+  filtered by a generated job id, supports cancel and cancels on unmount. Results are nodes held in
+  a stack for breadcrumbs. Three modes: **Map**, **Duplicates**, **Storage**.
 - **Treemap** measures its container with `ResizeObserver`, lays out children with
   `lib/treemap.ts`, and renders absolutely positioned buttons on a fixed dark canvas. File tiles
-  are colored by extension category; folder tiles are neutral, aggregate nodes amber. Labels are
-  shown only when the tile fits them; click selects, double-click/Enter drills, hover shows the
-  share of the parent.
+  are colored by extension category; folder tiles are neutral, aggregate nodes amber. Click
+  selects, double-click/Enter drills, hover shows the share of the parent. Selection is shared with
+  the tree and details.
+- **Tree column** (`TreeView.tsx`) is a persistent, resizable (220–520 px, persisted) column with
+  virtualized rows, ARIA tree keyboard navigation, expand/collapse, scroll-to-selection and reset
+  when the scan root changes. It renders the pruned IPC tree, not a complete file listing.
+- **Filters** (`AnalyzerFilters.tsx`, `lib/analyzerFilters.ts`) filter by name, minimum size, age,
+  extension and type, and sort by size, name, files or modified date. Filtered totals are labelled
+  as such.
+- **Duplicates panel** cancels its job and resets when the scan scope changes, so an old folder's
+  report cannot be shown as the new folder's result.
+- **Storage panel** presents categories, confidence, age buckets and insights, and states that
+  observations are not removal guidance.
 - **Cleaner** groups existing cache targets by category, filters by risk/search, expands rows for
   the full path and consequence note, and separates protected data. There is no removal control.
-- **Activity** lists persisted disk scans, with a two-step clear confirmation.
+- **Activity** lists persisted disk scans, with a two-step clear confirmation that Escape cancels.
 - **Settings** validates exclusions (drive-letter or UNC paths, no wildcards), debounces saving by
   450 ms, and resets to defaults.
 
 The treemap layout is pure TypeScript (`squarify`) with no chart dependency; extension families,
-colors and labels live in `lib/categories.ts`. The analyzer rail's **Tree** tab renders the pruned
-scan tree (`features/analyzer/TreeView.tsx`) with ARIA tree keyboard navigation, expands the
-ancestors of the treemap selection, scrolls it into view and caps visible rows at 500. It is the
-summarized IPC tree, not a complete file listing, and a persistent tree column is not implemented.
+colors and labels live in `lib/categories.ts`.
 
 ## Persistence
 
@@ -288,60 +354,72 @@ summarized IPC tree, not a complete file listing, and a persistent tree column i
 | --- | --- | --- |
 | Theme, scan scope, exclusions | `localStorage["cyron.settings.v1"]` | Until cleared by the user/profile reset |
 | Sidebar collapsed | `localStorage["cyron.sidebar.collapsed"]` | Same |
+| Tree column width | `localStorage["cyron.analyzer.treeWidth"]` | Same |
 | Scan history | `<app_data_dir>/history.json` | Until cleared from Activity or the profile is removed |
-| Scan results | Rust memory / React state | Session only |
+| Scan and duplicate results | Rust memory / React state | Session only |
 
-Only disk scans write history. Cache discovery is a measurement used by Overview and Cleaner and
-is deliberately not logged, to avoid an entry every time the app starts.
+Only disk scans write history. Cache discovery and duplicate runs are measurements and are not
+logged.
 
 ## Security and safety constraints
 
 - No command deletes scanned/cache/user files, uninstalls applications, terminates processes or
-  writes registry values. `clear_history` deletes only Cyron's own history log; history temp-file
-  cleanup is likewise limited to a Cyron-created file.
+  writes registry values. `clear_history` deletes only Cyron's own history log.
 - Command inputs are validated before use: job ids are 1–64 characters of `[A-Za-z0-9_-]`; paths
   must be non-empty, absolute, existing, canonicalized and (for scans) directories. Explorer
   arguments are passed as separate arguments, not interpolated into a shell string.
 - Reparse points are skipped during traversal, preventing cycle and mount-point escapes.
-- Scan depth, returned child counts, retained per-directory file nodes, largest-file output,
-  returned extension stats, errors, tracked file ids and native directory buffer have caps. The
-  underlying per-directory entry/subdirectory vectors and extension aggregation map can still grow
-  with the input; strict memory bounds for arbitrary directory sizes are not guaranteed.
+- Scan depth, returned child counts, retained nodes, file nodes, largest-file output, extension
+  stats and keys, errors, tracked file ids, the native directory buffer and the MFT record budget
+  are all capped.
 - The WebView runs with a strict CSP (`default-src 'self'`, IPC allowed, no remote scripts) and
   only the dialog-open capability is granted beyond Tauri core defaults.
 - No network API, telemetry, analytics or auto-update code is present.
-- The app does not request elevation. Folders the user cannot read are reported as scan errors.
+- The app does not request elevation. Without it, MFT is unavailable and the walk reports unreadable
+  folders instead of crashing.
 
 ## Performance characteristics and limits
 
-Scanning is single-threaded per request and runs off the UI thread via `spawn_blocking`; the UI only
-receives throttled counters and the final pruned tree. Memory includes the pruned-result candidate tree and capped hard-link set, but also an unbounded
-per-directory entry vector, directory-child vector and extension map; very large individual
-directories or unusually many extensions can therefore consume substantial memory. The native enumeration is designed to avoid a
-`stat`/`open` per file, but **no benchmark exists** and no WizTree-level comparison is claimed.
-MFT parsing is not implemented; Phase 2 is where performance work and benchmarks belong.
+Scans run off the UI thread via `spawn_blocking`; the UI receives throttled counters and the final
+pruned result. Measured on the development machine (warm cache, one run):
+
+| Target | Method | Time | Peak working set |
+| --- | --- | ---: | ---: |
+| `C:\` | MFT (elevated) | 14.52 s | 655.5 MiB |
+| `C:\` | directory walk | 155.24 s | 50.8 MiB |
+| `C:\Windows\System32` | MFT (elevated, whole-volume filter) | 3.91 s | 571.9 MiB |
+| `C:\Windows\System32` | directory walk | 0.28 s | 7.8 MiB |
+
+MFT trades memory for speed and only pays off at a drive root. The walk is streaming and bounded
+but slower; neither is a WizTree comparison. Details and caveats are in
+[docs/BENCHMARKS.md](BENCHMARKS.md).
 
 ## Testing and CI
 
-- `src/lib/*.test.ts` — treemap geometry (area, bounds, overlap), formatting, category mapping and
-  risk vocabulary: 32 tests (latest reported `npm test` run).
+- `src/lib/*.test.ts` — treemap geometry (area, bounds, overlap), formatting, category mapping,
+  risk vocabulary and analyzer filters: 51 tests.
 - Rust unit tests — registry filtering/deduplication/date and size parsing, native enumeration,
-  hard-link dedupe, exclusions, depth, cancellation, progress, stats, cache catalog validity and
-  protection rules, volume sanity, history ordering, command validation. Latest reported cargo run:
-  38 passed, 1 ignored; the real-system integration test also passed.
-- `src-tauri/tests/real_system.rs` — live registry count, live cache targets, a temporary fixture
-  tree with exact byte assertions.
+  hard-link dedupe, exclusions, depth, cancellation, progress, stats, output caps, MFT record
+  parsing/fixups/budget, duplicate verification (same/different content, equal edges, hard links,
+  minimum size, exclusions, cancellation, missing root), storage classification/age buckets/
+  insights, cache catalog validity and protection rules, volume sanity, history ordering, command
+  validation and duplicate-job registration.
+- `tests/real_system.rs` — live registry count, live cache targets, a temporary fixture tree with
+  exact byte assertions.
+- `tests/read_only.rs` — source audit for destructive APIs, junction skipping, hard-link dedupe,
+  missing path handling and protected catalog entries.
+- `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep
+  nesting, access-denied folders, exclusion subtree and cancellation.
 - `.github/workflows/ci.yml` — Windows CI for typecheck, Vitest, frontend build and `cargo test`.
-- `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs` — artefact checks used
-  by the Phase 1 acceptance ledger.
+- `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, `bench-scan.mjs` —
+  artefact checks and the benchmark harness.
 
 ## Deferred design work
 
-- MFT-based NTFS scanning with a safe fallback, plus measured benchmarks.
-- Folder tree view synchronized with the treemap (current UI synchronizes selection and
-  breadcrumbs, not a full column tree).
-- Duplicate detection with staged hash verification.
+- MFT scanning for volumes above the record budget (e.g. streaming aggregation without retaining all
+  records).
+- Store/MSIX application inventory and application icons.
+- Cold-cache benchmark methodology and multi-run statistics published from CI hardware.
 - Cleanup previews, deletion, rollback and operation logs (Phase 3).
-- Standard/advanced/force uninstall, scheduled uninstall queue, leftover registry/file detection,
-  process scanning and controlled termination (Phase 4).
-- MSIX/Store inventory, portable app detection, code signing and packaged installers (later).
+- Standard/advanced/force uninstall, uninstall queues, leftover file/registry detection and process
+  control (Phase 4).

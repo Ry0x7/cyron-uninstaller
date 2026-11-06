@@ -40,9 +40,38 @@ const ERROR_MORE_DATA: u32 = 234;
 const ERROR_BUFFER_OVERFLOW: u32 = 111;
 
 pub fn read_dir(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
-    match read_dir_native(path) {
-        Ok(entries) => Ok(entries),
-        Err(_native_error) => read_dir_fallback(path),
+    let mut entries = Vec::new();
+    for_each_entry(path, |entry| {
+        entries.push(entry.clone());
+        true
+    })?;
+    Ok(entries)
+}
+
+/// Streams a directory without materializing every entry.
+///
+/// `visit` returns false to stop early. A native failure before the first entry
+/// falls back to `std::fs`; a failure after entries were visited is returned so
+/// the caller never sees a silently duplicated or partial listing.
+pub fn for_each_entry(
+    path: &Path,
+    visit: impl FnMut(&DirEntryInfo) -> bool,
+) -> io::Result<()> {
+    let mut visit = visit;
+    let mut seen = 0usize;
+    let native = read_dir_native(path, &mut |entry| {
+        seen += 1;
+        visit(entry)
+    });
+    match native {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            if seen == 0 {
+                read_dir_fallback(path, &mut visit)
+            } else {
+                Err(error)
+            }
+        }
     }
 }
 
@@ -73,7 +102,10 @@ fn wide_path(path: &Path) -> Vec<u16> {
     wide
 }
 
-fn read_dir_native(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
+fn read_dir_native(
+    path: &Path,
+    visit: &mut dyn FnMut(&DirEntryInfo) -> bool,
+) -> io::Result<()> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE,
@@ -98,7 +130,7 @@ fn read_dir_native(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
         return Err(io::Error::last_os_error());
     }
 
-    let result = read_batches(handle, path);
+    let result = read_batches(handle, path, visit);
     // SAFETY: the handle was opened above and is closed exactly once.
     unsafe {
         CloseHandle(handle);
@@ -109,14 +141,14 @@ fn read_dir_native(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
 fn read_batches(
     handle: windows_sys::Win32::Foundation::HANDLE,
     path: &Path,
-) -> io::Result<Vec<DirEntryInfo>> {
+    visit: &mut dyn FnMut(&DirEntryInfo) -> bool,
+) -> io::Result<()> {
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::Storage::FileSystem::{
         FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
         FILE_ID_BOTH_DIR_INFO,
     };
 
-    let mut entries = Vec::new();
     let mut byte_capacity = 64 * 1024usize;
     let mut first_batch = true;
 
@@ -178,7 +210,10 @@ fn read_batches(
             if !name.is_empty() && name != "." && name != ".." {
                 parsed += 1;
                 let attributes = info.FileAttributes;
-                entries.push(DirEntryInfo {
+                // The entry is visited directly from the Windows buffer; only
+                // one DirEntryInfo exists at a time, so a huge directory cannot
+                // grow a Rust-side vector of every name.
+                let entry = DirEntryInfo {
                     path: path.join(&name),
                     name,
                     is_dir: attributes & FILE_ATTRIBUTE_DIRECTORY != 0,
@@ -193,7 +228,10 @@ fn read_batches(
                         Some(info.FileId as u64)
                     },
                     modified: filetime_to_unix(info.LastWriteTime),
-                });
+                };
+                if !visit(&entry) {
+                    return Ok(());
+                }
             }
             if info.NextEntryOffset == 0 {
                 break;
@@ -210,7 +248,7 @@ fn read_batches(
         }
     }
 
-    Ok(entries)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -279,10 +317,36 @@ mod tests {
         let missing = temp.0.join("does-not-exist");
         assert!(read_dir(&missing).is_err());
     }
+
+    #[test]
+    fn streaming_visits_entries_once_and_can_stop_early() {
+        let temp = TempDir::new("stream");
+        for index in 0..50u32 {
+            fs::write(temp.0.join(format!("f{index:02}.bin")), b"x").expect("fixture");
+        }
+
+        let mut seen = Vec::new();
+        for_each_entry(&temp.0, |entry| {
+            seen.push(entry.name.clone());
+            seen.len() < 10
+        })
+        .expect("streaming listing");
+        assert_eq!(seen.len(), 10, "the visitor stops the enumeration");
+
+        let mut all = 0usize;
+        for_each_entry(&temp.0, |_| {
+            all += 1;
+            true
+        })
+        .expect("full streaming listing");
+        assert_eq!(all, 50);
+    }
 }
 
-fn read_dir_fallback(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
-    let mut entries = Vec::new();
+fn read_dir_fallback(
+    path: &Path,
+    visit: &mut dyn FnMut(&DirEntryInfo) -> bool,
+) -> io::Result<()> {
     for entry in std::fs::read_dir(path)? {
         let entry = match entry {
             Ok(value) => value,
@@ -294,7 +358,7 @@ fn read_dir_fallback(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
         };
         let attributes = metadata.file_attributes();
         let size = metadata.file_size();
-        entries.push(DirEntryInfo {
+        let info = DirEntryInfo {
             path: entry.path(),
             name: entry.file_name().to_string_lossy().into_owned(),
             is_dir: metadata.is_dir(),
@@ -307,7 +371,10 @@ fn read_dir_fallback(path: &Path) -> io::Result<Vec<DirEntryInfo>> {
             allocated: size,
             file_id: None,
             modified: metadata.modified().ok().and_then(systemtime_to_unix),
-        });
+        };
+        if !visit(&info) {
+            return Ok(());
+        }
     }
-    Ok(entries)
+    Ok(())
 }

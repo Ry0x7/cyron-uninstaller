@@ -218,7 +218,7 @@ export function AppDrawer({
           <p className="un-hint">This entry records no uninstall command.</p>
         )}
         <p className="un-hint">
-          Shown for transparency only. Cyron never executes uninstall commands in Phase 1.
+          Shown for transparency only. Cyron never executes uninstall commands.
         </p>
       </section>
 

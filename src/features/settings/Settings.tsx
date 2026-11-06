@@ -208,7 +208,7 @@ export function Settings() {
                   className="textarea set-exclusions"
                   value={exclusionText}
                   spellCheck={false}
-                  placeholder={"C:\\Users\\Me\\Projects\\large-repo\nD:\\Virtual Machines"}
+                  placeholder={"e.g. C:\\Users\\Me\\Projects\\large-repo\ne.g. D:\\Virtual Machines"}
                   onChange={(event) => setExclusionText(event.target.value)}
                   onBlur={commitExclusions}
                 />
@@ -229,8 +229,15 @@ export function Settings() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={exclusionText.length === 0}
-                  onClick={() => setExclusionText("")}
+                  onClick={() => {
+                    // Commit immediately instead of waiting for the 450 ms debounce,
+                    // so closing the window right after clicking cannot keep stale exclusions.
+                    if (exclusionText.length === 0) return;
+                    lastSynced.current = "";
+                    setExclusionText("");
+                    setExclusions([]);
+                    setResetDone(false);
+                  }}
                 >
                   Clear all
                 </Button>
@@ -275,7 +282,7 @@ export function Settings() {
                   <IconLock size={11} />
                   Read-only
                 </Badge>
-                <span className="set-note">Phase 1 has no delete, uninstall or kill action.</span>
+                <span className="set-note">This build has no delete, uninstall or kill action.</span>
               </div>
 
               <h3 className="set-subhead">Cyron never touches</h3>
@@ -320,7 +327,7 @@ export function Settings() {
                 items={[
                   { label: "Name", value: "Cyron" },
                   { label: "Version", value: "0.1.0" },
-                  { label: "Stage", value: "Phase 1 · read-only preview" },
+                  { label: "Stage", value: "Phase 2 · disk intelligence, read-only" },
                   { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },
                   {
                     label: "Repository",

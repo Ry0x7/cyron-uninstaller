@@ -912,3 +912,352 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ------------------------------------------------- Phase 2 split + toolbar */
+
+.az-modes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.az-modes .segmented {
+  min-width: 280px;
+}
+
+.az-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.az-toolbar__main,
+.az-toolbar__meta {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.az-toolbar__meta {
+  align-items: center;
+  padding-top: 2px;
+}
+
+.az-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.az-field__label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.az-field__input {
+  width: 108px;
+  height: 27px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.az-field__sort {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.az-sort-dir {
+  width: 27px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.az-sort-dir:hover {
+  background: var(--surface-hover);
+}
+
+.az-toolbar__clear {
+  margin-bottom: 1px;
+}
+
+.az-method {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.az-method--mft {
+  border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
+  color: var(--accent-strong);
+}
+
+.az-toolbar__note {
+  min-width: 0;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.az-toolbar__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.az-toolbar__tree-toggle {
+  display: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.az-toolbar__hint {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.az-split {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+}
+
+.az-split__tree {
+  width: var(--az-tree-width, 300px);
+  flex: none;
+  position: sticky;
+  top: 96px;
+  min-width: 0;
+}
+
+.az-tree-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.az-tree-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.az-tree-panel__meta {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.az-split__divider {
+  width: 14px;
+  align-self: stretch;
+  min-height: 280px;
+  flex: none;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  border-radius: 4px;
+}
+
+.az-split__divider:hover,
+.az-split__divider:focus-visible {
+  background: var(--surface-hover);
+}
+
+.az-split__divider:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -4px;
+}
+
+.az-split__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 42px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: var(--line-strong);
+}
+
+.az-split__divider:hover .az-split__grip {
+  background: var(--accent);
+}
+
+.az-grid--split {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Virtualized tree: rows are absolutely placed inside a sized spacer. */
+.az-tree-view {
+  position: relative;
+  height: min(560px, calc(100vh - 330px));
+  min-height: 220px;
+  max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
+}
+
+.az-tree-view:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.az-tree-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.az-tree-view .az-tree-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 18px 18px minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+  min-height: 0;
+  padding: 0 10px 0 7px;
+  box-sizing: border-box;
+  cursor: default;
+}
+
+.az-tree-view .az-tree-row:hover {
+  background: var(--surface-hover);
+}
+
+.az-tree-view .az-tree-row.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.az-split__tree .az-tree-view__note {
+  font-size: 9.5px;
+  padding: 7px 10px;
+}
+
+@media (max-width: 1240px) {
+  .az-split__tree {
+    width: clamp(220px, 26vw, 320px);
+  }
+
+  .az-rail {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1120px) {
+  .az-toolbar__tree-toggle {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .az-split {
+    flex-direction: column;
+  }
+
+  .az-split__tree {
+    display: none;
+    position: static;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+
+  .az-split--tree-open .az-split__tree {
+    display: block;
+    max-width: 100%;
+  }
+
+  .az-split--tree-open .az-tree-view {
+    height: 280px;
+    min-height: 220px;
+  }
+
+  .az-split__divider {
+    display: none;
+  }
+
+  .az-toolbar__note {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .az-modes .segmented {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .az-toolbar__count {
+    margin-left: 0;
+    white-space: normal;
+  }
+
+  .az-field__input {
+    width: 86px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .az-split__divider,
+  .az-split__grip {
+    transition: none;
+  }
+}

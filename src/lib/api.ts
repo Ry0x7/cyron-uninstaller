@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppInventory,
   CacheInventory,
+  DuplicateOptions,
+  DuplicateReport,
   HistoryEntry,
   Measured,
   ScanOptions,
@@ -59,6 +61,9 @@ export const api = {
   revealPath: (path: string) => call<void>("reveal_path", { path }),
   getHistory: () => call<HistoryEntry[]>("get_history"),
   clearHistory: () => call<void>("clear_history"),
+  startDuplicateScan: (jobId: string, path: string, options: DuplicateOptions) =>
+    call<DuplicateReport>("start_duplicate_scan", { jobId, path, options }),
+  cancelDuplicateScan: (jobId: string) => call<void>("cancel_duplicate_scan", { jobId }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

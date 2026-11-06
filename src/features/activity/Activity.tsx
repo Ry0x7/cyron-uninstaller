@@ -54,10 +54,25 @@ export function Activity() {
   }, [history.data]);
 
   // The shell keeps views mounted while hidden. Refresh when the desktop window
-  // regains focus so scans recorded in another view are visible on return.
+  // regains focus so scans recorded in another view are visible on return. A
+  // single focus change fires both events; the timestamp guard keeps it to one read.
   useEffect(() => {
+    if (!confirmingClear || clearing) return;
+    const cancelOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfirmingClear(false);
+    };
+    window.addEventListener("keydown", cancelOnEscape);
+    return () => window.removeEventListener("keydown", cancelOnEscape);
+  }, [confirmingClear, clearing]);
+
+  useEffect(() => {
+    let lastRefresh = 0;
     const refreshOnFocus = () => {
-      if (document.visibilityState === "visible") history.reload();
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastRefresh < 500) return;
+      lastRefresh = now;
+      history.reload();
     };
     window.addEventListener("focus", refreshOnFocus);
     document.addEventListener("visibilitychange", refreshOnFocus);

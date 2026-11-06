@@ -83,11 +83,42 @@ export interface FileStat {
   modified: number | null;
 }
 
+export type ScanMethod = "auto" | "mft" | "directory";
+
 export interface ScanOptions {
   includeHidden: boolean;
   exclusions: string[];
   collectTree: boolean;
   maxDepth: number;
+  /** auto tries the NTFS MFT reader first and falls back to the directory walk. */
+  method: ScanMethod;
+}
+
+export interface StorageCategory {
+  key: string;
+  label: string;
+  bytes: number;
+  allocated: number;
+  fileCount: number;
+  /** True when a known path rule matched, false when inferred from extensions. */
+  known: boolean;
+  note: string;
+}
+
+export interface AgeBucket {
+  key: string;
+  label: string;
+  bytes: number;
+  fileCount: number;
+}
+
+export interface StorageInsight {
+  key: string;
+  title: string;
+  detail: string;
+  bytes: number;
+  fileCount: number;
+  samplePath: string | null;
 }
 
 export interface ScanResult {
@@ -106,6 +137,13 @@ export interface ScanResult {
   elapsedMs: number;
   cancelled: boolean;
   truncated: boolean;
+  /** "mft" or "directory". */
+  method: string;
+  /** Why the requested method was not used, when that happened. */
+  methodNote: string | null;
+  categories: StorageCategory[];
+  ageBuckets: AgeBucket[];
+  insights: StorageInsight[];
 }
 
 export interface ScanProgress {
@@ -155,3 +193,53 @@ export interface HistoryEntry {
 }
 
 export const SCAN_EVENT = "cyron-scan-progress";
+export const DUPLICATE_EVENT = "cyron-duplicate-progress";
+
+export interface DuplicateOptions {
+  /** Files smaller than this are ignored; the backend enforces a floor. */
+  minSize: number;
+  includeHidden: boolean;
+  exclusions: string[];
+}
+
+export interface DuplicateFile {
+  path: string;
+  size: number;
+  allocated: number;
+  modified: number | null;
+  /** True when this path is an additional hard link to an already-listed file. */
+  hardLink: boolean;
+}
+
+export interface DuplicateGroup {
+  id: string;
+  size: number;
+  /** Recoverable bytes if all but one copy were removed. */
+  wasted: number;
+  files: DuplicateFile[];
+}
+
+export interface DuplicateReport {
+  jobId: string;
+  rootPath: string;
+  groups: DuplicateGroup[];
+  totalGroups: number;
+  totalFiles: number;
+  totalWasted: number;
+  candidateFiles: number;
+  hashedFiles: number;
+  scannedFiles: number;
+  errors: string[];
+  elapsedMs: number;
+  cancelled: boolean;
+  truncated: boolean;
+}
+
+export interface DuplicateProgress {
+  jobId: string;
+  /** "index" | "partial" | "full". */
+  phase: string;
+  files: number;
+  bytesHashed: number;
+  currentPath: string;
+}

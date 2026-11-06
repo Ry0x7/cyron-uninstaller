@@ -209,7 +209,7 @@ export function Cleaner() {
     <>
       <ViewHeader
         title="Cleaner"
-        description="Developer, AI and Windows caches with an honest cost for each one. Nothing here is removed in Phase 1."
+        description="Developer, AI and Windows caches with an honest cost for each one. Nothing here is removed in this phase."
         meta={<Badge tone="accent">Preview only</Badge>}
         actions={
           <>
@@ -228,7 +228,7 @@ export function Cleaner() {
 
       <div className="view-body">
         <Banner tone="accent">
-          <strong>Phase 1 measures and classifies.</strong> Cleaning with previews, rollback and an
+          <strong>This build measures and classifies.</strong> Cleaning with previews, rollback and an
           operation log arrives in Phase 3. No control on this page deletes a file, and Cyron never
           offers protected data for removal.
         </Banner>
@@ -250,7 +250,10 @@ export function Cleaner() {
           <Banner tone="caution">
             <strong>{warnings.length === 1 ? "One location" : `${warnings.length} locations`}</strong>{" "}
             could not be measured completely. Sizes below are what Windows allowed Cyron to read.
-            <ul className="cl-warning-list">                          {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            <ul className="cl-warning-list">
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
             </ul>
           </Banner>
         )}
@@ -272,8 +275,12 @@ export function Cleaner() {
           <Panel title="Detected locations">
             <EmptyState
               icon={IconCleaner}
-              title="No disposable caches detected"
-              description="None of the known developer, AI or Windows cache locations exist on this PC yet. Run your tools once and refresh."
+              title={warnings.length > 0 || error ? "No cache locations could be measured" : "No known cache locations found"}
+              description={
+                warnings.length > 0 || error
+                  ? "Some locations were inaccessible or the latest measurement failed. Review the warning above and refresh; this is not a complete inventory."
+                  : "None of the catalogued developer, AI or Windows cache folders exist on this PC yet. Run your tools once and refresh."
+              }
               action={
                 <Button icon={<IconRefresh size={14} />} onClick={() => void load(true)}>
                   Refresh
@@ -284,8 +291,8 @@ export function Cleaner() {
         ) : (
           <>
             <Panel
-              title="What could be reclaimed"
-              subtitle={`${formatCount(existing.length)} measured locations in known tool folders`}
+              title="Measured storage by risk"
+              subtitle={`${formatCount(existing.length)} measured locations in known tool folders; this view does not remove files`}
             >
               <div className="cl-summary">
                 <div className="cl-summary__grid">

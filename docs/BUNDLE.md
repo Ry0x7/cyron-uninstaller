@@ -12,7 +12,9 @@ npm run build:desktop
 ```
 
 `npm run build:desktop` invokes Tauri in debug mode with `--no-bundle`. The executable is
-`src-tauri/target/debug/cyron.exe`; this is a development build, not an installer.
+`src-tauri/target/debug/cyron.exe`; this is a development build, not an installer. A debug build
+targets Tauri's `devUrl`, so it expects the Vite dev server (`npm run dev`) to be running; without
+it the window shows a connection error. Release builds embed the frontend assets instead.
 
 To build the configured release installers:
 

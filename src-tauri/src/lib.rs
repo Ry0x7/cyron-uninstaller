@@ -1,9 +1,12 @@
 pub mod apps;
 pub mod caches;
 pub mod commands;
+pub mod duplicates;
 pub mod fs;
 pub mod history;
+pub mod mft;
 pub mod scan;
+pub mod storage;
 pub mod volumes;
 
 use std::collections::HashMap;
@@ -14,6 +17,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Default)]
 pub struct AppState {
     pub scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub duplicate_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 pub fn run() {
@@ -26,6 +30,8 @@ pub fn run() {
             commands::list_caches,
             commands::start_scan,
             commands::cancel_scan,
+            commands::start_duplicate_scan,
+            commands::cancel_duplicate_scan,
             commands::measure_path,
             commands::reveal_path,
             commands::get_history,

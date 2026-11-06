@@ -4,102 +4,127 @@ Updated: 2026-11-06
 
 ## Current status
 
-Phase 1 foundation and read-only scanning is implemented across the Rust backend and React
-interface, including a synchronized folder tree in the analyzer rail. The app discovers installed
-Windows applications, scans folders and renders a treemap, measures 48 developer/AI/Windows cache
-targets, records scan history, and persists appearance/scan settings. There is no user-data
-cleanup, uninstall, process termination or registry-write path; `clear_history` removes only
-Cyron's own history log.
+Phase 1 (foundation, read-only scanning) and Phase 2 (disk intelligence) are implemented across the
+Rust backend and React interface. The app discovers installed Windows applications, scans folders
+with either an NTFS MFT reader or a streaming directory walk, renders a treemap with a persistent
+synchronized folder tree, verifies duplicate files, categorizes storage, measures 48 developer/AI
+cache targets, records scan history and persists appearance/scan settings.
 
-Latest measured checks: typecheck clean; 38 frontend tests in 5 files pass; 38 Rust tests pass with
-1 ignored; the real-system integration test passes; the 5-test read-only safety suite passes. The
-debug desktop build succeeded (`DESKTOP_BINARY_OK`, 14 MiB `cyron.exe`) and
-`DESKTOP_SMOKE_OK` launched a real window titled "Cyron". Release MSI/NSIS packaging, signing and
-a native visual pass remain unverified.
+There is **no user-data cleanup, uninstall, process termination or registry-write path**.
+`clear_history` removes only Cyron's own history log.
+
+Latest measured checks: typecheck clean; **51 frontend tests in 6 files pass**; **84 Rust tests
+pass** (73 unit, 5 read-only, 1 real-system, 5 stress) with 3 ignored; `DIST_OK`;
+`DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`; both themes captured across all six views with a real scan
+loaded. Release MSI/NSIS packaging and signing remain unverified.
 
 ## Implemented
 
-- Tauri v2 shell with a strict CSP, dialog capability, one native window and nine commands
+### Phase 1
+
+- Tauri v2 shell with strict CSP, dialog capability, one native window and eleven commands
   (`list_installed_apps`, `list_volumes`, `list_caches`, `start_scan`, `cancel_scan`,
-  `measure_path`, `reveal_path`, `get_history`, `clear_history`). The last only removes Cyron's
-  own history file; no scanned/user-data cleanup command exists.
+  `start_duplicate_scan`, `cancel_duplicate_scan`, `measure_path`, `reveal_path`, `get_history`,
+  `clear_history`).
 - Registry inventory: four uninstall hives, update/patch/system filtering, dedupe, install-date and
-  `EstimatedSize` normalisation, protected-system hint.
-- Scanner: native `FileIdBothDirectoryInfo` enumeration with `std::fs` fallback, reparse skipping,
-  hard-link dedupe, exclusions, hidden/system filter, depth cap, throttled progress, cancellation,
-  top-24 returned extensions, top-100 largest files, pruned IPC tree (200 children / 8 levels /
-  up to 40 file nodes per folder plus aggregate groups). Hard-link ids are tracked up to 1,000,000.
-  The directory entry/child vectors and extension map can grow with input, so strict memory bounds
-  are not guaranteed.
+  `EstimatedSize` normalization, protected-system hint.
 - Volumes: local fixed/removable capacity and free space; network/optical skipped deliberately.
 - Cache catalog: AI tools, IDEs, package managers, containers/WSL and Windows/browser locations;
-  Safe / Review / Protected risk model; totals per risk; protected data never offered for removal.
-- UI: Overview, Uninstaller (inventory + detail drawer with *Measure folder* and *Open location*),
-  Disk Analyzer (volume cards, folder picker, treemap, synchronized folder tree and
-  selection/largest/types rail), Cleaner (preview), Activity (history + clear), Settings (theme,
-  hidden files, exclusions).
+  Safe / Review / Protected risk model; protected data never offered for removal.
+- UI: Overview, Uninstaller (inventory + drawer with *Measure folder* and *Open location*), Disk
+  Analyzer, Cleaner (preview), Activity (history + clear), Settings.
 - Local persistence: `history.json` in app-data (max 100, atomic write), settings in
   `localStorage["cyron.settings.v1"]`, sidebar state in localStorage.
-- Tooling: `scripts/msvc-env.mjs` (finds VS C++ toolchain through `vswhere`), `verify-dist.mjs`,
-  `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, Windows CI workflow, Vitest suite, Rust unit
-  tests, a live-system integration test and a read-only safety suite (`tests/read_only.rs`).
-  Latest measured: 38 Rust tests passed with 1 ignored, real-system passed, read-only 5/5 passed.
+- Tooling: `scripts/msvc-env.mjs`, `verify-dist.mjs`, `verify-desktop-binary.mjs`,
+  `smoke-desktop.mjs`, Windows CI workflow, Vitest suite, Rust unit tests, live-system integration
+  test, read-only safety suite.
+
+### Phase 2
+
+- **MFT scanner** (`src-tauri/src/mft.rs`): boot sector and `$MFT` run-list parsing,
+  update-sequence fixups, `FILE_NAME`/`$DATA`/`$STANDARD_INFORMATION`, subtree construction,
+  per-record hard-link dedupe, a 768 MiB record budget checked before allocation, cancellation every
+  4,096 records, and one fixed 1,024-byte parse buffer. Live elevated measurement on `C:\`:
+  2,211,292 files / 604,557 dirs / 332.3 GiB in 14.52 s, 655.5 MiB peak.
+- **Method selection**: `auto` uses MFT only for drive roots; subfolders use the walk (System32:
+  0.28 s walk vs 3.91 s MFT). Any requested method that falls back reports the reason in
+  `methodNote`, shown in the analyzer.
+- **Bounded walker**: streaming directory enumeration, ≤200 retained children per folder, ≤100,000
+  tree nodes, ≤40 file nodes per folder, ≤4,096 extension keys, ≤1,000,000 tracked hard-link ids,
+  top-24 extension stats, top-100 largest files, throttled progress and cancellation.
+- **Duplicates** (`duplicates.rs`): size buckets → 4 KiB head/tail SHA-256 → full streaming
+  SHA-256; hard links flagged and excluded from recoverable bytes; progress and cancellation;
+  caps on candidates (1M), groups (200) and files per group (50) with a `truncated` flag.
+- **Storage** (`storage.rs`): ten categories with known/inferred confidence, five age buckets and
+  up to six explained insights; root-relative detection for Program Files, Downloads, Steam,
+  `.cargo`, `.ollama`, Docker/WSL and other known locations.
+- **Analyzer UI**: Map / Duplicates / Storage modes, persistent resizable virtualized tree column
+  (220–520 px, persisted), filters (name, size, age, extension, type, sort), synchronized treemap
+  selection, breadcrumbs and details, scanner-method badge, partial-result and stale-result states.
+- **Benchmarks**: `scripts/bench-scan.mjs` + `examples/scan_bench.rs`; results in
+  [docs/BENCHMARKS.md](docs/BENCHMARKS.md). Warm cache, one machine; not comparable to WizTree
+  without matched measurement.
+- **Stress tests** (`tests/stress_scan.rs`): 20,000-file wide directory with exact totals and
+  bounded children, deep nesting, access-denied folders, exclusion subtree and cancellation.
+
+### Phase 1 remediation
+
+- `.chryypt/` runtime sessions and checkpoints are untracked and gitignored; no credentials or
+  secrets were found in them. The initial commit still contains those files, so removing them from
+  history requires a rewrite that has **not** been performed.
+- `GATES.md` is now a tracked Phase 2 acceptance ledger (previously a gitignored Phase 1 file).
+- Scanner memory bounds replaced the previously unbounded per-directory entry vectors and
+  extension map; stress tests cover the wide/deep cases.
+- UI fixes: text-contrast token correction (light-theme arithmetic), uninstaller table minimum
+  width, Activity refresh plus error-vs-empty states and Escape-to-cancel confirmation, Cleaner
+  incomplete-measurement state, Settings/Uninstaller copy that no longer calls the app "Phase 1",
+  per-root tree reset, focus return after expand/collapse, duplicate-panel stale-scope cancellation.
 
 ## Key files
 
-- `src-tauri/src/scan.rs`, `fs.rs`: scanner and native enumeration.
+- `src-tauri/src/mft.rs`, `scan.rs`, `fs.rs`: scanners and native enumeration.
+- `src-tauri/src/duplicates.rs`, `storage.rs`: Phase 2 analysis.
 - `src-tauri/src/apps.rs`, `caches.rs`, `volumes.rs`: Windows inventory.
 - `src-tauri/src/commands.rs`, `history.rs`, `lib.rs`: IPC, validation, persistence.
+- `src/features/analyzer/*`: analyzer, tree, filters, duplicates, storage.
 - `src/App.tsx`, `src/features/*`: shell and six views.
-- `src/lib/treemap.ts`, `categories.ts`, `risk.ts`, `format.ts`: pure frontend logic.
-- `GATES.md` (gitignored): Phase 1 acceptance ledger.
+- `src/lib/analyzerFilters.ts`, `treemap.ts`, `categories.ts`, `risk.ts`, `format.ts`: pure logic.
+- `GATES.md`: Phase 2 acceptance ledger.
+- `docs/BENCHMARKS.md`: measured scanner results.
 
 ## Verification
 
 | Check | Command | Last result |
 | --- | --- | --- |
 | TypeScript | `npm run typecheck` | Pass |
-| Vitest | `npm test` | Pass, 38/38 across 5 files |
-| Frontend bundle | `node scripts/verify-dist.mjs` | Earlier reported `DIST_OK`; not re-run for this handoff |
-| Rust tests | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | Pass: 38 passed, 1 ignored |
-| Read-only safety | `... --test read_only -- --nocapture` | Pass: 5/5 |
-| Real-system test | `... --test real_system -- --nocapture` | Pass |
-| Desktop binary | `npm run build:desktop` + `node scripts/verify-desktop-binary.mjs` | Pass: `DESKTOP_BINARY_OK`, 14.03 MiB |
-| Launch smoke | `node scripts/smoke-desktop.mjs` | Pass: `DESKTOP_SMOKE_OK`, window "Cyron" |
-| Visual review | Both themes, 1320×860, collapsed sidebar | Pending |
-
-Environment note: Visual Studio 2022 Build Tools and a Windows SDK were installed during this
-session. Use `node scripts/msvc-env.mjs <command>` rather than bare `cargo` if `link.exe` resolves
-to Git's coreutils binary.
+| Frontend tests | `npm test` | 51/51 pass, 6 files |
+| Frontend build | `node scripts/verify-dist.mjs` | `DIST_OK` |
+| Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 84 pass, 3 ignored |
+| Real system | `... --test real_system -- --nocapture` | Pass |
+| Read-only safety | `... --test read_only -- --nocapture` | 5/5 pass |
+| Stress | `... --test stress_scan -- --nocapture` | 5/5 pass (1 ignored 20k-file test) |
+| Desktop binary | `npm run build:desktop`, `node scripts/verify-desktop-binary.mjs` | `DESKTOP_BINARY_OK` |
+| Launch | `node scripts/smoke-desktop.mjs` | `DESKTOP_SMOKE_OK` |
+| Visual pass | Six views × two themes + real scan, native window | Rendered correctly |
+| MFT live scan | Elevated `examples/scan_bench` | `C:\` in 14.52 s, 2.21M files |
 
 ## Known limitations
 
-- Registry (Win32) applications only; no Store/MSIX or portable app detection, no app icons.
-- Sizes come from installer metadata when present; otherwise the UI shows “—” and the user can
-  measure the install folder.
-- No MFT scanner and no performance benchmark. Native enumeration is used with a safe fallback.
-- Treemap and Tree IPC output is pruned (200 children/folder, 8 levels, 500 rendered tree rows).
-  Totals cover the walk; returned extension stats/largest files are top 24/top 100. Scan
-  structures are not strictly memory-bounded for huge directories; hard-link tracking caps at one
-  million ids and the fallback has no ids.
-- Junctions/symlinks are counted and skipped, never followed.
-- Fixed cache catalog; no custom paths or unknown tools.
-- Cleaner is a preview. No deletion, uninstall, process kill, registry backup or rollback exists.
-- Network and optical volumes are skipped when listing drives.
-- History records disk scans only.
+- The debug desktop executable loads the Vite dev server; launching it without `npm run dev` shows a
+  connection error. Release packaging/signing is unverified.
+- MFT needs administrator rights and NTFS, and reads the whole volume even for a subfolder root.
+- Whole-volume MFT and walk totals differ by counting rule (record vs path; hard links).
+- Benchmarks are warm-cache, single-machine, one run; no WizTree comparison and no cold-cache
+  methodology.
+- Store/MSIX inventory is still missing; the IPC tree is pruned; duplicates are candidate-based
+  (≥1 MiB by default); storage categories are heuristics.
+- Git history still contains the original `.chryypt` files. Rewriting history needs explicit
+  approval.
+- Windows CI has been added but its remote run has not been observed from this machine.
 
 ## Next directive
 
-1. Run `node scripts/verify-dist.mjs` for the production bundle if the frontend changed.
-2. Review the running native window in both themes at 1320×860 and collapsed-sidebar width:
-   treemap labels, Tree tab sync, table density, drawer keyboard flow and loading/error/empty
-   states with real data.
-3. Mark only evidenced gates green in `GATES.md`; G9 (visual review) stays open until step 2.
-4. Do not start Phase 2 performance claims without MFT investigation and representative
-   benchmarks. Release MSI/NSIS packaging and signing belong to Phase 5.
-
-## Open decisions
-
-- Whether Store/MSIX applications are required for the first public release.
-- Which signing infrastructure, if any, will be available for Phase 5.
-- Whether the first cleaning release needs per-provider plugins or a single audited engine.
+Phase 3 (safe cleaning) may start from this baseline. It must add preview + explicit confirmation,
+protected-data enforcement (models, histories, repositories, Docker/WSL volumes), operation logs and
+rollback where supported, and extend the read-only audit tests to the new destructive boundary.
+Do not add cleanup or uninstall paths without those gates.

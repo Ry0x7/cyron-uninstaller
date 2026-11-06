@@ -1,5 +1,5 @@
 use crate::scan::{self, ScanProgress, ScanResult};
-use crate::{apps, caches, history, volumes, AppState};
+use crate::{apps, caches, duplicates, history, mft, volumes, AppState};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -51,6 +51,25 @@ fn validate_directory(path: &str) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
+/// Keep concurrent jobs addressable by an unambiguous cancellation id. Without
+/// this check a repeated id replaces the first job's flag and its eventual
+/// cleanup can also remove the newer job from the registry.
+fn register_scan(
+    registry: &std::sync::Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
+    job_id: &str,
+    cancel: Arc<AtomicBool>,
+    label: &str,
+) -> Result<(), String> {
+    let mut scans = registry
+        .lock()
+        .map_err(|_| format!("The {label} scan registry is unavailable."))?;
+    if scans.contains_key(job_id) {
+        return Err(format!("A {label} scan with this job id is already running."));
+    }
+    scans.insert(job_id.to_string(), cancel);
+    Ok(())
+}
+
 /* -------------------------------------------------------------- background */
 
 async fn run_blocking<T, F>(label: &str, work: F) -> Result<T, String>
@@ -100,15 +119,20 @@ pub async fn start_scan(
         .filter(|entry| !entry.is_empty())
         .take(200)
         .collect();
+    // Auto uses the MFT only for a whole volume, where reading the table pays
+    // for itself. A subfolder scan is faster through the directory walk because
+    // the MFT path must parse every record on the volume first.
+    let method = match options.method.trim().to_ascii_lowercase().as_str() {
+        "mft" => "mft",
+        "directory" => "directory",
+        _ if root.parent().is_none() => "mft",
+        _ => "directory",
+    }
+    .to_string();
+    options.method = method.clone();
 
     let cancel = Arc::new(AtomicBool::new(false));
-    {
-        let mut scans = state
-            .scans
-            .lock()
-            .map_err(|_| "The scan registry is unavailable.".to_string())?;
-        scans.insert(job_id.clone(), Arc::clone(&cancel));
-    }
+    register_scan(&state.scans, &job_id, Arc::clone(&cancel), "filesystem")?;
 
     let scans = Arc::clone(&state.scans);
     let cleanup_job = job_id.clone();
@@ -119,7 +143,24 @@ pub async fn start_scan(
             let _ = emit_target.emit(SCAN_EVENT, payload);
         };
         let started = SystemTime::now();
-        let result = scan::scan_directory(&job_id, &root, &options, cancel, &progress);
+        let mut note: Option<String> = None;
+        let mut result = if method == "directory" {
+            scan::scan_directory(&job_id, &root, &options, cancel, &progress)
+        } else {
+            let mft_attempt = mft::support(&root).and_then(|()| {
+                mft::scan(&job_id, &root, &options, Arc::clone(&cancel), &progress)
+            });
+            match mft_attempt {
+                Ok(outcome) => mft_scan_result(&job_id, &root, outcome, &started),
+                Err(reason) => {
+                    // An explicit MFT request still falls back rather than
+                    // failing the scan; the note explains why.
+                    note = Some(reason);
+                    scan::scan_directory(&job_id, &root, &options, cancel, &progress)
+                }
+            }
+        };
+        result.method_note = note;
         let elapsed = started.elapsed().unwrap_or_default().as_millis() as u64;
 
         let status = if result.cancelled {
@@ -146,6 +187,61 @@ pub async fn start_scan(
 #[tauri::command]
 pub fn cancel_scan(state: State<'_, AppState>, job_id: String) {
     let Ok(scans) = state.scans.lock() else {
+        return;
+    };
+    if let Some(flag) = scans.get(job_id.trim()) {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[tauri::command]
+pub async fn start_duplicate_scan(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    job_id: String,
+    path: String,
+    options: duplicates::DuplicateOptions,
+) -> Result<duplicates::DuplicateReport, String> {
+    let job_id = validate_job_id(&job_id)?;
+    let root = validate_directory(&path)?;
+
+    let mut options = options;
+    options.exclusions = options
+        .exclusions
+        .into_iter()
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .take(200)
+        .collect();
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    register_scan(
+        &state.duplicate_scans,
+        &job_id,
+        Arc::clone(&cancel),
+        "duplicate",
+    )?;
+
+    let scans = Arc::clone(&state.duplicate_scans);
+    let cleanup_job = job_id.clone();
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        let emit_target = app.clone();
+        let progress = move |payload: duplicates::DuplicateProgress| {
+            let _ = emit_target.emit(duplicates::DUPLICATE_EVENT, payload);
+        };
+        duplicates::find_duplicates(&job_id, &root, &options, cancel, &progress)
+    });
+
+    let outcome = task.await;
+    if let Ok(mut scans) = scans.lock() {
+        scans.remove(&cleanup_job);
+    }
+    outcome.map_err(|error| format!("The duplicate scan task stopped unexpectedly: {error}"))
+}
+
+#[tauri::command]
+pub fn cancel_duplicate_scan(state: State<'_, AppState>, job_id: String) {
+    let Ok(scans) = state.duplicate_scans.lock() else {
         return;
     };
     if let Some(flag) = scans.get(job_id.trim()) {
@@ -185,6 +281,38 @@ pub fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 /* ----------------------------------------------------------------- helpers */
+
+/// Adapts an MFT outcome to the same contract the directory walk returns, so
+/// the UI does not have to branch on the scanner.
+fn mft_scan_result(
+    job_id: &str,
+    root: &std::path::Path,
+    outcome: mft::MftOutcome,
+    started: &SystemTime,
+) -> ScanResult {
+    ScanResult {
+        job_id: job_id.to_string(),
+        root_path: scan::display_path(&root.to_string_lossy()),
+        root: outcome.root,
+        total_size: outcome.total_size,
+        total_allocated: outcome.total_allocated,
+        file_count: outcome.file_count,
+        dir_count: outcome.dir_count,
+        deduped_files: outcome.deduped_files,
+        skipped_reparse: outcome.skipped_reparse,
+        errors: outcome.errors,
+        extension_stats: outcome.extension_stats,
+        largest_files: outcome.largest_files,
+        elapsed_ms: started.elapsed().unwrap_or_default().as_millis() as u64,
+        cancelled: outcome.cancelled,
+        truncated: outcome.truncated,
+        method: "mft".into(),
+        method_note: None,
+        categories: outcome.categories,
+        age_buckets: outcome.age_buckets,
+        insights: outcome.insights,
+    }
+}
 
 /// Two scans can finish in the same second with the same file count, so the
 /// id also carries sub-second precision and a process-local sequence.
@@ -311,6 +439,23 @@ mod tests {
         assert!(validate_job_id("").is_err());
         assert!(validate_job_id("scan/one").is_err());
         assert!(validate_job_id(&"a".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn duplicate_job_ids_do_not_replace_the_cancellable_scan() {
+        let registry = std::sync::Mutex::new(std::collections::HashMap::new());
+        let original = Arc::new(AtomicBool::new(false));
+        let replacement = Arc::new(AtomicBool::new(false));
+
+        register_scan(&registry, "same-job", Arc::clone(&original), "duplicate")
+            .expect("first job registers");
+        let error = register_scan(&registry, "same-job", Arc::clone(&replacement), "duplicate")
+            .expect_err("duplicate job id must be rejected");
+
+        assert!(error.contains("already running"));
+        let scans = registry.lock().expect("registry lock");
+        assert!(Arc::ptr_eq(scans.get("same-job").expect("original remains"), &original));
+        assert!(!replacement.load(Ordering::Relaxed));
     }
 
     #[test]

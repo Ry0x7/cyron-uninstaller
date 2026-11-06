@@ -1,4 +1,5 @@
 use crate::fs::{self, DirEntryInfo};
+use crate::storage::Accumulator;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -17,6 +18,9 @@ pub struct ScanOptions {
     pub collect_tree: bool,
     /// Maximum directory recursion depth.
     pub max_depth: u32,
+    /// auto, mft or directory. The walk itself always uses the directory
+    /// method; the command layer picks the scanner and records the note.
+    pub method: String,
 }
 
 impl Default for ScanOptions {
@@ -26,6 +30,7 @@ impl Default for ScanOptions {
             exclusions: Vec::new(),
             collect_tree: true,
             max_depth: 48,
+            method: "auto".into(),
         }
     }
 }
@@ -83,6 +88,13 @@ pub struct ScanResult {
     pub elapsed_ms: u64,
     pub cancelled: bool,
     pub truncated: bool,
+    /// mft or directory, whichever produced this result.
+    pub method: String,
+    /// Why the requested method was not used, when it was not.
+    pub method_note: Option<String>,
+    pub categories: Vec<crate::storage::StorageCategory>,
+    pub age_buckets: Vec<crate::storage::AgeBucket>,
+    pub insights: Vec<crate::storage::StorageInsight>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,12 +118,33 @@ pub struct Measured {
     pub errors: Vec<String>,
 }
 
+/// Strips the `\\?\` verbatim prefix a canonicalized local path carries, for
+/// display only. Operations keep using the original path.
+pub fn display_path(value: &str) -> String {
+    match value.strip_prefix("\\\\?\\") {
+        Some(rest) if rest.len() > 1 && rest.as_bytes()[1] == b':' => rest.to_string(),
+        _ => value.to_string(),
+    }
+}
+
+fn clean_error(value: String) -> String {
+    value.replace("\\\\?\\", "")
+}
+
 const MAX_ERRORS: usize = 20;
 const MAX_FILE_NODES: usize = 40;
 const MAX_CHILDREN_PER_DIR: usize = 200;
 const IPC_TREE_DEPTH: u32 = 8;
 const MAX_EXTENSIONS: usize = 24;
+/// Distinct extension keys retained while walking. The rest are folded into a
+/// single counter and reported under `other`, so a directory of unique names
+/// cannot grow the map without bound.
+const MAX_EXTENSION_KEYS: usize = 4096;
 const MAX_LARGEST_FILES: usize = 100;
+/// Total tree nodes retained across the whole walk. The 8-level IPC cap plus
+/// this budget keep the in-memory tree bounded even for a wide, deep fixture;
+/// totals keep accumulating after the budget is spent.
+const MAX_TREE_NODES: usize = 100_000;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(120);
 /// Hard-link ids are the only per-file state the walker keeps. Cap it so a
 /// multi-million-file scan cannot grow memory without limit; past the cap new
@@ -139,11 +172,18 @@ pub fn scan_directory(
     walker.emit_progress(path, true);
     let extension_stats = walker.extension_stats();
     let largest_files = walker.largest_files();
-    let errors = std::mem::take(&mut walker.errors);
+    let errors: Vec<String> = std::mem::take(&mut walker.errors)
+        .into_iter()
+        .map(clean_error)
+        .collect();
+    let (categories, age_buckets, insights) = match walker.categories.take() {
+        Some(accumulator) => accumulator.finish(),
+        None => (Vec::new(), Vec::new(), Vec::new()),
+    };
 
     ScanResult {
         job_id: job_id.to_string(),
-        root_path: path.to_string_lossy().into_owned(),
+        root_path: display_path(&path.to_string_lossy()),
         root,
         total_size: walker.size,
         total_allocated: walker.allocated,
@@ -157,6 +197,11 @@ pub fn scan_directory(
         elapsed_ms: elapsed(started),
         cancelled: walker.cancelled,
         truncated: walker.truncated,
+        method: "directory".into(),
+        method_note: None,
+        categories,
+        age_buckets,
+        insights,
     }
 }
 
@@ -193,6 +238,7 @@ struct Walker<'a> {
     allocated: u64,
     files: u64,
     dirs: u64,
+    tree_nodes: usize,
     deduped: u64,
     skipped_reparse: u64,
     cancelled: bool,
@@ -201,8 +247,13 @@ struct Walker<'a> {
     seen_file_ids: HashSet<u64>,
     dedupe_limit_warned: bool,
     extensions: HashMap<String, (u64, u64)>,
+    /// (file_count, size) for extensions beyond MAX_EXTENSION_KEYS.
+    extension_overflow: (u64, u64),
     largest: Vec<FileStat>,
     errors: Vec<String>,
+    /// Started on the first walked directory; `measure_path` also collects it
+    /// but only `scan_directory` reports the result.
+    categories: Option<Accumulator>,
 }
 
 impl<'a> Walker<'a> {
@@ -231,6 +282,7 @@ impl<'a> Walker<'a> {
             allocated: 0,
             files: 0,
             dirs: 0,
+            tree_nodes: 0,
             deduped: 0,
             skipped_reparse: 0,
             cancelled: false,
@@ -238,15 +290,23 @@ impl<'a> Walker<'a> {
             seen_file_ids: HashSet::new(),
             dedupe_limit_warned: false,
             extensions: HashMap::new(),
+            extension_overflow: (0, 0),
             largest: Vec::new(),
             errors: Vec::new(),
+            categories: None,
         }
     }
 
     fn walk(&mut self, path: &Path, depth: u32) -> ScanNode {
+        if self.categories.is_none() {
+            self.categories = Some(Accumulator::new(path));
+        }
+        let keep_children = self.collect_tree
+            && depth < IPC_TREE_DEPTH
+            && self.tree_nodes < MAX_TREE_NODES;
         let mut node = ScanNode {
             name: display_name(path),
-            path: path.to_string_lossy().into_owned(),
+            path: display_path(&path.to_string_lossy()),
             kind: "dir".into(),
             size: 0,
             allocated: 0,
@@ -271,30 +331,29 @@ impl<'a> Walker<'a> {
                 .and_then(systemtime_to_unix);
         }
 
-        let entries = match fs::read_dir(path) {
-            Ok(entries) => entries,
-            Err(error) => {
-                self.record_error(format!("{}: {}", path.display(), error));
-                self.dirs += 1;
-                return node;
-            }
-        };
         self.dirs += 1;
         self.maybe_progress(path);
 
         let mut directory_children: Vec<ScanNode> = Vec::new();
         let mut file_nodes: Vec<ScanNode> = Vec::new();
         let mut own_files = 0u64;
-        let mut overflow_count = 0u64;
+        let mut sub_files = 0u64;
+        let mut sub_dirs = 0u64;
+        let mut overflow_files = 0u64;
+        let mut overflow_dirs = 0u64;
         let mut overflow_size = 0u64;
         let mut overflow_allocated = 0u64;
+        let mut had_children = false;
 
-        for entry in entries {
+        // Entries are streamed one at a time: the directory listing itself is
+        // never materialized, so a directory with millions of entries uses
+        // bounded memory. Totals are accumulated in the same pass.
+        let streamed = fs::for_each_entry(path, |entry| {
             if self.is_cancelled() {
-                break;
+                return false;
             }
             if !self.include_hidden && (entry.is_hidden || entry.is_system) {
-                continue;
+                return true;
             }
             if entry.is_reparse {
                 self.skipped_reparse += 1;
@@ -304,26 +363,45 @@ impl<'a> Walker<'a> {
                         entry.path.display()
                     ));
                 }
-                continue;
+                return true;
             }
             if entry.is_dir {
-                if self.is_excluded(&entry.path) {
-                    continue;
+                if self.is_excluded(&entry.path) || depth >= self.max_depth {
+                    return true;
                 }
-                if depth >= self.max_depth {
-                    continue;
-                }
+                had_children = true;
                 let child = self.walk(&entry.path, depth + 1);
                 node.size += child.size;
                 node.allocated += child.allocated;
-                directory_children.push(child);
-                continue;
+                sub_files += child.file_count;
+                sub_dirs += child.dir_count + 1;
+                if keep_children && self.tree_nodes < MAX_TREE_NODES {
+                    self.tree_nodes += 1;
+                    retain_directory_child(
+                        &mut directory_children,
+                        child,
+                        &mut overflow_files,
+                        &mut overflow_dirs,
+                        &mut overflow_size,
+                        &mut overflow_allocated,
+                    );
+                } else if keep_children {
+                    // The global node budget is spent: keep the totals and report
+                    // the missing detail instead of retaining another node.
+                    overflow_files += child.file_count;
+                    overflow_dirs += child.dir_count;
+                    overflow_size += child.size;
+                    overflow_allocated += child.allocated;
+                    self.truncated = true;
+                }
+                return true;
             }
 
             if self.is_excluded(&entry.path) {
-                continue;
+                return true;
             }
 
+            had_children = true;
             own_files += 1;
             self.files += 1;
             if own_files % PROGRESS_EVERY_FILES == 0 {
@@ -343,13 +421,23 @@ impl<'a> Walker<'a> {
                 self.deduped += 1;
             }
 
-            self.track_extension(&entry, unique);
-            self.track_largest(&entry);
+            if let Some(accumulator) = &mut self.categories {
+                accumulator.add_file(
+                    &entry.path,
+                    entry.size,
+                    if unique { entry.allocated } else { 0 },
+                    entry.modified,
+                );
+            }
 
-            if self.collect_tree {
+            self.track_extension(entry, unique);
+            self.track_largest(entry);
+
+            if keep_children && self.tree_nodes < MAX_TREE_NODES {
+                self.tree_nodes += 1;
                 let file_node = ScanNode {
                     name: entry.name.clone(),
-                    path: entry.path.to_string_lossy().into_owned(),
+                    path: display_path(&entry.path.to_string_lossy()),
                     kind: "file".into(),
                     size: entry.size,
                     allocated: if unique { entry.allocated } else { 0 },
@@ -360,34 +448,45 @@ impl<'a> Walker<'a> {
                 };
                 insert_file_node(&mut file_nodes, file_node);
                 if file_nodes.len() > MAX_FILE_NODES {
-                    let dropped = file_nodes.remove(0);
-                    overflow_count += 1;
-                    overflow_size += dropped.size;
-                    overflow_allocated += dropped.allocated;
+                    // Nodes are kept largest-first, so the last node is the
+                    // smallest and the one that belongs in the group tile.
+                    if let Some(dropped) = file_nodes.pop() {
+                        overflow_files += 1;
+                        overflow_size += dropped.size;
+                        overflow_allocated += dropped.allocated;
+                    }
                 }
+            } else if keep_children {
+                self.truncated = true;
             }
+            true
+        });
+
+        if let Err(error) = streamed {
+            self.record_error(format!("{}: {}", path.display(), error));
         }
 
-        let mut sub_files = 0u64;
-        let mut sub_dirs = 0u64;
-        for child in &directory_children {
-            sub_files += child.file_count;
-            sub_dirs += child.dir_count + 1;
-        }
         node.file_count = own_files + sub_files;
         node.dir_count = sub_dirs;
 
-        if self.collect_tree {
+        if !keep_children && had_children && self.collect_tree {
+            // Deeper detail is intentionally not materialized; the totals above
+            // still cover the full walk.
+            self.truncated = true;
+        }
+
+        if keep_children {
             node.children.extend(directory_children);
-            if overflow_count > 0 {
+            let overflow_items = overflow_files + overflow_dirs;
+            if overflow_items > 0 {
                 node.children.push(ScanNode {
-                    name: format!("{} smaller files", format_count(overflow_count)),
+                    name: format!("{} more items", format_count(overflow_items)),
                     path: String::new(),
                     kind: "group".into(),
                     size: overflow_size,
                     allocated: overflow_allocated,
-                    file_count: overflow_count,
-                    dir_count: 0,
+                    file_count: overflow_files,
+                    dir_count: overflow_dirs,
                     modified: None,
                     children: Vec::new(),
                 });
@@ -447,6 +546,16 @@ impl<'a> Walker<'a> {
 
     fn track_extension(&mut self, entry: &DirEntryInfo, unique: bool) {
         let extension = extension_of(&entry.name);
+        if !self.extensions.contains_key(&extension) && self.extensions.len() >= MAX_EXTENSION_KEYS {
+            // Keep the map bounded for pathological inputs; the bytes still add
+            // up, they are just reported under `other`.
+            self.extension_overflow.0 += 1;
+            if unique {
+                self.extension_overflow.1 += entry.size;
+            }
+            self.truncated = true;
+            return;
+        }
         let slot = self.extensions.entry(extension).or_insert((0, 0));
         slot.0 += 1;
         // Extension totals follow the same hard-link rule as allocated space:
@@ -459,7 +568,7 @@ impl<'a> Walker<'a> {
     fn track_largest(&mut self, entry: &DirEntryInfo) {
         let candidate = FileStat {
             name: entry.name.clone(),
-            path: entry.path.to_string_lossy().into_owned(),
+            path: display_path(&entry.path.to_string_lossy()),
             size: entry.size,
             allocated: entry.allocated,
             extension: extension_of(&entry.name),
@@ -492,6 +601,19 @@ impl<'a> Walker<'a> {
                 size: *size,
             })
             .collect();
+        if self.extension_overflow.0 > 0 {
+            match stats.iter_mut().find(|stat| stat.extension == "other") {
+                Some(stat) => {
+                    stat.file_count += self.extension_overflow.0;
+                    stat.size += self.extension_overflow.1;
+                }
+                None => stats.push(ExtensionStat {
+                    extension: "other".into(),
+                    file_count: self.extension_overflow.0,
+                    size: self.extension_overflow.1,
+                }),
+            }
+        }
         stats.sort_by_key(|stat| std::cmp::Reverse(stat.size));
         stats.truncate(MAX_EXTENSIONS);
         stats
@@ -548,8 +670,40 @@ impl<'a> Walker<'a> {
     }
 }
 
+/// Retains the largest children while folding everything else into the
+/// directory's aggregate group, so one directory cannot hold an unbounded
+/// number of nodes.
+fn retain_directory_child(
+    children: &mut Vec<ScanNode>,
+    child: ScanNode,
+    overflow_files: &mut u64,
+    overflow_dirs: &mut u64,
+    overflow_size: &mut u64,
+    overflow_allocated: &mut u64,
+) {
+    let mut dropped = child;
+    if children.len() < MAX_CHILDREN_PER_DIR {
+        children.push(dropped);
+        return;
+    }
+    let smallest = children
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, node)| node.size)
+        .map(|(index, _)| index);
+    if let Some(index) = smallest {
+        if children[index].size < dropped.size {
+            dropped = std::mem::replace(&mut children[index], dropped);
+        }
+    }
+    *overflow_files += dropped.file_count;
+    *overflow_dirs += dropped.dir_count;
+    *overflow_size += dropped.size;
+    *overflow_allocated += dropped.allocated;
+}
+
 /// Keeps the largest file nodes first and drops the smallest when full.
-fn insert_file_node(nodes: &mut Vec<ScanNode>, node: ScanNode) {
+pub(crate) fn insert_file_node(nodes: &mut Vec<ScanNode>, node: ScanNode) {
     let position = nodes.iter().position(|existing| existing.size > node.size);
     match position {
         Some(index) => nodes.insert(index, node),
@@ -559,7 +713,7 @@ fn insert_file_node(nodes: &mut Vec<ScanNode>, node: ScanNode) {
 
 /// Caps the tree that crosses the IPC boundary and reports whether anything was
 /// dropped. Aggregated nodes keep the dropped sizes visible.
-fn prune_tree(node: &mut ScanNode, depth: u32) -> bool {
+pub(crate) fn prune_tree(node: &mut ScanNode, depth: u32) -> bool {
     if node.children.is_empty() {
         return false;
     }
@@ -987,5 +1141,71 @@ mod tests {
 
         assert_eq!(result.total_size, 0);
         assert!(!result.errors.is_empty());
+    }
+
+    #[test]
+    fn a_large_single_directory_stays_bounded_and_keeps_exact_totals() {
+        let temp = TempDir::new("bounded");
+        let file_count = 2_000u64;
+        for index in 0..file_count {
+            write_file(&temp.path().join(format!("f{index:05}.bin")), 3);
+        }
+
+        let result = scan(temp.path(), ScanOptions::default());
+
+        assert_eq!(result.file_count, file_count);
+        assert_eq!(result.total_size, file_count * 3);
+        assert!(
+            result.root.children.len() <= MAX_FILE_NODES + 1,
+            "{} children retained",
+            result.root.children.len()
+        );
+        let group = result
+            .root
+            .children
+            .iter()
+            .find(|child| child.kind == "group")
+            .expect("overflow group");
+        assert_eq!(group.file_count, file_count - MAX_FILE_NODES as u64);
+        assert_eq!(group.size, (file_count - MAX_FILE_NODES as u64) * 3);
+    }
+
+    #[test]
+    fn extension_map_folds_beyond_the_key_cap_without_losing_bytes() {
+        let temp = TempDir::new("extcap");
+        let file_count = (MAX_EXTENSION_KEYS + 200) as u64;
+        for index in 0..file_count {
+            write_file(&temp.path().join(format!("f{index:05}.e{index}")), 2);
+        }
+
+        let result = scan(temp.path(), ScanOptions::default());
+
+        assert_eq!(result.file_count, file_count);
+        assert_eq!(result.total_size, file_count * 2);
+        assert!(result.truncated, "folding extensions is reported");
+        assert!(result.extension_stats.len() <= MAX_EXTENSIONS);
+    }
+
+    #[test]
+    #[ignore = "creates 20,000 files; run explicitly for the memory-bound check"]
+    fn stress_single_directory_reports_totals_without_panic() {
+        let temp = TempDir::new("stress20k");
+        let file_count = 20_000u64;
+        for index in 0..file_count {
+            write_file(&temp.path().join(format!("f{index:05}.dat")), 1);
+        }
+
+        let result = scan(temp.path(), ScanOptions::default());
+
+        assert_eq!(result.file_count, file_count);
+        assert_eq!(result.total_size, file_count);
+        assert!(result.root.children.len() <= MAX_FILE_NODES + 1);
+    }
+
+    #[test]
+    fn verbatim_prefix_is_hidden_from_display_only() {
+        assert_eq!(display_path(r"\\?\C:\Windows"), r"C:\Windows");
+        assert_eq!(display_path(r"\\?\UNC\server\share"), r"\\?\UNC\server\share");
+        assert_eq!(display_path(r"C:\Windows"), r"C:\Windows");
     }
 }

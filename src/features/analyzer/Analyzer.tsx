@@ -44,6 +44,15 @@ import { useSettings } from "../../lib/settings";
 import { SCAN_EVENT, type ScanNode, type ScanProgress, type ScanResult } from "../../lib/types";
 import { Treemap } from "./Treemap";
 import { TreeView } from "./TreeView";
+import { AnalyzerFilterBar } from "./AnalyzerFilters";
+import { DuplicatesPanel } from "./DuplicatesPanel";
+import { StoragePanel } from "./StoragePanel";
+import {
+  defaultFilters,
+  filteredTotals,
+  matchesFile,
+  type AnalyzerFilters,
+} from "../../lib/analyzerFilters";
 import "./analyzer.css";
 
 const CATEGORY_ORDER: CategoryKey[] = [
@@ -67,12 +76,37 @@ const VOLUME_KIND: Record<string, string> = {
 
 const RAIL_TABS = [
   { value: "selection" as const, label: "Selection" },
-  { value: "tree" as const, label: "Tree" },
   { value: "largest" as const, label: "Largest" },
   { value: "types" as const, label: "Types" },
 ];
 
 type RailTab = (typeof RAIL_TABS)[number]["value"];
+
+const MODES = [
+  { value: "map" as const, label: "Map" },
+  { value: "duplicates" as const, label: "Duplicates" },
+  { value: "storage" as const, label: "Storage" },
+];
+
+type AnalyzerMode = (typeof MODES)[number]["value"];
+
+const TREE_WIDTH_MIN = 220;
+const TREE_WIDTH_MAX = 520;
+const TREE_WIDTH_DEFAULT = 300;
+
+function clampTreeWidth(width: number): number {
+  if (!Number.isFinite(width)) return TREE_WIDTH_DEFAULT;
+  return Math.min(TREE_WIDTH_MAX, Math.max(TREE_WIDTH_MIN, Math.round(width)));
+}
+
+function readTreeWidth(): number {
+  try {
+    const stored = Number(window.localStorage.getItem("cyron.analyzer.treeWidth"));
+    return stored ? clampTreeWidth(stored) : TREE_WIDTH_DEFAULT;
+  } catch {
+    return TREE_WIDTH_DEFAULT;
+  }
+}
 
 const KIND_LABEL: Record<ScanNode["kind"], string> = {
   dir: "Folder",
@@ -112,6 +146,10 @@ export function Analyzer() {
   const [stack, setStack] = useState<ScanNode[]>([]);
   const [selected, setSelected] = useState<ScanNode | null>(null);
   const [railTab, setRailTab] = useState<RailTab>("selection");
+  const [mode, setMode] = useState<AnalyzerMode>("map");
+  const [filters, setFilters] = useState<AnalyzerFilters>(defaultFilters);
+  const [treeWidth, setTreeWidth] = useState(readTreeWidth);
+  const [treeOpen, setTreeOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [cancelling, setCancelling] = useState(false);
   // Frozen at scan start so the result describes the scan that actually ran.
@@ -194,6 +232,37 @@ export function Analyzer() {
     return map;
   }, [result]);
 
+  const visibleTotals = useMemo(
+    () => (result ? filteredTotals(result.root, filters) : { bytes: 0, files: 0 }),
+    [result, filters],
+  );
+  const visibleLargest = useMemo(
+    () => (result ? result.largestFiles.filter((file) => matchesFile(file, filters)) : []),
+    [result, filters],
+  );
+  const visibleTypes = useMemo(() => {
+    if (!result) return [];
+    const extension = filters.extension.trim().replace(/^\./, "").toLocaleLowerCase();
+    return result.extensionStats.filter((stat) => {
+      if (filters.minSize > 0 && stat.size < filters.minSize) return false;
+      if (extension && stat.extension.toLocaleLowerCase() !== extension) return false;
+      if (filters.category !== "all" && categoryForExtension(stat.extension) !== filters.category) {
+        return false;
+      }
+      return true;
+    });
+  }, [result, filters]);
+
+  const applyTreeWidth = (next: number) => {
+    const width = clampTreeWidth(next);
+    setTreeWidth(width);
+    try {
+      window.localStorage.setItem("cyron.analyzer.treeWidth", String(width));
+    } catch {
+      // Persistence is optional.
+    }
+  };
+
   const runScan = async (target: string) => {
     const trimmed = target.trim();
     if (!trimmed) {
@@ -228,6 +297,7 @@ export function Analyzer() {
       exclusions: settings.exclusions.length,
     });
     setLastPath(trimmed);
+    setMode("map");
 
     try {
       const scan = await api.startScan(jobId, trimmed, {
@@ -235,6 +305,7 @@ export function Analyzer() {
         exclusions: settings.exclusions,
         collectTree: true,
         maxDepth: 48,
+        method: "auto",
       });
       if (!aliveRef.current || jobRef.current !== jobId) return;
       jobRef.current = null;
@@ -314,11 +385,11 @@ export function Analyzer() {
 
   const selectTreeNode = (node: ScanNode) => {
     setSelected(node);
-    setRailTab("tree");
+    setRailTab("selection");
     const chain = chainToNode(node);
     if (chain.length) {
-      // Show the selected child in the treemap; the root itself remains the
-      // view when it is selected. Tree rows are the same nodes as the scan tree.
+      // Keep the selected item visible in the treemap by showing its parent
+      // folder; the selection itself is highlighted there when it is a tile.
       setStack(chain.length > 1 ? chain.slice(0, -1) : chain);
     }
   };
@@ -580,10 +651,111 @@ export function Analyzer() {
               {" · "}logical size and allocated size are reported separately.
             </p>
 
-            <div className="az-grid">
-              <div className="az-main">
-                <Panel
-                  className="az-tree"
+            <div className="az-modes">
+              <Segmented
+                size="sm"
+                options={MODES}
+                value={mode}
+                onChange={(value) => setMode(value as AnalyzerMode)}
+                ariaLabel="Analyzer mode"
+              />
+            </div>
+
+            {mode === "duplicates" && (
+              <DuplicatesPanel
+                rootPath={result.rootPath}
+                includeHidden={appliedOptions.includeHidden}
+                exclusions={settings.exclusions}
+              />
+            )}
+
+            {mode === "storage" && <StoragePanel result={result} />}
+
+            {mode === "map" && (
+              <>
+                <AnalyzerFilterBar
+                  filters={filters}
+                  onChange={setFilters}
+                  visible={visibleTotals}
+                  total={{ bytes: result.totalSize, files: result.fileCount }}
+                  method={result.method}
+                  methodNote={result.methodNote}
+                  treeOpen={treeOpen}
+                  onToggleTree={() => setTreeOpen((open) => !open)}
+                />
+
+                <div
+                  className={cx("az-split", treeOpen && "az-split--tree-open")}
+                  style={{ "--az-tree-width": `${treeWidth}px` } as React.CSSProperties}
+                >
+                  <aside className="az-split__tree" aria-label="Folder tree">
+                    <div className="az-tree-panel">
+                      <div className="az-tree-panel__head">
+                        <span>Folder tree</span>
+                        <span className="az-tree-panel__meta">
+                          {formatCount(visibleTotals.files)} files
+                        </span>
+                      </div>
+                      <TreeView
+                        root={result.root}
+                        selectedNode={selected}
+                        currentPath={current.path}
+                        filters={filters}
+                        onSelect={selectTreeNode}
+                        onDrill={drill}
+                      />
+                    </div>
+                  </aside>
+
+                  <div
+                    className="az-split__divider"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="Resize folder tree"
+                    aria-valuemin={TREE_WIDTH_MIN}
+                    aria-valuemax={TREE_WIDTH_MAX}
+                    aria-valuenow={treeWidth}
+                    tabIndex={0}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      const startX = event.clientX;
+                      const startWidth = treeWidth;
+                      const target = event.currentTarget;
+                      target.setPointerCapture(event.pointerId);
+                      const move = (moveEvent: PointerEvent) =>
+                        applyTreeWidth(startWidth + moveEvent.clientX - startX);
+                      const stop = () => {
+                        target.removeEventListener("pointermove", move);
+                        target.removeEventListener("pointerup", stop);
+                        target.removeEventListener("pointercancel", stop);
+                      };
+                      target.addEventListener("pointermove", move);
+                      target.addEventListener("pointerup", stop);
+                      target.addEventListener("pointercancel", stop);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        applyTreeWidth(treeWidth - 16);
+                      } else if (event.key === "ArrowRight") {
+                        event.preventDefault();
+                        applyTreeWidth(treeWidth + 16);
+                      } else if (event.key === "Home") {
+                        event.preventDefault();
+                        applyTreeWidth(TREE_WIDTH_MIN);
+                      } else if (event.key === "End") {
+                        event.preventDefault();
+                        applyTreeWidth(TREE_WIDTH_MAX);
+                      }
+                    }}
+                  >
+                    <span className="az-split__grip" aria-hidden="true" />
+                  </div>
+
+                  <div className="az-grid az-grid--split">
+                    <div className="az-main">
+                      <Panel
+                        className="az-tree"
                   flush
                   title={
                     <nav className="az-breadcrumb" aria-label="Folder path">
@@ -663,7 +835,7 @@ export function Analyzer() {
                   <div
                     className={cx(
                       "az-rail__body",
-                      railTab !== "selection" && railTab !== "tree" && "az-rail__body--flush",
+                      railTab !== "selection" && "az-rail__body--flush",
                     )}
                   >
                     {railTab === "selection" && (
@@ -676,38 +848,21 @@ export function Analyzer() {
                       />
                     )}
 
-                    {railTab === "tree" && result && (
-                      <div className="az-tree-rail">
-                        <TreeView
-                          root={result.root}
-                          selectedNode={selected}
-                          currentPath={current.path}
-                          onSelect={selectTreeNode}
-                          onDrill={drill}
-                        />
-                        <div className="az-tree-rail__details">
-                          <SelectionDetails
-                            node={selected ?? current}
-                            viewNode={current}
-                            totalSize={result.totalSize}
-                            onDrill={drill}
-                            onReveal={reveal}
-                          />
-                        </div>
-                      </div>
-                    )}
-
                     {railTab === "largest" && (
                       <div className="az-list" role="list">
-                        {result.largestFiles.length === 0 && (
+                        {visibleLargest.length === 0 && (
                           <EmptyState
                             compact
                             icon={IconDrive}
                             title="No large files"
-                            description="This scan did not record any sizable files."
+                            description={
+                              result.largestFiles.length === 0
+                                ? "This scan did not record any sizable files."
+                                : "No recorded large file matches the current filters."
+                            }
                           />
                         )}
-                        {result.largestFiles.slice(0, 40).map((file) => (
+                        {visibleLargest.slice(0, 40).map((file) => (
                           <button
                             type="button"
                             className="az-list__row"
@@ -728,10 +883,10 @@ export function Analyzer() {
                             <span className="az-row__size">{formatBytes(file.size)}</span>
                           </button>
                         ))}
-                        {result.largestFiles.length > 40 && (
+                        {visibleLargest.length > 40 && (
                           <p className="az-list__foot">
-                            Showing the 40 largest of {formatCount(result.largestFiles.length)}{" "}
-                            recorded files.
+                            Showing the 40 largest of {formatCount(visibleLargest.length)} matching
+                            files. The backend returns the top 100 files from the walk.
                           </p>
                         )}
                       </div>
@@ -739,15 +894,19 @@ export function Analyzer() {
 
                     {railTab === "types" && (
                       <div className="az-types" role="list">
-                        {result.extensionStats.length === 0 && (
+                        {visibleTypes.length === 0 && (
                           <EmptyState
                             compact
                             icon={IconDrive}
                             title="No file types"
-                            description="Nothing measurable was found in this scan."
+                            description={
+                              result.extensionStats.length === 0
+                                ? "Nothing measurable was found in this scan."
+                                : "No recorded file type matches the current filters."
+                            }
                           />
                         )}
-                        {result.extensionStats.map((stat) => {
+                        {visibleTypes.map((stat) => {
                           const category = categoryForExtension(stat.extension);
                           const share = result.totalSize > 0 ? stat.size / result.totalSize : 0;
                           return (
@@ -777,7 +936,10 @@ export function Analyzer() {
                   </div>
                 </Panel>
               </aside>
-            </div>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -845,8 +1007,10 @@ interface SelectionProps {
 
 function SelectionDetails({ node, viewNode, totalSize, onDrill, onReveal }: SelectionProps) {
   const isView = node.path === viewNode.path;
-  const logical = node.size || node.allocated;
-  const viewTotal = viewNode.size || viewNode.allocated;
+  // Share percentages are always based on logical bytes; allocated bytes are
+  // presented separately and must not substitute when logical size is zero.
+  const logical = node.size;
+  const viewTotal = viewNode.size;
   const denominator = isView ? totalSize : viewTotal;
   const share = denominator > 0 ? logical / denominator : 0;
   const canDrill = node.kind === "dir" && node.children.length > 0 && !isView;

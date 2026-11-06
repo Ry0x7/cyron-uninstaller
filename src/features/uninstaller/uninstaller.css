@@ -38,6 +38,8 @@
 
 .un-grid {
   table-layout: fixed;
+  /* Keep six columns readable at 1000px: the wrapper scrolls instead of crushing cells. */
+  min-width: 720px;
 }
 
 .un-row:focus-visible {

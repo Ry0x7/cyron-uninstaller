@@ -17,42 +17,58 @@ state, not a claim that an unobserved remote CI run passed.
 - [x] Read-only application detail drawer with real folder measurement and Explorer reveal.
 - [x] Native directory enumeration with logical and allocated size (fallback reports logical size as allocated and has no file ids).
 - [x] Depth/output-capped, cancellable filesystem scan with progress, exclusions and junction
-      skipping (strict memory bounds for arbitrary inputs are not guaranteed).
+      skipping (output and work are bounded; see Phase 2 for the streaming rewrite).
 - [x] Interactive squarified treemap with drill-down and synchronized selection details.
-- [x] Synchronized folder tree in the analyzer details rail: expandable real scan nodes,
-      treemap↔tree selection, scroll-to-selection and keyboard tree navigation (500-row render cap).
+- [x] Synchronized folder tree: expandable real scan nodes, treemap↔tree selection,
+      scroll-to-selection and keyboard tree navigation (Phase 2 moved it to a persistent,
+      virtualized column).
 - [x] Largest-file and extension-statistics reporting from real scan data.
 - [x] Developer/AI/Windows cache catalog (48 locations) with Safe / Review / Protected classification.
 - [x] Overview with real volume capacity, application counts, measured cache sizes by risk and recent scan activity.
 - [x] Local scan history persisted in the app-data directory (max 100 entries).
 - [x] Settings for theme, hidden/system files and exclusion paths (scanner skips hidden/system entries when the option is off).
-- [x] Frontend and Rust unit/integration suites. Latest measured results: 38 frontend tests pass;
-      38 Rust tests pass with 1 ignored; the real-system integration test passes; the 5-test
-      read-only safety suite passes.
+- [x] Frontend and Rust unit/integration suites. Latest measured results: 51 frontend tests pass;
+      84 Rust tests pass (73 unit, 5 read-only, 1 real-system, 5 stress) with 3 ignored.
 - [x] Native desktop compile and launch: `npm run build:desktop`, `verify-desktop-binary.mjs`
       (`DESKTOP_BINARY_OK`) and `smoke-desktop.mjs` (`DESKTOP_SMOKE_OK`, window title "Cyron").
-- [~] Visual review of the running native window in both themes is still pending.
+- [x] Visual review of the running native window in both themes (six views, light and dark,
+      with a real scan loaded).
 - [x] Windows CI workflow for typecheck, tests, build and `cargo test` (workflow file added;
       remote run has not been observed).
 - [x] Documentation: README, architecture, implementation status, agent memory, handoff.
 - [x] No user-data cleanup, uninstall, process termination or registry-write operations. The
       `clear_history` action removes only Cyron's own history file.
 
-Deferred from Phase 1: a persistent tree column beside the treemap (the tree lives in the
-analyzer rail), MSIX/Store inventory, duplicate files and benchmarks.
+Deferred from Phase 1 and delivered in Phase 2: a persistent tree column, duplicate files and
+benchmarks. Still deferred: MSIX/Store inventory.
 
-## Phase 2 — Disk intelligence
+## Phase 2 — Disk intelligence (implemented, see docs/IMPLEMENTATION_STATUS.md)
 
-- [ ] MFT-based NTFS scanning with a safe directory-walk fallback.
-- [ ] Benchmark harness: cold/warm scans of representative roots, memory ceiling and duration.
-- [ ] A persistent tree column beside the treemap (Phase 1 ships a synchronized Tree tab in the details rail).
-- [ ] Advanced filters (size, age, extension, modification date); largest-file discovery exists in the current scanner.
-- [ ] Duplicate-file candidates using size buckets, staged partial hashes and full hashes.
-- [ ] Storage categorization: applications, games, downloads, documents, temporary files,
-      developer tools and AI models.
-- [ ] Present richer inaccessible-folder and reparse-point diagnostics in the UI (the scanner already skips reparse points and reports capped errors).
-- [ ] Scan performance and memory passes on very large roots.
-- [ ] Cancellation and error handling stress-hardening under very large scans.
+- [x] MFT-based NTFS scanning with a safe directory-walk fallback, automatic selection at drive
+      roots and an explicit `methodNote` whenever a requested method falls back.
+- [x] Benchmark harness (`scripts/bench-scan.mjs`, `examples/scan_bench.rs`) reporting duration,
+      peak working set, files, directories and logical bytes. Warm-cache measurements recorded in
+      [docs/BENCHMARKS.md](docs/BENCHMARKS.md); cold-cache timing is not measured.
+- [x] A persistent, resizable, virtualized tree column beside the treemap, synchronized with
+      treemap selection, breadcrumbs and details.
+- [x] Advanced filters (name, size, age, extension, type, sort field/direction) applied to the
+      tree, largest files and treemap, with filtered totals.
+- [x] Duplicate-file candidates using size buckets, 4 KiB edge hashing and full streaming
+      SHA-256; cancellation, progress, hard-link handling and read-only reporting.
+- [x] Storage categorization: ten categories with known/inferred confidence, age buckets and
+      explainable insights; Docker, WSL, package caches and AI models are identified and described
+      as data, not as removal targets.
+- [x] Inaccessible-folder, reparse-point and partial-result diagnostics in the analyzer, including
+      scanner method and fallback reason.
+- [x] Scan performance and memory passes on very large roots; the walker is streaming, hard-link
+      tracking is bounded, and the MFT reader enforces a record-count budget before allocating.
+- [x] Cancellation and error handling stress-hardening under very large scans
+      (`tests/stress_scan.rs`: wide directories, deep nesting, access-denied paths, exclusions,
+      cancellation).
+
+Still deferred: MFT measurement on volumes above the record budget, Store/MSIX inventory, and a
+cold-cache benchmark methodology.
+
 
 ## Phase 3 — Safe cleaning
 

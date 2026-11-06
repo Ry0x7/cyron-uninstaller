@@ -143,7 +143,7 @@ export function Uninstaller() {
 
       <div className="view-body">
         <Banner tone="accent">
-          <strong>Inventory only in Phase 1.</strong> Standard, force and batch uninstalling plus
+          <strong>Inventory only.</strong> Standard, force and batch uninstalling plus
           leftover scanning arrive in Phase 4. Nothing on this screen removes software.
         </Banner>
 
@@ -218,11 +218,19 @@ export function Uninstaller() {
           ) : visible.length === 0 ? (
             <EmptyState
               icon={IconApps}
-              title={apps.length === 0 ? "No applications found" : "No matching applications"}
+              title={
+                inventory.status === "error" && apps.length === 0
+                  ? "Inventory unavailable"
+                  : apps.length === 0
+                    ? "No applications found"
+                    : "No matching applications"
+              }
               description={
-                apps.length === 0
-                  ? "Cyron could not read any uninstall entries from the registry. This can happen on a locked-down machine."
-                  : "Try a different search term or switch the scope filter back to All."
+                inventory.status === "error" && apps.length === 0
+                  ? "The registry could not be read, so this is not an empty inventory. Retry, or check the message above if the problem continues."
+                  : apps.length === 0
+                    ? "Cyron could not read any uninstall entries from the registry. This can happen on a locked-down machine."
+                    : "Try a different search term or switch the scope filter back to All."
               }
               action={
                 apps.length === 0 ? (
@@ -276,7 +284,7 @@ export function Uninstaller() {
                     >
                       <td>
                         <div className="cell-name">
-                          <span className="cell-name__title un-name">
+                          <span className="cell-name__title un-name" title={app.name}>
                             {app.isProtected && (
                               <IconLock size={11} className="un-lock" aria-label="System component" />
                             )}

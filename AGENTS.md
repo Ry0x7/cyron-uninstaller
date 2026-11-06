@@ -8,13 +8,15 @@ safe to remove but also have the ability to force uninstall and kill process. In
 Revo uninstaller, bleachbit, and windirstat but better indications, material UI, clean simple
 usable for non-tech people.
 
-**Current state: Phase 1 is implemented and read-only for scanned/user data.** Application
-inventory, disk analysis with a treemap plus synchronized folder tree, and developer/AI cache
+**Current state: Phases 1 and 2 are implemented and read-only for scanned/user data.**
+Application inventory, disk analysis with a treemap plus persistent synchronized folder tree,
+MFT/directory scanning, duplicate verification, storage categorization and developer/AI cache
 inspection work. There is no user-data cleanup, uninstall, process termination or registry write
 path. `clear_history` deletes only Cyron's own history file; history temp-file maintenance removes
 only Cyron-created temporary files. The debug desktop build and launch are verified on this
-machine (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`); release installers, signing and a native visual
-pass are not.
+machine (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`), and all six views were captured in both themes
+against the dev-server-backed window; release installers, signing and a standalone release build
+are not.
 
 ## Stack
 
@@ -26,10 +28,11 @@ pass are not.
 
 ## How it works (the non-obvious parts)
 
-- **IPC surface** is nine commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
-  eight discovery/scan/measurement/reveal commands plus `clear_history`, which only removes Cyron's
-  own `history.json`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors
-  the data contract. Change both together.
+- **IPC surface** is eleven commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
+  discovery/scan/duplicate/measurement/reveal commands plus `clear_history`, which only removes
+  Cyron's own `history.json`. A running job id is rejected rather than silently re-registered.
+  Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the data contract.
+  Change both together.
 - **Application discovery** (`apps.rs`) reads HKLM/HKCU uninstall keys in the 64-bit view plus
   `WOW6432Node`, drops updates/patches/system components, deduplicates by name+version+location
   (preferring machine-64), and reports `estimatedSize: null` when the installer recorded nothing.
@@ -37,13 +40,26 @@ pass are not.
 - **Directory enumeration** (`fs.rs`) uses `GetFileInformationByHandleEx(FileIdBothDirectoryInfo)`
   for logical size, allocated size and a stable file id, with a `std::fs` fallback. Reparse points
   (junctions/symlinks/mount points) are never followed.
-- **Scanner** (`scan.rs`) is depth-first and single-threaded per request. It deduplicates hard
-  links using at most 1,000,000 tracked ids, retains at most 40 file nodes per folder, and prunes
-  the IPC tree to 200 children and 8 levels. It reports top-24 extensions and top-100 largest files
-  from the walk. Cancellation is an `AtomicBool` polled per directory and entry; progress is
-  throttled to 120 ms (also polled each 512 files in a single large directory). Directory entry /
-  child vectors and the extension map can still grow with input; strict memory bounds are not
-  guaranteed.
+- **Scan method selection** (`scan.rs`): `auto` uses the MFT reader only for a drive root and the
+  directory walk elsewhere; MFT is whole-volume work and loses badly on subfolders (System32:
+  3.9 s vs 0.28 s). A requested method that falls back reports `methodNote`. Both paths return the
+  same `ScanResult` shape with `method`, `methodNote`, `outcome` and `storage`.
+- **MFT reader** (`mft.rs`) parses the boot sector, `$MFT` run list, fixups and
+  `FILE_NAME`/`$DATA`/`$STANDARD_INFORMATION`. It rejects a record count above its derived 768 MiB
+  budget (4,910,404 records) before allocating, uses one fixed 1,024-byte buffer, polls
+  cancellation every 4,096 records and dedupes hard links with a per-record bitset. It needs an
+  elevated process; otherwise it returns a fallback reason.
+- **Directory walk** (`scan.rs`) is depth-first, single-threaded and streaming: directory entries
+  are processed as read, not collected. It tracks at most 1,000,000 hard-link ids, retains at most
+  40 file nodes per folder, 200 children per folder, 100,000 tree nodes and 4,096 extension keys,
+  and reports top-24 extensions and top-100 largest files. Cancellation is an `AtomicBool` polled
+  per directory and entry; progress is throttled to 120 ms.
+- **Duplicate verification** (`duplicates.rs`) groups by size, hashes 4 KiB edges, then full
+  streaming SHA-256. Hard links are listed but do not count toward recoverable bytes. Caps: 1M
+  candidates, 200 groups, 50 files per group, with `truncated`.
+- **Storage intelligence** (`storage.rs`) assigns every byte to one of ten categories with
+  `known` vs `inferred` confidence, five age buckets and explained insights. Category text comes
+  from `category_meta`; it describes data, never removal advice.
 - **Cache catalog** (`caches.rs`) is 48 fixed env-templated locations. Risk is `safe` (regenerates),
   `caution` (re-download/reset cost) or `protected` (history, models, settings, Docker/WSL data).
   Protected entries are measured but never offered for removal. Each target is measured with
@@ -54,15 +70,19 @@ pass are not.
 - **Frontend shell** (`App.tsx`) keeps visited views mounted but hidden so scan state survives
   navigation. Settings are persisted in `localStorage["cyron.settings.v1"]` and resolve
   system/light/dark into `data-theme` on `<html>` before React mounts (no theme flash).
-- **Analyzer tree** (`features/analyzer/TreeView.tsx`) renders the pruned scan nodes as an ARIA
-  tree in the details rail, expands ancestors of the treemap selection, scrolls it into view, and
-  caps rendered rows at 500. It is the summarized IPC tree, not a full file listing.
+- **Analyzer tree** (`features/analyzer/TreeView.tsx`) is a persistent, resizable column beside
+  the treemap (220–520 px, persisted in `localStorage["cyron.analyzer.treeWidth"]`), virtualized
+  with no row cap, ARIA tree keyboard navigation and per-root reset. It is the summarized IPC tree,
+  not a full file listing.
+- **Analyzer modes and filters**: Map / Duplicates / Storage share the scan result;
+  `lib/analyzerFilters.ts` filters the tree, largest files and treemap and computes filtered
+  totals. The Duplicates panel cancels and resets when the scan scope changes.
 - **Cache request dedupe**: `lib/api.ts` memoizes `list_caches` so Overview and Cleaner share one
   disk measurement; `invalidateCaches()` forces a fresh pass.
 
 ## Conventions
 
-- Keep Phase 1 free of scanned/user-data cleanup, uninstall, process termination and registry
+- Keep Phases 1–2 free of scanned/user-data cleanup, uninstall, process termination and registry
   writes. The only deletion is clearing Cyron's own history file. Any future destructive capability
   belongs to Phase 3/4 with preview, confirmation, protected-data enforcement and rollback — never
   add a hidden user-data deletion path.
@@ -89,6 +109,7 @@ npm run tauri -- build     # release MSI/NSIS (needs bundler download; unverifie
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test real_system -- --nocapture
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test read_only -- --nocapture
+node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test stress_scan -- --nocapture
 node scripts/verify-dist.mjs
 node scripts/verify-desktop-binary.mjs
 node scripts/smoke-desktop.mjs
@@ -104,8 +125,11 @@ node scripts/smoke-desktop.mjs
 - **The treemap is a pruned view**, not a complete file list. Aggregated `group` nodes have an
   empty path and cannot be revealed in Explorer.
 - Scanning a drive root without exclusions can take a long time and hit permission errors; those
-  are reported (max 20). Output and some scan structures are capped, but per-directory entry lists
-  and extension aggregation are not strictly bounded for arbitrarily large inputs.
+  are reported (max 20). Output structures are capped, and the MFT reader checks its record budget
+  before allocating. Benchmark MFT only from an elevated shell; the harness refuses to label a
+  fallback run as MFT.
+- **MFT and walk totals differ** because one counts records and the other counts paths. Do not
+  publish either as "the" size of a volume without the counting rule.
 - **No network code exists.** Keep it that way unless a feature explicitly requires it, and never
   add telemetry by default.
 - **Store apps are missing** from the uninstaller. This is known, not a regression.
@@ -118,8 +142,9 @@ node scripts/smoke-desktop.mjs
 - `ROADMAP.md`: phase plan with honest checkboxes.
 - `HANDOFF.md`: current save state, verification results and next directive.
 - `docs/ARCHITECTURE.md`: components, IPC, scan pipeline, safety model.
-- `docs/IMPLEMENTATION_STATUS.md`: Phase 1 acceptance table and evidence.
+- `docs/IMPLEMENTATION_STATUS.md`: Phase 1 and Phase 2 acceptance tables and evidence.
+- `docs/BENCHMARKS.md`: measured scanner results, environment and caveats.
 - `DESIGN.md`: tokens, themes, component anatomy, treemap palette and accessibility rules.
-- `docs/SECURITY.md`: Phase 1 threat model and future destructive-operation gates.
+- `docs/SECURITY.md`: threat model and future destructive-operation gates.
 - `docs/BUNDLE.md`: build/installer targets, WebView2, signing status and app-data paths.
-- `GATES.md` (local, gitignored): acceptance ledger used for this build session.
+- `GATES.md`: Phase 2 acceptance ledger (tracked).
