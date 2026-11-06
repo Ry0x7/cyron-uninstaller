@@ -11,7 +11,6 @@ import type {
 } from "../../lib/types";
 import { Badge, Banner, Button, Drawer, KeyValue, Spinner, type BadgeTone } from "../../components/ui";
 import {
-  IconCheck,
   IconFile,
   IconFolder,
   IconRefresh,
@@ -409,7 +408,7 @@ export function UninstallWizard({
             </h4>
 
             {/* Standard Mode Card */}
-            {app.uninstallSupport !== "missing" && !app.isProtected && (
+            {(app.uninstallSupport !== "missing" || (app.uninstallString && app.uninstallString.trim().length > 0)) && !app.isProtected && (
               <label
                 className={`un-mode-card ${mode === "standard" ? "un-mode-card--selected" : ""}`}
                 onClick={() => setMode("standard")}
@@ -578,10 +577,7 @@ export function UninstallWizard({
             </div>
           ) : processes.length === 0 ? (
             <Banner tone="safe">
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <IconCheck size={16} />
-                <span>No active processes found for this application. Safe to proceed.</span>
-              </div>
+              <span>No active processes found for this application. Safe to proceed.</span>
             </Banner>
           ) : (
             <div className="stack" style={{ gap: 8 }}>
@@ -714,14 +710,11 @@ export function UninstallWizard({
           ) : uninstallResult ? (
             <div className="stack" style={{ gap: 12 }}>
               <Banner tone={uninstallResult.status === "completed" ? "safe" : "caution"}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <IconCheck size={16} />
-                  <div>
-                    <strong>{uninstallResult.message}</strong>
-                    <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
-                      Exit code: {uninstallResult.exitCode ?? "N/A"} · Duration:{" "}
-                      {(uninstallResult.elapsedMs / 1000).toFixed(1)}s
-                    </div>
+                <div>
+                  <strong>{uninstallResult.message}</strong>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+                    Exit code: {uninstallResult.exitCode ?? "N/A"} · Duration:{" "}
+                    {(uninstallResult.elapsedMs / 1000).toFixed(1)}s
                   </div>
                 </div>
               </Banner>
@@ -791,15 +784,21 @@ export function UninstallWizard({
             </div>
           ) : leftoverReport ? (
             leftoverReport.candidates.length === 0 ? (
-              <Banner tone="safe">
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <IconCheck size={16} />
+              <div className="stack" style={{ gap: 12 }}>
+                <Banner tone="safe">
                   <span>
                     No residual files or registry keys were found. The application was completely
                     removed!
                   </span>
-                </div>
-              </Banner>
+                </Banner>
+                {mode === "forced" && (
+                  <Banner tone="accent">
+                    <span>
+                      Notice: No file residues were detected on disk. You can clean this ghost entry from the Windows Uninstall registry.
+                    </span>
+                  </Banner>
+                )}
+              </div>
             ) : (
               <div className="stack" style={{ gap: 12 }}>
                 {/* Selection Toolbar */}
@@ -939,17 +938,31 @@ export function UninstallWizard({
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
             <Button variant="ghost" onClick={onClose}>
-              Skip Leftovers & Close
+              {leftoverReport && leftoverReport.candidates.length === 0 ? "Finish & Close" : "Skip Leftovers & Close"}
             </Button>
-            <Button
-              variant="danger"
-              icon={<IconTrash size={14} />}
-              loading={cleaning}
-              disabled={selectedCandidateIds.size === 0}
-              onClick={handleCleanLeftovers}
-            >
-              Clean Selected ({selectedCandidateIds.size})
-            </Button>
+            {leftoverReport && leftoverReport.candidates.length === 0 && mode === "forced" ? (
+              <Button
+                variant="primary"
+                loading={preparingBrokenPlan}
+                onClick={async () => {
+                  setMode("clean_entry");
+                  setStep("mode");
+                  handlePrepareCleanEntry();
+                }}
+              >
+                Clean Ghost Entry →
+              </Button>
+            ) : (
+              <Button
+                variant="danger"
+                icon={<IconTrash size={14} />}
+                loading={cleaning}
+                disabled={selectedCandidateIds.size === 0}
+                onClick={handleCleanLeftovers}
+              >
+                Clean Selected ({selectedCandidateIds.size})
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -958,14 +971,11 @@ export function UninstallWizard({
       {step === "complete" && (
         <div className="stack" style={{ gap: 16 }}>
           <Banner tone="safe">
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <IconCheck size={18} />
-              <div>
-                <strong style={{ fontSize: 14 }}>Uninstallation & Cleanup Completed</strong>
-                <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                  {app.name} has been removed and verified.
-                </p>
-              </div>
+            <div>
+              <strong style={{ fontSize: 14 }}>Uninstallation & Cleanup Completed</strong>
+              <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                {app.name} has been removed and verified.
+              </p>
             </div>
           </Banner>
 

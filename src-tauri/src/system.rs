@@ -111,7 +111,11 @@ fn query_system_specs_live() -> SystemSpecs {
         let display_ver: Result<String, _> = cv.get_value("DisplayVersion");
         let build: Result<String, _> = cv.get_value("CurrentBuild");
 
-        if let Ok(p) = prod {
+        if let Ok(mut p) = prod {
+            let build_num: u32 = build.as_ref().ok().and_then(|b| b.parse().ok()).unwrap_or(0);
+            if build_num >= 22000 && p.contains("Windows 10") {
+                p = p.replacen("Windows 10", "Windows 11", 1);
+            }
             os_name = p;
             if let Ok(v) = display_ver {
                 os_name = format!("{os_name} {v}");
