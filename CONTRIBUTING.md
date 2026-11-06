@@ -78,11 +78,14 @@ node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture
 node scripts/verify-cleanup.mjs
+node scripts/verify-e2e.mjs
+node scripts/benchmark-competitive.mjs
 
-# Desktop build and smoke test
+# Desktop build, smoke test, and release bundles
 npm run build:desktop
 node scripts/verify-desktop-binary.mjs
 node scripts/smoke-desktop.mjs
+node scripts/verify-release-bundles.mjs
 ```
 
 ---

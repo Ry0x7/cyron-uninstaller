@@ -99,7 +99,7 @@ function batchTotal(batches: QuarantineBatch[] | null): number {
   return (batches ?? []).reduce((total, batch) => total + batch.bytes, 0);
 }
 
-export function Cleaner() {
+export function Cleaner({ initialTargetId }: { initialTargetId?: string | null } = {}) {
   const { settings } = useSettings();
   const exclusions = settings.exclusions;
   const [inventory, setInventory] = useState<CacheInventory | null>(null);
@@ -113,6 +113,16 @@ export function Cleaner() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("cleanup");
+
+  useEffect(() => {
+    if (initialTargetId && inventory) {
+      const match = inventory.targets.find((t) => t.id === initialTargetId);
+      if (match && isSelectable(match)) {
+        setSelected(new Set([initialTargetId]));
+        setTab("cleanup");
+      }
+    }
+  }, [initialTargetId, inventory]);
 
   const [readOnly, setReadOnly] = useState<boolean | null>(null);
   const [modeBusy, setModeBusy] = useState(false);

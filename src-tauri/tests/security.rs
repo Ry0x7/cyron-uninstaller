@@ -455,11 +455,11 @@ fn destructive_calls_stay_inside_reviewed_modules() {
                 );
             }
 
-            // Registry deletion is restricted strictly to leftovers.rs
+            // Registry deletion is restricted strictly to leftovers.rs (with backup) and explorer.rs (app shell verbs)
             if lower.contains(".delete_subkey") || lower.contains("regkey::delete_") || lower.contains("regdelete") {
-                assert_eq!(
-                    name, "leftovers.rs",
-                    "Registry deletion is only permitted in leftovers.rs with prior backup, found in {}:{}",
+                assert!(
+                    name == "leftovers.rs" || name == "explorer.rs",
+                    "Registry deletion is only permitted in leftovers.rs (with prior backup) or explorer.rs (unregistration), found in {}:{}",
                     file.display(),
                     line_number + 1
                 );
@@ -896,6 +896,10 @@ fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
         scope: "user".into(),
         architecture: "x64".into(),
         is_protected: false,
+        source: "win32".into(),
+        uninstall_support: "standard".into(),
+        confidence: "confirmed".into(),
+        detection_reason: None,
     }).collect();
     assert!(uninstall::create_batch_uninstall_plan(&many_apps, false).is_err());
 
@@ -915,6 +919,10 @@ fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
         scope: "user".into(),
         architecture: "x64".into(),
         is_protected: false,
+        source: "win32".into(),
+        uninstall_support: "standard".into(),
+        confidence: "confirmed".into(),
+        detection_reason: None,
     }];
     assert!(uninstall::create_batch_uninstall_plan(&shell_app, false).is_err());
 }

@@ -176,6 +176,20 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
    - Registry backup validation checks syntax structure across all 6 Windows value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) and nested subkeys before deleting any key.
    - Registry restoration reports all failures and never claims success on partial recovery.
 
+7. **Explorer Integration Boundary & Path Sanitization (Phase 6)**:
+   - Shell verb registration is strictly per-user under `HKCU\Software\Classes` and does not require administrator privileges.
+   - Context-menu commands invoke Cyron with tightly restricted command-line arguments: `--analyze`, `--duplicates`, `--storage`, `--uninstall-target`, and `--find-related`.
+   - All input paths received from CLI arguments are canonicalized and validated (`sanitize_target_path`). Raw UNC device paths (`\\.\`), wildcard characters, control characters, and nonexistent paths are rejected.
+   - Invoking Cyron from Explorer opens the corresponding inspection view in Cyron; it **never** triggers uninstallation, process termination, file quarantine, or any destructive action automatically.
+   - Executable right-clicks (`--uninstall-target` and `--find-related`) query registered Win32, Store, Steam, and portable applications server-side to match the target binary. They never execute the clicked file or assume an unregistered executable can be safely uninstalled.
+
+8. **Extensible Declarative Cleanup Provider Schema Validation (Phase 6)**:
+   - Providers are validated against `schema_version: 1` specifications before being accepted into the cleaning engine.
+   - Target roots must strictly use approved environment variable tokens (`%USERPROFILE%`, `%LOCALAPPDATA%`, `%APPDATA%`, `%TEMP%`, `%PROGRAMDATA%`, `%SYSTEMROOT%`).
+   - Path traversal components (`..`) and directory wildcards are strictly rejected.
+   - Providers are forbidden from targeting entire system roots, user profiles, or Windows system folders.
+   - Providers cannot override or demote protected catalog targets (source repositories, virtual environments, Docker/WSL, model weights, browser profiles) to safe or caution risks.
+
 ---
 
 ## Code Signing & Release Security

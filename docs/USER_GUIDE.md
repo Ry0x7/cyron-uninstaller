@@ -15,9 +15,16 @@ The Overview view provides an instant snapshot of your system storage and develo
 
 ## 2. Applications & Uninstallation
 
-The Uninstaller view provides transparent management of all desktop software registered in the 64-bit and 32-bit Windows registry.
+The Uninstaller view provides transparent management of all desktop software, modern store packages, and gaming installations across your system.
 
 ### Features
+- **Multi-Source Inventory**:
+  - **Win32 Applications**: Standard 64-bit and 32-bit software registered in the Windows uninstall registry.
+  - **Microsoft Store / AppX / MSIX**: Modern packaged apps enumerated via `AppModel\Repository\Packages`.
+  - **Steam Games**: Multi-library game discovery reading `libraryfolders.vdf` and `appmanifest_*.acf`.
+  - **Portable Applications**: Discovers standalone executables installed under `%LOCALAPPDATA%\Programs`.
+  - **Broken Records**: Flags uninstall entries whose executable or uninstall string targets missing binaries.
+- **Source Filtering & Badges**: Filter easily between `All`, `Win32`, `Store`, `Steam`, `Portable`, and `Broken` records.
 - **Application Search & Filtering**: Filter by publisher, name, or installation scope (machine-wide vs per-user).
 - **Size Measurement**: Because many installers record inaccurate or missing sizes, use the **Measure folder** action to calculate exact on-disk byte totals.
 - **Process Manager**:
@@ -45,6 +52,7 @@ The Uninstaller view provides transparent management of all desktop software reg
 Analyze where disk space went across any directory or drive:
 - **Visual Treemap**: High-performance Squarified treemap rendering directory sizes proportionally.
 - **Synchronized Hierarchy Tree**: Resizable virtualized folder tree synchronized with the treemap selection.
+- **Direct Cleaner Integration**: Selecting recognized developer or cache folders (e.g., `.gradle`, `.cargo`, `node_modules`, pip cache, NuGet) displays a cleanable callout in Selection Details, showing expected reclaimable space and providing a 1-click **Review for Cleanup** shortcut directly to the Cleaner drawer.
 - **Scanning Methods**:
   - **Directory Walk**: Depth-first streaming traversal that tracks hard links and respects memory bounds.
   - **NTFS MFT Reader**: High-speed Master File Table parser for full volume scans when running with administrator privileges.
@@ -66,6 +74,7 @@ Locate redundant files safely:
 ## 5. Review-First Cache Cleaner
 
 Clean accumulated build artifacts, package manager caches, and disposable temporary data:
+- **Declarative Providers**: Built upon versioned (`schema_version: 1`) declarative provider definitions covering developer tooling, package managers, and temporary caches.
 - **Preview First**: Calculates exact file counts and byte totals before asking for approval.
 - **Snapshot Binding**: Cleanup execution verifies that on-disk files match the approved preview snapshot. Any unexpected file created during the preview is preserved.
 - **Durable Quarantine**: Files are renamed into an app-data quarantine batch alongside a crash-consistent write-ahead recovery journal (`recovery_journal.jsonl`).
@@ -86,5 +95,12 @@ The Activity view maintains an audit log of past scans and quarantine batches:
 ## 7. Settings & Safety Controls
 
 - **Read-Only Mode**: Enabled by default upon initial installation. When active, all destructive operations (cleanup, leftover quarantine, process termination) are completely blocked by the backend.
+- **Windows Explorer Integration**:
+  - Optional native right-click integration registered cleanly under `HKCU\Software\Classes` without needing administrator rights.
+  - **Folders & Drives**: "Analyze with Cyron", "Find Duplicates with Cyron", and "View Storage Breakdown".
+  - **Executables (`.exe`)**: "Uninstall with Cyron" (opens registered uninstaller review) and "Find Related Files" (opens residual file review).
+  - Single-click **Enable**, **Disable**, and **Repair** controls in Settings. Clean uninstallation completely removes all registered shell verbs.
+- **Exclusion Folders**: Define specific absolute directory paths that the scanner and cleaner must never touch.
+- **Theme**: Choose between System, Light, and Dark themes with zero theme flicker on startup.
 - **Exclusion Folders**: Define specific absolute directory paths that the scanner and cleaner must never touch.
 - **Theme**: Choose between System, Light, and Dark themes with zero theme flicker on startup.

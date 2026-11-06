@@ -98,6 +98,12 @@ describe("Tauri IPC contract", () => {
       { run: () => api.cleanAppLeftovers("app-1", "plan-1", ["c1"]), command: "clean_app_leftovers", args: { appId: "app-1", planId: "plan-1", candidateIds: ["c1"] } },
       { run: () => api.prepareBatchUninstall(["app-1", "app-2"], false), command: "prepare_batch_uninstall", args: { appIds: ["app-1", "app-2"], quiet: false } },
       { run: () => api.executeBatchUninstall("batch-plan-1"), command: "execute_batch_uninstall", args: { planId: "batch-plan-1" } },
+      { run: () => api.getStartupRoute(), command: "get_startup_route", args: undefined },
+      { run: () => api.getExplorerIntegrationStatus(), command: "get_explorer_integration_status", args: undefined },
+      { run: () => api.setExplorerIntegration(true), command: "set_explorer_integration", args: { enabled: true } },
+      { run: () => api.repairExplorerIntegration(), command: "repair_explorer_integration", args: undefined },
+      { run: () => api.listCleanupProviders(), command: "list_cleanup_providers", args: undefined },
+      { run: () => api.inspectCleanableDirectory("C:\\cache"), command: "inspect_cleanable_directory", args: { path: "C:\\cache" } },
     ];
 
     for (const { run, command, args } of calls) {

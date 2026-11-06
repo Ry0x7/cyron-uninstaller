@@ -24,6 +24,10 @@ import type {
   UninstallExecutionResult,
   UninstallPlan,
   VolumeInfo,
+  StartupRoute,
+  ExplorerIntegrationStatus,
+  CleanableInspection,
+  CleanupProviderDef,
 } from "./types";
 
 export function isDesktop(): boolean {
@@ -110,6 +114,15 @@ export const api = {
     call<BatchUninstallPlan>("prepare_batch_uninstall", { appIds, quiet }),
   executeBatchUninstall: (planId: string) =>
     call<BatchUninstallReport>("execute_batch_uninstall", { planId }),
+  getStartupRoute: () => call<StartupRoute | null>("get_startup_route"),
+  getExplorerIntegrationStatus: () =>
+    call<ExplorerIntegrationStatus>("get_explorer_integration_status"),
+  setExplorerIntegration: (enabled: boolean) =>
+    call<void>("set_explorer_integration", { enabled }),
+  repairExplorerIntegration: () => call<void>("repair_explorer_integration"),
+  listCleanupProviders: () => call<CleanupProviderDef[]>("list_cleanup_providers"),
+  inspectCleanableDirectory: (path: string) =>
+    call<CleanableInspection>("inspect_cleanable_directory", { path }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

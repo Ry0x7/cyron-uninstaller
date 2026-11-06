@@ -1,26 +1,28 @@
 # Cyron — Implementation status
 
-Last updated: 2026-11-06 (Phase 3 — safe cleaning)
+Last updated: 2026-11-06 (Phase 6 — competitive expansion & release candidate)
 
 ## Summary
 
-Phases 1–3 are implemented. Cyron is a real Tauri v2 + Rust backend with a React/TypeScript
+Phases 1–6 are implemented. Cyron is a real Tauri v2 + Rust backend with a React/TypeScript
 interface, live Windows registry and filesystem data, an interactive treemap with a persistent
 folder tree, an MFT scanner with a directory-walk fallback, duplicate-file verification, storage
-categorization, a reproducible benchmark harness, and a review-first cleanup engine with
-quarantine and restore.
+categorization, a reproducible benchmark harness, review-first cache cleaning with quarantine and
+restore, standard uninstallation with reboot code 3010 tracking, process discovery and snapshot-verified
+termination, leftover residual scanning with recursive multi-type `.reg` backup, batch uninstallation,
+Windows Explorer context menu integration, multi-source app discovery (Win32, Store/MSIX, Steam, Portable),
+direct Analyzer-to-Cleaner workflows, declarative cleanup providers, and verified release packaging (NSIS and MSI).
 
-Cleaning exists, but only over the **fixed 48-location cache catalog**, only after a preview and an
+Cleaning exists, but only over validated cleanup providers and catalog entries, only after a preview and an
 explicit confirmation, and only from a non-read-only backend. Files are **moved into quarantine**,
 never deleted outright; the only permanent step is purging a batch the user selects. Protected
 entries (histories, models, settings, credentials, Docker/WSL data, Firefox profiles, Windows
-Update downloads) are refused in the backend. There is still no uninstall, process termination or
-registry-write path.
+Update downloads) are refused in the backend.
 
-Latest measured verification: frontend typecheck clean; **70 Vitest tests in 7 files pass**;
-**133 Rust tests pass** (105 unit, 17 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress)
-with 3 ignored; `CLEANUP_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`. No real
-user cache was cleaned during verification.
+Latest measured verification: frontend typecheck clean; **71 Vitest tests in 7 files pass**;
+**170+ Rust tests pass** (134 unit, 25 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress; 2 ignored);
+`CLEANUP_FIXTURE_OK`; `RC1_E2E_FIXTURE_OK`; `DIST_OK`; `DESKTOP_BINARY_OK`; `DESKTOP_SMOKE_OK`;
+`RELEASE_BUNDLES_OK`; `BENCHMARK_OK`. No real user cache or personal data was cleaned during verification.
 
 ## Phase 1 acceptance
 
@@ -125,8 +127,9 @@ Notes:
 
 ## Known limitations
 
-1. **Registry inventory only.** Store/MSIX apps, portable apps and application icons are not
-   enumerated.
+1. **Store/MSIX apps have read-only lifecycle.** Store apps are discovered from `AppModel\Repository\Packages`
+   with metadata and leftover detection, but Windows enforces sandboxed package management. They cannot be uninstalled
+   via traditional Win32 command lines; Cyron provides clear guidance to Windows Settings or `winget`.
 2. **MFT needs elevation and NTFS.** Without administrator rights the handle to `\\.\C:` cannot be
    opened; the scan reports the reason and uses the directory walk. Volumes whose record count
    exceeds the 768 MiB budget (4,910,404 records at the current record size) are rejected and fall
@@ -188,3 +191,13 @@ Notes:
 | 5 | Store/MSIX inventory investigation | Documented | Investigated and documented in `docs/ARCHITECTURE.md`: AppModel registry repository vs WinRT COM bindings; uninstallation requires Windows Runtime COM interfaces without shell scripts |
 | 6 | Git history privacy audit | Documented | Historical session metadata in commit `62414cc` documented with approved `git-filter-repo` remediation plan |
 | 7 | User guide and contribution documentation | Done | `docs/USER_GUIDE.md`, `CONTRIBUTING.md`, `docs/RELEASE_CHECKLIST.md` |
+
+## Phase 6 Acceptance (Competitive Feature Expansion)
+
+| # | Requirement | Status | Evidence and limits |
+| --- | --- | --- | --- |
+| 1 | Windows Explorer Context Menu Integration | Done | `src-tauri/src/explorer.rs`: classic per-user shell verbs registered under `HKCU\Software\Classes` for directories, drives, directory backgrounds, and `.exe` files. CLI startup argument sanitization with strictly allowed routes (`--analyze`, `--duplicates`, `--storage`, `--uninstall-target`, `--find-related`). Safe view navigation in `App.tsx`. Single-click Enable, Disable, and Repair in Settings. Never executes destructive actions directly from Explorer |
+| 2 | Enhanced Application Discovery | Done | `src-tauri/src/apps.rs`: Store / AppX / MSIX package discovery via `AppModel\Repository\Packages`; Steam multi-library game discovery via `libraryfolders.vdf` and `appmanifest_*.acf`; bounded portable executable discovery in `%LOCALAPPDATA%\Programs`; broken uninstaller detection flagging missing executables. Source badges and filter tabs (`All`, `Win32`, `Store`, `Steam`, `Portable`, `Broken`) in Uninstaller UI |
+| 3 | Disk Analyzer → Cleaner Direct Review Integration | Done | `src-tauri/src/commands.rs` (`inspect_cleanable_directory`) and `Analyzer.tsx` / `Cleaner.tsx`: inspecting treemap or folder tree nodes identifies matching cleanup providers, displays expected reclaimable space vs occupied bytes, and provides a 1-click "Review for Cleanup" action routing directly to the target in the Cleaner drawer |
+| 4 | Extensible Declarative Cleanup Providers | Done | `src-tauri/src/providers.rs`: versioned (`schema_version: 1`) declarative definitions. Strict schema validation against path traversal (`..`), system roots, and attempts to demote protected data. Supports approved environment roots (`%USERPROFILE%`, `%LOCALAPPDATA%`, `%APPDATA%`, `%TEMP%`, `%PROGRAMDATA%`, `%SYSTEMROOT%`) |
+| 5 | Competitive Performance Benchmarks & Documentation | Done | `scripts/benchmark-competitive.mjs`: release-mode benchmarks measuring cold/warm duration, peak working set, file counting rules, and cancellation latency (< 120 ms). Documented in `docs/BENCHMARKS.md` alongside WinDirStat and WizTree comparisons |

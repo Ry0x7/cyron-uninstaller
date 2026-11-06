@@ -82,6 +82,10 @@ fn main() {
         scope: "user".into(),
         architecture: "x64".into(),
         is_protected: false,
+        source: "win32".into(),
+        uninstall_support: "standard".into(),
+        confidence: "confirmed".into(),
+        detection_reason: Some("Mock test fixture".into()),
     };
 
     let batch_plan = uninstall::create_batch_uninstall_plan(&[mock_app.clone()], true)

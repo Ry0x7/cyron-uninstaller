@@ -3,11 +3,13 @@ pub mod caches;
 pub mod cleanup;
 pub mod commands;
 pub mod duplicates;
+pub mod explorer;
 pub mod fs;
 pub mod history;
 pub mod leftovers;
 pub mod mft;
 pub mod process;
+pub mod providers;
 pub mod scan;
 pub mod storage;
 pub mod uninstall;
@@ -28,6 +30,7 @@ pub struct AppState {
     pub batch_uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredBatchUninstallPlan>>>,
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
+    pub startup_route: Arc<Mutex<Option<explorer::StartupRoute>>>,
     /// True until the user deliberately enables cleaning.
     pub read_only: Arc<AtomicBool>,
 }
@@ -43,15 +46,21 @@ impl Default for AppState {
             batch_uninstall_plans: Arc::default(),
             process_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
+            startup_route: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
         }
     }
 }
 
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    let startup_route = explorer::parse_startup_args(&args);
+    let mut state = AppState::default();
+    state.startup_route = Arc::new(Mutex::new(startup_route));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::default())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::list_installed_apps,
             commands::list_volumes,
@@ -81,6 +90,12 @@ pub fn run() {
             commands::scan_app_leftovers,
             commands::clean_app_leftovers,
             commands::execute_batch_uninstall,
+            commands::get_startup_route,
+            commands::get_explorer_integration_status,
+            commands::set_explorer_integration,
+            commands::repair_explorer_integration,
+            commands::list_cleanup_providers,
+            commands::inspect_cleanable_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");

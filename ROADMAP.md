@@ -162,6 +162,15 @@ size cap or expiry sweep; batches stay until purged.
 - [x] UI/UX audit & branding cleanup: removed obsolete "Phase 1 is read-only" from bundle descriptions and Settings, verified all six views.
 - [x] Release automation gating: `.github/workflows/release.yml` enforces test suites, runs installer verification, and publishes unsigned release candidates as draft pre-releases with explicit disclaimers.
 
+## Phase 6 — Competitive Expansion & Explorer Integration (implemented)
+
+- [x] Native Windows Explorer context menu integration: per-user `HKCU\Software\Classes` shell verbs for folders, drives, and executables (Analyze, Find Duplicates, Storage Breakdown, Uninstall Review, Related Files) with icon binding, clean unregistration, and Settings toggle/repair controls.
+- [x] Enhanced multi-source application discovery: Microsoft Store / AppX / MSIX read-only inventory with Windows Package Manager lifecycle guidance, Steam multi-library game discovery (`libraryfolders.vdf` + `appmanifest_*.acf`), and bounded heuristic portable executable detection.
+- [x] Disk Analyzer → Cleaner direct review: Selecting cleanable cache directories from treemap or folder tree surfaces "Review for Cleanup", displaying expected reclaimable bytes and launching the review-first workflow.
+- [x] Extensible Declarative Cleanup Providers: Versioned (`schema_version: 1`) provider definitions with strict path template validation, safe environment root enforcement, and automated rejection of malicious path definitions.
+- [x] Competitive Performance & Benchmarking: Added `scripts/benchmark-competitive.mjs`, measuring cold vs warm latency, peak working set, file counting rules, and cancellation response against WinDirStat/WizTree metrics.
+- [x] UI/UX Audit & Accessibility Polish: Source filter tabs, status badges, clear Store/Portable app lifecycle guidance, high-contrast dark/light tokens, and full keyboard navigation.
+
 ## Non-negotiable constraints for every phase
 
 - Never recursively delete arbitrary directories based on names.

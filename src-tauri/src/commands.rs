@@ -1152,6 +1152,98 @@ fn human_duration(ms: u64) -> String {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanableInspection {
+    pub path: String,
+    pub is_recognized: bool,
+    pub provider_id: Option<String>,
+    pub tool_label: Option<String>,
+    pub risk: Option<String>,
+    pub category: Option<String>,
+    pub explanation: String,
+    pub is_cleanable: bool,
+    pub expected_reclaimable_bytes: u64,
+    pub total_occupied_bytes: u64,
+}
+
+#[tauri::command]
+pub fn get_startup_route(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::explorer::StartupRoute>, String> {
+    let mut guard = state.startup_route.lock().map_err(|e| e.to_string())?;
+    Ok(guard.take())
+}
+
+#[tauri::command]
+pub fn get_explorer_integration_status() -> Result<crate::explorer::ExplorerIntegrationStatus, String> {
+    Ok(crate::explorer::get_integration_status())
+}
+
+#[tauri::command]
+pub fn set_explorer_integration(enabled: bool) -> Result<(), String> {
+    if enabled {
+        crate::explorer::register_explorer_integration()
+    } else {
+        crate::explorer::unregister_explorer_integration()
+    }
+}
+
+#[tauri::command]
+pub fn repair_explorer_integration() -> Result<(), String> {
+    crate::explorer::register_explorer_integration()
+}
+
+#[tauri::command]
+pub fn list_cleanup_providers() -> Result<Vec<crate::providers::CleanupProviderDef>, String> {
+    Ok(crate::providers::get_default_providers())
+}
+
+#[tauri::command]
+pub fn inspect_cleanable_directory(
+    path: String,
+) -> Result<CleanableInspection, String> {
+    let canonical = validate_directory(&path)?;
+    let providers = crate::providers::get_default_providers();
+
+    if let Some((provider, _)) = crate::providers::match_path_to_provider(&providers, &canonical) {
+        let is_cleanable = provider.risk != crate::providers::PROTECTED;
+        let measured = scan::measure_path(&canonical);
+        let explanation = if provider.risk == crate::providers::PROTECTED {
+            format!("Protected cache: {}. Cyron protects user history and configurations from automated deletion.", provider.impact)
+        } else {
+            format!("Recognized {}: {}. Space will be reclaimed via quarantine.", provider.tool, provider.impact)
+        };
+
+        Ok(CleanableInspection {
+            path: canonical.to_string_lossy().to_string(),
+            is_recognized: true,
+            provider_id: Some(provider.id.clone()),
+            tool_label: Some(provider.tool.clone()),
+            risk: Some(provider.risk.clone()),
+            category: Some(provider.category.clone()),
+            explanation,
+            is_cleanable,
+            expected_reclaimable_bytes: if is_cleanable { measured.allocated } else { 0 },
+            total_occupied_bytes: measured.allocated,
+        })
+    } else {
+        let measured = scan::measure_path(&canonical);
+        Ok(CleanableInspection {
+            path: canonical.to_string_lossy().to_string(),
+            is_recognized: false,
+            provider_id: None,
+            tool_label: None,
+            risk: None,
+            category: None,
+            explanation: "Not a recognized cache location. Cyron only cleans reviewed, validated cache targets to prevent accidental data loss.".to_string(),
+            is_cleanable: false,
+            expected_reclaimable_bytes: 0,
+            total_occupied_bytes: measured.allocated,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1427,5 +1519,24 @@ mod tests {
         assert!(validate_cleanup_record_id("cleanup-1700000000-1-0").is_ok());
         assert!(validate_cleanup_record_id("..\\secrets").is_err());
         assert!(validate_cleanup_record_id("").is_err());
+    }
+
+    #[test]
+    fn inspect_cleanable_directory_identifies_unrecognized_folders() {
+        let dir = temp_dir();
+        let inspection = inspect_cleanable_directory(dir.to_string_lossy().to_string())
+            .expect("inspection succeeds");
+        assert!(!inspection.is_recognized);
+        assert!(!inspection.is_cleanable);
+        assert_eq!(inspection.expected_reclaimable_bytes, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_cleanup_providers_returns_valid_catalog() {
+        let providers = list_cleanup_providers().expect("returns providers");
+        assert!(!providers.is_empty());
+        assert!(providers.iter().any(|p| p.id == "npm-cache"));
+        assert!(providers.iter().any(|p| p.id == "claude-code-projects"));
     }
 }

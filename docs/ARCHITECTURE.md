@@ -21,7 +21,7 @@ communication for non-technical users.
 | Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
 | Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json`, `recovery_journal.jsonl` and `quarantine/` in the Tauri app-data dir |
 | Frontend tests | Vitest, 71 tests in 7 files |
-| Backend tests | `cargo test`: 148 passed (116 unit, 21 security, 5 cleanup-stress, 1 real-system, 5 scanner-stress), 3 ignored |
+| Backend tests | `cargo test`: 171 passed (134 unit, 25 security, 5 cleanup-stress, 1 real-system, 6 scanner-stress), 3 ignored |
 
 Native APIs used by the backend:
 
@@ -70,9 +70,11 @@ src-tauri/
   src/process.rs              process discovery, critical-process protection, controlled termination
   src/uninstall.rs            safe command parsing, uninstaller execution, exit code tracking
   src/leftovers.rs            leftover scanning, registry backup, residual quarantine
+  src/explorer.rs             Windows Explorer right-click shell verbs, CLI routing, path validation
+  src/providers.rs            declarative cleanup provider system, schema validator, safety enforcement
   src/volumes.rs              local volume capacity
   src/history.rs              app-data history persistence
-  src/commands.rs             validated Tauri command layer (26 commands)
+  src/commands.rs             validated Tauri command layer (34 commands)
   src/lib.rs                  state, dialog plugin, command registration
   tests/real_system.rs        live registry/cache/scan integration test
   tests/security.rs           permission boundaries, protected paths, links, fixtures
@@ -80,6 +82,7 @@ src-tauri/
   tests/stress_scan.rs        wide/deep/denied/cancellation stress tests
   examples/scan_bench.rs      benchmark binary used by scripts/bench-scan.mjs
   examples/cleanup_fixture.rs isolated end-to-end cleanup verification
+  examples/rc1_e2e_fixture.rs comprehensive uninstaller, process, and residual e2e fixture
 scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark checks
 ```
 
@@ -87,18 +90,23 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 
 | Module | Responsibility |
 | --- | --- |
-| `apps.rs` | Enumerates `HKLM`/`HKCU` uninstall keys in the 64-bit view and the `WOW6432Node` 32-bit view, parses values, filters non-products, flags protected system locations, deduplicates duplicate registrations and sorts by name. |
+| `apps.rs` | Enumerates `HKLM`/`HKCU` uninstall keys (64-bit and 32-bit views), Microsoft Store packages (`AppModel\Repository\Packages`), Steam libraries (`libraryfolders.vdf`), and bounded portable binaries (`%LOCALAPPDATA%\Programs`). Identifies broken uninstallers and provides source tags. |
 | `fs.rs` | Opens a directory with `FILE_LIST_DIRECTORY` + `FILE_FLAG_BACKUP_SEMANTICS` and reads `FILE_ID_BOTH_DIR_INFO` batches. Returns name, attributes, logical size, `AllocationSize`, file id and last-write time. Falls back to `std::fs` when the native path fails or exceeds an 8 MiB listing buffer. |
 | `mft.rs` | Reads the NTFS boot sector and `$MFT` run list, validates record counts against a derived memory budget, applies update-sequence fixups, parses `FILE_NAME`/`$DATA`/`$STANDARD_INFORMATION`, deduplicates hard links with a record bitset, and builds the requested subtree. Cancellation and progress are polled during parsing. Any failure returns a fallback reason. |
 | `scan.rs` | Chooses the scan method, then runs the streaming directory walk: depth/error/stat-output/tree caps, exclusions, hidden/system filtering, reparse skipping, totals, extension stats, largest files, hard-link tracking, throttled progress and cancellation. Builds `StorageReport` alongside the tree. `measure_path` reuses the walker without a tree or cancellation. |
 | `duplicates.rs` | Walks a root for files at or above `minSize`, groups by size, confirms groups with 4 KiB head/tail SHA-256, then full streaming SHA-256. Tracks hard links by file id, polls cancellation, emits `cyron-duplicate-progress`, caps candidates/groups/files and reports truncation. |
 | `storage.rs` | Classifies bytes into ten categories by known root and extension, marks known vs inferred confidence, buckets files by age, and derives up to six explained insights (large, old, developer-heavy). |
-| `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. Also carries the per-entry impact text the Cleaner shows. |
-| `cleanup.rs` | The only destructive module. Resolves catalog ids to specs, enforces `guard_path`, plans and measures a preview, executes a server-held plan by moving files into a quarantine batch, and implements list/restore/purge plus the capped cleanup log. |
+| `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. |
+| `providers.rs` | Declarative versioned (`schema_version: 1`) cleanup provider system. Enforces approved environment roots, validates path templates and patterns, rejects path traversals, wildcards in roots, and attempts to mark protected data safe. |
+| `cleanup.rs` | The primary cache cleanup engine. Resolves catalog ids to specs, enforces `guard_path`, plans and measures a preview, executes a server-held plan by moving files into a quarantine batch, and implements list/restore/purge plus the capped cleanup log. |
+| `explorer.rs` | Registers and unregisters native per-user Windows shell context menu verbs under `HKEY_CURRENT_USER\Software\Classes` without administrator elevation. Parses startup CLI arguments (`--analyze`, `--duplicates`, `--storage`, `--uninstall-target`, `--find-related`) and sanitizes paths. |
+| `process.rs` | Discovers processes executing from an application root, snapshots process state with 64-bit creation times (`GetProcessTimes`) to defeat PID recycling, denies Windows critical processes, and executes graceful `WM_CLOSE` preceding `TerminateProcess`. |
+| `uninstall.rs` | Resolves vendor commands server-side from live registry keys, creates expiring single-use plans (`UninstallPlan`, `BatchUninstallPlan`), tokenizes commands safely, normalizes MSI invocations, and tracks exit codes (including code 3010 reboot requests). |
+| `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `commands.rs` | Path/job/plan validation, background execution, the scan, duplicate-scan and cleanup-cancel registries, the single-use plan registry, event emission, history and log recording, Explorer reveal and measurement commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState { scans, duplicate_scans, plans, cleanup_jobs, read_only }` and the nineteen commands. `read_only` starts `true`. |
+| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 34 validated IPC commands. |
+| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 34 Tauri commands. `read_only` starts `true`. |
 
 ## IPC surface
 

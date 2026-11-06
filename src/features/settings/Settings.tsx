@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api, errorMessage } from "../../lib/api";
 import { useSettings, type ThemePreference } from "../../lib/settings";
+import type { ExplorerIntegrationStatus } from "../../lib/types";
 import {
   Badge,
+  Banner,
   Button,
   Field,
   KeyValue,
@@ -114,6 +117,56 @@ export function Settings() {
       setExclusionText(savedExclusions);
     }
   }, [savedExclusions]);
+
+  const [explorerStatus, setExplorerStatus] = useState<ExplorerIntegrationStatus | null>(null);
+  const [explorerLoading, setExplorerLoading] = useState(false);
+  const [explorerMsg, setExplorerMsg] = useState<{ tone: "safe" | "caution" | "danger"; text: string } | null>(null);
+
+  const loadExplorerStatus = () => {
+    api.getExplorerIntegrationStatus()
+      .then(setExplorerStatus)
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    loadExplorerStatus();
+  }, []);
+
+  const handleToggleExplorer = async (enable: boolean) => {
+    setExplorerLoading(true);
+    setExplorerMsg(null);
+    try {
+      await api.setExplorerIntegration(enable);
+      setExplorerMsg({
+        tone: "safe",
+        text: enable
+          ? "Windows Explorer right-click integration registered in HKCU."
+          : "Windows Explorer right-click integration cleanly unregistered.",
+      });
+      loadExplorerStatus();
+    } catch (err) {
+      setExplorerMsg({ tone: "danger", text: errorMessage(err) });
+    } finally {
+      setExplorerLoading(false);
+    }
+  };
+
+  const handleRepairExplorer = async () => {
+    setExplorerLoading(true);
+    setExplorerMsg(null);
+    try {
+      await api.repairExplorerIntegration();
+      setExplorerMsg({
+        tone: "safe",
+        text: "Windows Explorer integration repaired and pointed to the current binary path.",
+      });
+      loadExplorerStatus();
+    } catch (err) {
+      setExplorerMsg({ tone: "danger", text: errorMessage(err) });
+    } finally {
+      setExplorerLoading(false);
+    }
+  };
 
   // Persist the parsed list shortly after typing stops.
   useEffect(() => {
@@ -322,6 +375,77 @@ export function Settings() {
                 them. Application uninstallation, process management, and residual cleanup are review-first
                 and require server-verified confirmation plans.
               </p>
+            </Panel>
+
+            <Panel title="Windows Explorer Integration">
+              <div className="set-status">
+                {explorerStatus?.isRegistered && !explorerStatus?.needsRepair ? (
+                  <Badge tone="safe">Registered in user shell (HKCU)</Badge>
+                ) : explorerStatus?.needsRepair ? (
+                  <Badge tone="caution">Needs repair / Path mismatch</Badge>
+                ) : (
+                  <Badge tone="neutral">Not registered</Badge>
+                )}
+              </div>
+
+              <p className="set-note set-note--spaced">
+                Optional native Windows right-click menu integration for folders, drives, and executables.
+                Registered exclusively in <code>HKEY_CURRENT_USER\Software\Classes</code> without requiring
+                administrator privileges.
+              </p>
+
+              <ul className="set-guards">
+                <li className="set-guard">
+                  <IconCheck size={14} />
+                  <span><strong>Folders &amp; Drives:</strong> Analyze, Find Duplicates, View Storage Breakdown</span>
+                </li>
+                <li className="set-guard">
+                  <IconCheck size={14} />
+                  <span><strong>Executables:</strong> Review Uninstallation, Find Related Files</span>
+                </li>
+                <li className="set-guard">
+                  <IconCheck size={14} />
+                  <span><strong>Safe execution:</strong> Never triggers destructive actions directly from Explorer</span>
+                </li>
+              </ul>
+
+              {explorerMsg && (
+                <div style={{ marginTop: 12 }}>
+                  <Banner tone={explorerMsg.tone}>{explorerMsg.text}</Banner>
+                </div>
+              )}
+
+              <div className="set-actions" style={{ marginTop: 16 }}>
+                {explorerStatus?.isRegistered ? (
+                  <div className="row" style={{ gap: 8 }}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={explorerLoading}
+                      onClick={() => handleToggleExplorer(false)}
+                    >
+                      Disable integration
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={explorerLoading}
+                      onClick={handleRepairExplorer}
+                    >
+                      Repair / Re-register
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={explorerLoading}
+                    onClick={() => handleToggleExplorer(true)}
+                  >
+                    Enable Explorer integration
+                  </Button>
+                )}
+              </div>
             </Panel>
 
             <Panel title="Data">

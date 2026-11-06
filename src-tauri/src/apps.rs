@@ -1,10 +1,12 @@
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use winreg::enums::*;
 use winreg::RegKey;
 
-/// One installed application discovered from the Windows uninstall registry.
-#[derive(Debug, Clone, Serialize)]
+/// One installed application discovered from the Windows uninstall registry,
+/// Microsoft Store packages, Steam libraries, or portable heuristics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledApp {
     pub id: String,
@@ -16,9 +18,9 @@ pub struct InstalledApp {
     pub uninstall_string: Option<String>,
     pub quiet_uninstall_string: Option<String>,
     pub display_icon: Option<String>,
-    /// EstimatedSize from the registry converted to bytes.
+    /// EstimatedSize from the registry or manifest converted to bytes.
     pub estimated_size: Option<u64>,
-    /// Registry location: machine-64, machine-32, user-64, user-32.
+    /// Registry location or package source: machine-64, machine-32, user-64, user-32, store, steam, portable.
     pub hive: String,
     /// machine or user.
     pub scope: String,
@@ -26,9 +28,17 @@ pub struct InstalledApp {
     pub architecture: String,
     /// Located under the Windows directory or published as a Windows component.
     pub is_protected: bool,
+    /// "win32", "store", "steam", or "portable".
+    pub source: String,
+    /// "standard", "silent_only", "store_managed", "manual_only", or "missing".
+    pub uninstall_support: String,
+    /// "confirmed" or "heuristic".
+    pub confidence: String,
+    /// Explanation of why and how this application was identified.
+    pub detection_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInventory {
     pub apps: Vec<InstalledApp>,
@@ -38,7 +48,9 @@ pub struct AppInventory {
 const UNINSTALL_PATH: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
 const UNINSTALL_WOW_PATH: &str =
     "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
-const MAX_WARNINGS: usize = 10;
+const APPMODEL_PACKAGES_PATH: &str =
+    r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages";
+const MAX_WARNINGS: usize = 12;
 
 /// Raw registry values before filtering and normalisation.
 #[derive(Debug, Clone, Default)]
@@ -57,7 +69,8 @@ struct RawApp {
     release_type: Option<String>,
 }
 
-/// Enumerates the uninstall registry keys of the current machine.
+/// Enumerates installed applications across Win32 registry, Store packages,
+/// Steam game libraries, and bounded portable application folders.
 pub fn discover_apps() -> AppInventory {
     let mut apps = Vec::new();
     let mut warnings = Vec::new();
@@ -66,6 +79,7 @@ pub fn discover_apps() -> AppInventory {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let view = KEY_READ | KEY_WOW64_64KEY;
 
+    // 1. Conventional Win32 Registry hives
     read_hive(
         &hklm,
         view,
@@ -107,8 +121,20 @@ pub fn discover_apps() -> AppInventory {
         &mut warnings,
     );
 
+    // 2. Microsoft Store / AppX / MSIX read-only inventory
+    discover_store_apps(&hkcu, &mut apps, &mut warnings);
+
+    // 3. Steam installed-game detection
+    discover_steam_apps(&hkcu, &mut apps, &mut warnings);
+
+    // Deduplicate primary inventory first
+    let mut deduped = dedupe(apps);
+
+    // 4. Bounded portable application discovery
+    discover_portable_apps(&mut deduped, &mut warnings);
+
     AppInventory {
-        apps: dedupe(apps),
+        apps: deduped,
         warnings,
     }
 }
@@ -136,8 +162,6 @@ fn read_hive(
     };
 
     for key_name in base.enum_keys().flatten() {
-        // The view flag is not inherited by relative opens, so pass it again to
-        // keep WOW6432Node enumeration in the 32-bit view.
         match base.open_subkey_with_flags(key_name.as_str(), KEY_READ | KEY_WOW64_64KEY) {
             Ok(key) => {
                 if let Some(app) = read_app(&key, &key_name, hive, scope, architecture) {
@@ -182,6 +206,12 @@ fn read_app(
     let name = raw.display_name?;
     let windir = std::env::var("WINDIR").ok();
 
+    // Check uninstall support and missing executable detection
+    let uninstall_support = determine_win32_uninstall_support(
+        raw.uninstall_string.as_deref(),
+        raw.quiet_uninstall_string.as_deref(),
+    );
+
     Some(InstalledApp {
         id: format!("{hive}|{key_name}"),
         name: name.clone(),
@@ -202,7 +232,381 @@ fn read_app(
             raw.install_location.as_deref(),
             windir.as_deref(),
         ),
+        source: "win32".to_string(),
+        uninstall_support,
+        confidence: "confirmed".to_string(),
+        detection_reason: Some(format!("Discovered in Windows Registry ({hive})")),
     })
+}
+
+/// Evaluates whether an uninstaller command is standard, silent_only, or missing from disk.
+fn determine_win32_uninstall_support(
+    uninstall_string: Option<&str>,
+    quiet_uninstall_string: Option<&str>,
+) -> String {
+    let uninst = uninstall_string.or(quiet_uninstall_string);
+    let Some(cmd) = uninst else {
+        return "missing".to_string();
+    };
+
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return "missing".to_string();
+    }
+
+    // If it's an MSI installer GUID call, it's supported by Windows Installer
+    let lower = trimmed.to_lowercase();
+    if lower.contains("msiexec") || lower.contains("/x{") || lower.contains("/i{") {
+        if quiet_uninstall_string.is_some() && uninstall_string.is_none() {
+            return "silent_only".to_string();
+        }
+        return "standard".to_string();
+    }
+
+    // Extract executable target from command line
+    let exe_candidate = if let Some(stripped) = trimmed.strip_prefix('"') {
+        stripped.split('"').next().unwrap_or(trimmed)
+    } else {
+        trimmed.split_whitespace().next().unwrap_or(trimmed)
+    };
+
+    let path = Path::new(exe_candidate);
+    // If the path is absolute and clearly does not exist on disk, mark as missing
+    if path.is_absolute() && !path.exists() {
+        return "missing".to_string();
+    }
+
+    if quiet_uninstall_string.is_some() && uninstall_string.is_none() {
+        "silent_only".to_string()
+    } else {
+        "standard".to_string()
+    }
+}
+
+/// Discovers Microsoft Store / MSIX / AppX packages in HKCU AppModel Repository.
+fn discover_store_apps(
+    hkcu: &RegKey,
+    out: &mut Vec<InstalledApp>,
+    _warnings: &mut Vec<String>,
+) {
+    let packages_key = match hkcu.open_subkey_with_flags(APPMODEL_PACKAGES_PATH, KEY_READ) {
+        Ok(k) => k,
+        Err(_) => return, // Store package repository not present or inaccessible
+    };
+
+    for package_name in packages_key.enum_keys().flatten() {
+        // Skip dependencies, frameworks and internal Windows components
+        let lower = package_name.to_lowercase();
+        if lower.contains("vclibs")
+            || lower.contains("ui.xaml")
+            || lower.contains("directx")
+            || lower.contains(".net.native")
+        {
+            continue;
+        }
+
+        let pkg_key = match packages_key.open_subkey_with_flags(&package_name, KEY_READ) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+
+        let root_folder: Option<String> = pkg_key.get_value("PackageRootFolder").ok();
+        let display_name_raw: Option<String> = pkg_key.get_value("DisplayName").ok();
+
+        let is_system_app = root_folder
+            .as_deref()
+            .map(|f| f.to_lowercase().contains("systemapps"))
+            .unwrap_or(false);
+
+        // Derive a human readable name if DisplayName is a resource reference
+        let human_name = match display_name_raw {
+            Some(ref name) if !name.starts_with("@{") && !name.trim().is_empty() => name.clone(),
+            _ => {
+                // Parse package family or package name prefix
+                package_name
+                    .split('_')
+                    .next()
+                    .unwrap_or(&package_name)
+                    .to_string()
+            }
+        };
+
+        if human_name.trim().is_empty() || is_system_app {
+            continue;
+        }
+
+        // Parse version from package name (e.g. Name_1.2.3.4_x64...)
+        let version = package_name.split('_').nth(1).map(|v| v.to_string());
+        let arch = if lower.contains("_x64_") {
+            "x64"
+        } else if lower.contains("_x86_") {
+            "x86"
+        } else {
+            "neutral"
+        };
+
+        out.push(InstalledApp {
+            id: format!("store|{package_name}"),
+            name: human_name,
+            version,
+            publisher: Some("Microsoft Store / AppX".to_string()),
+            install_location: root_folder,
+            install_date: None,
+            uninstall_string: None,
+            quiet_uninstall_string: None,
+            display_icon: None,
+            estimated_size: None,
+            hive: "store".to_string(),
+            scope: "user".to_string(),
+            architecture: arch.to_string(),
+            is_protected: false,
+            source: "store".to_string(),
+            uninstall_support: "store_managed".to_string(),
+            confidence: "confirmed".to_string(),
+            detection_reason: Some("Registered Microsoft Store / MSIX application package".to_string()),
+        });
+    }
+}
+
+/// Discovers games installed across all Steam libraries.
+fn discover_steam_apps(
+    hkcu: &RegKey,
+    out: &mut Vec<InstalledApp>,
+    _warnings: &mut Vec<String>,
+) {
+    let steam_key = match hkcu.open_subkey_with_flags(r"Software\Valve\Steam", KEY_READ) {
+        Ok(k) => k,
+        Err(_) => return,
+    };
+
+    let steam_path_str: String = match steam_key.get_value("SteamPath") {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+
+    let steam_root = PathBuf::from(steam_path_str.replace('/', "\\"));
+    let library_vdf = steam_root.join(r"steamapps\libraryfolders.vdf");
+
+    let mut library_dirs = Vec::new();
+    library_dirs.push(steam_root.clone());
+
+    if library_vdf.exists() {
+        if let Ok(content) = std::fs::read_to_string(&library_vdf) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("\"path\"") {
+                    if let Some(path_part) = extract_quoted_value(trimmed) {
+                        let candidate = PathBuf::from(path_part.replace("\\\\", "\\"));
+                        if candidate.exists() && !library_dirs.contains(&candidate) {
+                            library_dirs.push(candidate);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for lib_dir in library_dirs {
+        let steamapps_dir = lib_dir.join("steamapps");
+        let entries = match std::fs::read_dir(&steamapps_dir) {
+            Ok(iter) => iter,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+            if name_str.starts_with("appmanifest_") && name_str.ends_with(".acf") {
+                if let Ok(acf_content) = std::fs::read_to_string(entry.path()) {
+                    if let Some(game) = parse_steam_manifest(&acf_content, &lib_dir) {
+                        out.push(game);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn extract_quoted_value(line: &str) -> Option<String> {
+    let mut parts = line.split('"').filter(|s| !s.trim().is_empty());
+    parts.next()?; // Skip key
+    parts.next().map(|s| s.to_string())
+}
+
+fn parse_steam_manifest(content: &str, library_dir: &Path) -> Option<InstalledApp> {
+    let mut app_id = String::new();
+    let mut name = String::new();
+    let mut install_dir = String::new();
+    let mut size_on_disk: Option<u64> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\"appid\"") {
+            if let Some(val) = extract_quoted_value(trimmed) {
+                app_id = val;
+            }
+        } else if trimmed.starts_with("\"name\"") {
+            if let Some(val) = extract_quoted_value(trimmed) {
+                name = val;
+            }
+        } else if trimmed.starts_with("\"installdir\"") {
+            if let Some(val) = extract_quoted_value(trimmed) {
+                install_dir = val;
+            }
+        } else if trimmed.starts_with("\"SizeOnDisk\"") {
+            if let Some(val) = extract_quoted_value(trimmed) {
+                size_on_disk = val.parse::<u64>().ok();
+            }
+        }
+    }
+
+    if app_id.is_empty() || name.is_empty() {
+        return None;
+    }
+
+    let install_location = if !install_dir.is_empty() {
+        Some(library_dir.join("steamapps").join("common").join(install_dir).to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    Some(InstalledApp {
+        id: format!("steam|{app_id}"),
+        name,
+        version: None,
+        publisher: Some("Valve / Steam".to_string()),
+        install_location,
+        install_date: None,
+        uninstall_string: Some(format!("steam://uninstall/{app_id}")),
+        quiet_uninstall_string: None,
+        display_icon: Some(library_dir.join("steam.exe").to_string_lossy().to_string()),
+        estimated_size: size_on_disk,
+        hive: "steam".to_string(),
+        scope: "user".to_string(),
+        architecture: "x64".to_string(),
+        is_protected: false,
+        source: "steam".to_string(),
+        uninstall_support: "store_managed".to_string(),
+        confidence: "confirmed".to_string(),
+        detection_reason: Some(format!("Steam game library manifest (AppID {app_id})")),
+    })
+}
+
+/// Discovers standalone portable applications in bounded user directories.
+fn discover_portable_apps(
+    known_apps: &mut Vec<InstalledApp>,
+    _warnings: &mut Vec<String>,
+) {
+    let mut known_paths = HashSet::new();
+    for app in known_apps.iter() {
+        if let Some(ref loc) = app.install_location {
+            known_paths.insert(loc.to_lowercase().replace('/', "\\"));
+        }
+        if let Some(ref icon) = app.display_icon {
+            let icon_clean = icon.split(',').next().unwrap_or(icon).trim().trim_matches('"');
+            known_paths.insert(icon_clean.to_lowercase().replace('/', "\\"));
+        }
+    }
+
+    let mut candidate_roots = Vec::new();
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidate_roots.push(PathBuf::from(local).join("Programs"));
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        candidate_roots.push(PathBuf::from(appdata).join("Programs"));
+    }
+
+    let mut portable_candidates = Vec::new();
+
+    for root in candidate_roots {
+        if !root.exists() {
+            continue;
+        }
+
+        let entries = match std::fs::read_dir(&root) {
+            Ok(iter) => iter,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // Look for direct executable in folder
+                if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                    for sub in sub_entries.flatten() {
+                        let sub_path = sub.path();
+                        if sub_path.is_file()
+                            && sub_path
+                                .extension()
+                                .map(|ext| ext.eq_ignore_ascii_case("exe"))
+                                .unwrap_or(false)
+                        {
+                            let sub_norm = sub_path.to_string_lossy().to_lowercase();
+                            let dir_norm = path.to_string_lossy().to_lowercase();
+
+                            let already_registered = known_paths.iter().any(|k| {
+                                sub_norm.contains(k) || dir_norm.contains(k) || k.contains(&dir_norm)
+                            });
+
+                            if !already_registered && is_pe_executable(&sub_path) {
+                                let folder_name = path
+                                    .file_name()
+                                    .unwrap_or_default()
+                                    .to_string_lossy()
+                                    .to_string();
+                                let size = std::fs::metadata(&sub_path).map(|m| m.len()).ok();
+
+                                portable_candidates.push(InstalledApp {
+                                    id: format!("portable|{}", hash_path(&sub_path)),
+                                    name: folder_name,
+                                    version: None,
+                                    publisher: None,
+                                    install_location: Some(path.to_string_lossy().to_string()),
+                                    install_date: None,
+                                    uninstall_string: None,
+                                    quiet_uninstall_string: None,
+                                    display_icon: Some(sub_path.to_string_lossy().to_string()),
+                                    estimated_size: size,
+                                    hive: "portable".to_string(),
+                                    scope: "user".to_string(),
+                                    architecture: "x64".to_string(),
+                                    is_protected: false,
+                                    source: "portable".to_string(),
+                                    uninstall_support: "manual_only".to_string(),
+                                    confidence: "heuristic".to_string(),
+                                    detection_reason: Some("Standalone executable detected in user programs directory without Windows uninstaller registration".to_string()),
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    known_apps.extend(portable_candidates);
+}
+
+fn is_pe_executable(path: &Path) -> bool {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut magic = [0u8; 2];
+    if file.read_exact(&mut magic).is_ok() {
+        magic == [b'M', b'Z']
+    } else {
+        false
+    }
+}
+
+fn hash_path(path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(path.to_string_lossy().as_bytes());
+    format!("{:x}", hasher.finalize())[..12].to_string()
 }
 
 fn read_string(key: &RegKey, name: &str) -> Option<String> {
@@ -447,6 +851,27 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn parses_steam_manifest_accurately() {
+        let manifest = r#"
+"AppState"
+{
+	"appid"		"730"
+	"name"		"Counter-Strike 2"
+	"installdir"		"Counter-Strike Global Offensive"
+	"SizeOnDisk"		"73963861286"
+}
+"#;
+        let app = parse_steam_manifest(manifest, Path::new(r"E:\SteamLibrary"))
+            .expect("Should parse manifest");
+        assert_eq!(app.id, "steam|730");
+        assert_eq!(app.name, "Counter-Strike 2");
+        assert_eq!(app.source, "steam");
+        assert_eq!(app.uninstall_support, "store_managed");
+        assert_eq!(app.estimated_size, Some(73963861286));
+        assert!(app.install_location.unwrap().contains("Counter-Strike Global Offensive"));
+    }
+
     fn app(name: &str, hive: &str, location: &str) -> InstalledApp {
         InstalledApp {
             id: format!("{hive}|{name}"),
@@ -468,6 +893,10 @@ mod tests {
             .into(),
             architecture: if hive.ends_with("32") { "x86" } else { "x64" }.into(),
             is_protected: false,
+            source: "win32".to_string(),
+            uninstall_support: "standard".to_string(),
+            confidence: "confirmed".to_string(),
+            detection_reason: None,
         }
     }
 

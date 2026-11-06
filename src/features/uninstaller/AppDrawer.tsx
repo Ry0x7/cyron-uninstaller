@@ -297,8 +297,11 @@ export function AppDrawer({
       }
     >
       <div className="un-drawer-badges">
-        <Badge tone="neutral">{app.scope === "machine" ? "Machine-wide" : "Current user"}</Badge>
-        <Badge tone="neutral">{app.architecture === "x64" ? "64-bit" : "32-bit"}</Badge>
+        <Badge tone={app.source === "store" ? "accent" : app.source === "steam" ? "accent" : app.source === "portable" ? "caution" : "neutral"}>
+          {app.source === "store" ? "Microsoft Store (MSIX)" : app.source === "steam" ? "Steam Library" : app.source === "portable" ? "Portable App" : (app.scope === "machine" ? "Machine-wide" : "Current user")}
+        </Badge>
+        <Badge tone="neutral">{app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : "Neutral"}</Badge>
+        {app.uninstallSupport === "missing" && <Badge tone="danger">Broken Uninstaller</Badge>}
         {app.isProtected && <Badge tone="caution">System component</Badge>}
         {processes.length > 0 && <Badge tone="accent">{processes.length} running</Badge>}
       </div>
@@ -336,6 +339,34 @@ export function AppDrawer({
               { label: "Version", value: app.version ?? "—" },
               { label: "Installed", value: formatDate(app.installDate) },
               { label: "Registry view", value: HIVE_LABEL[app.hive] ?? app.hive },
+              {
+                label: "Application source",
+                value:
+                  app.source === "store"
+                    ? "Microsoft Store / MSIX"
+                    : app.source === "steam"
+                    ? "Steam Game Library"
+                    : app.source === "portable"
+                    ? "Portable Heuristic"
+                    : "Win32 Registry",
+              },
+              {
+                label: "Uninstall support",
+                value:
+                  app.uninstallSupport === "standard"
+                    ? "Standard uninstaller"
+                    : app.uninstallSupport === "silent_only"
+                    ? "Silent uninstaller only"
+                    : app.uninstallSupport === "store_managed"
+                    ? "Store-managed lifecycle"
+                    : app.uninstallSupport === "manual_only"
+                    ? "Manual removal only"
+                    : "Missing uninstaller executable",
+              },
+              {
+                label: "Detection details",
+                value: app.detectionReason ?? "Windows Registry entry",
+              },
               {
                 label: "Install location",
                 value: location ? <span className="mono un-code">{location}</span> : "Not reported",
@@ -492,6 +523,47 @@ export function AppDrawer({
             <Banner tone="caution">
               This application is registered as a protected Windows component. Cyron refuses to launch
               uninstallation for system software.
+            </Banner>
+          ) : app.source === "store" ? (
+            <Banner tone="info">
+              <strong>Microsoft Store / MSIX application.</strong>
+              <p style={{ marginTop: 6 }}>
+                This package is managed by Windows Package Manager. Microsoft Store apps do not
+                expose Win32 uninstall executables. To remove it, use Windows Settings &gt; Installed Apps
+                or <code>winget uninstall &quot;{app.name}&quot;</code>. Cyron provides read-only inventory
+                and leftover scanning.
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <Button size="sm" onClick={() => setTab("leftovers")}>
+                  Scan for leftover data
+                </Button>
+              </div>
+            </Banner>
+          ) : app.source === "portable" ? (
+            <Banner tone="caution">
+              <strong>Portable application.</strong>
+              <p style={{ marginTop: 6 }}>
+                This executable was identified via heuristic scanning in your user program directory.
+                Portable applications do not have a registered Windows uninstaller.
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <Button size="sm" onClick={() => setTab("leftovers")}>
+                  Scan for residual files
+                </Button>
+              </div>
+            </Banner>
+          ) : app.uninstallSupport === "missing" ? (
+            <Banner tone="danger">
+              <strong>Broken uninstaller record.</strong>
+              <p style={{ marginTop: 6 }}>
+                The uninstaller executable registered in the Windows registry was not found on disk.
+                Use the Leftover Scanner to safely inspect and clean residual directories and registry keys.
+              </p>
+              <div style={{ marginTop: 10 }}>
+                <Button size="sm" onClick={() => setTab("leftovers")}>
+                  Scan for leftovers
+                </Button>
+              </div>
             </Banner>
           ) : uninstallPlan ? (
             <>

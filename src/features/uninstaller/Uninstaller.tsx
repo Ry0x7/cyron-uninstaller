@@ -22,6 +22,7 @@ import { AppDrawer } from "./AppDrawer";
 import "./uninstaller.css";
 
 type ScopeFilter = "all" | "machine" | "user";
+type SourceFilter = "all" | "win32" | "store" | "steam" | "portable" | "broken";
 type SortKey = "name" | "publisher" | "installed" | "size";
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
@@ -58,10 +59,17 @@ function normalizeSearch(value: string): string {
   return value.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
 }
 
-export function Uninstaller() {
+export function Uninstaller({
+  initialAppId,
+  initialQuery,
+}: {
+  initialAppId?: string | null;
+  initialQuery?: string | null;
+} = {}) {
   const inventory = useAsync(() => api.listInstalledApps(), []);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery ?? "");
   const [scope, setScope] = useState<ScopeFilter>("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sort, setSort] = useState<SortKey>("name");
   const [selected, setSelected] = useState<InstalledApp | null>(null);
 
@@ -79,6 +87,13 @@ export function Uninstaller() {
   const apps = inventory.data?.apps ?? [];
   const warnings = [...new Set(inventory.data?.warnings ?? [])];
 
+  useEffect(() => {
+    if (initialAppId && apps.length > 0) {
+      const match = apps.find((a) => a.id === initialAppId);
+      if (match) setSelected(match);
+    }
+  }, [initialAppId, apps]);
+
   const counts = useMemo(() => {
     const needle = normalizeSearch(query);
     const matching = needle
@@ -90,17 +105,32 @@ export function Uninstaller() {
       : apps;
     let machine = 0;
     let user = 0;
+    let win32 = 0;
+    let store = 0;
+    let steam = 0;
+    let portable = 0;
+    let broken = 0;
     for (const app of matching) {
       if (app.scope === "machine") machine += 1;
       else user += 1;
+      if (app.uninstallSupport === "missing") broken += 1;
+      if (app.source === "store") store += 1;
+      else if (app.source === "steam") steam += 1;
+      else if (app.source === "portable") portable += 1;
+      else win32 += 1;
     }
-    return { all: matching.length, machine, user };
+    return { all: matching.length, machine, user, win32, store, steam, portable, broken };
   }, [apps, query]);
 
   const visible = useMemo(() => {
     const needle = normalizeSearch(query);
     const filtered = apps.filter((app) => {
       if (scope !== "all" && app.scope !== scope) return false;
+      if (sourceFilter === "win32" && app.source !== "win32") return false;
+      if (sourceFilter === "store" && app.source !== "store") return false;
+      if (sourceFilter === "steam" && app.source !== "steam") return false;
+      if (sourceFilter === "portable" && app.source !== "portable") return false;
+      if (sourceFilter === "broken" && app.uninstallSupport !== "missing") return false;
       if (!needle) return true;
       return [app.name, app.publisher, app.installLocation, app.version]
         .some((value) => value !== null && normalizeSearch(value).includes(needle));
@@ -265,9 +295,22 @@ export function Uninstaller() {
               value={scope}
               onChange={setScope}
               options={[
-                { value: "all", label: "All", count: counts.all },
+                { value: "all", label: "All scope", count: counts.all },
                 { value: "machine", label: "Machine", count: counts.machine },
                 { value: "user", label: "User", count: counts.user },
+              ]}
+            />
+            <Segmented
+              ariaLabel="Filter by application source"
+              value={sourceFilter}
+              onChange={(val) => setSourceFilter(val as SourceFilter)}
+              options={[
+                { value: "all", label: "All sources" },
+                { value: "win32", label: "Win32", count: counts.win32 },
+                { value: "store", label: "Store", count: counts.store },
+                { value: "steam", label: "Steam", count: counts.steam },
+                { value: "portable", label: "Portable", count: counts.portable },
+                { value: "broken", label: "Broken", count: counts.broken },
               ]}
             />
             <div className="un-toolbar__end">
@@ -412,11 +455,14 @@ export function Uninstaller() {
                         {app.estimatedSize === null ? "—" : formatBytes(app.estimatedSize)}
                       </td>
                       <td>
-                        <div className="un-scope">
-                          <Badge tone="neutral">
-                            {app.scope === "machine" ? "Machine" : "User"}
+                        <div className="un-scope" style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+                          <Badge tone={app.source === "store" ? "accent" : app.source === "steam" ? "accent" : app.source === "portable" ? "caution" : "neutral"}>
+                            {app.source === "store" ? "Store" : app.source === "steam" ? "Steam" : app.source === "portable" ? "Portable" : (app.scope === "machine" ? "Machine" : "User")}
                           </Badge>
-                          <span className="un-arch">{app.architecture === "x64" ? "64-bit" : "32-bit"}</span>
+                          {app.uninstallSupport === "missing" && (
+                            <Badge tone="danger">Broken</Badge>
+                          )}
+                          <span className="un-arch">{app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : ""}</span>
                         </div>
                       </td>
                     </tr>

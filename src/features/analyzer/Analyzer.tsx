@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   IconChevronRight,
+  IconCleaner,
   IconDrive,
   IconExternal,
   IconFolder,
@@ -10,6 +11,7 @@ import {
   IconStop,
 } from "../../components/Icons";
 import {
+  Badge,
   Banner,
   Button,
   EmptyState,
@@ -41,7 +43,7 @@ import {
 } from "../../lib/format";
 import { useAsync } from "../../lib/hooks";
 import { useSettings } from "../../lib/settings";
-import { SCAN_EVENT, type ScanNode, type ScanProgress, type ScanResult } from "../../lib/types";
+import { SCAN_EVENT, type CleanableInspection, type ScanNode, type ScanProgress, type ScanResult } from "../../lib/types";
 import { Treemap } from "./Treemap";
 import { TreeView } from "./TreeView";
 import { AnalyzerFilterBar } from "./AnalyzerFilters";
@@ -134,11 +136,19 @@ function isAbsoluteWindowsPath(value: string): boolean {
   return value.startsWith("\\\\") && value.length > 2 && value[2] !== "\\";
 }
 
-export function Analyzer() {
+export function Analyzer({
+  initialPath,
+  initialMode,
+  onNavigateToCleaner,
+}: {
+  initialPath?: string | null;
+  initialMode?: "map" | "duplicates" | "storage" | null;
+  onNavigateToCleaner?: (targetId?: string) => void;
+} = {}) {
   const { settings } = useSettings();
   const volumes = useAsync(() => api.listVolumes(), []);
   const [phase, setPhase] = useState<"idle" | "scanning" | "result">("idle");
-  const [path, setPath] = useState("");
+  const [path, setPath] = useState(initialPath ?? "");
   const [lastPath, setLastPath] = useState("");
   const [result, setResult] = useState<ScanResult | null>(null);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
@@ -146,7 +156,7 @@ export function Analyzer() {
   const [stack, setStack] = useState<ScanNode[]>([]);
   const [selected, setSelected] = useState<ScanNode | null>(null);
   const [railTab, setRailTab] = useState<RailTab>("selection");
-  const [mode, setMode] = useState<AnalyzerMode>("map");
+  const [mode, setMode] = useState<AnalyzerMode>(initialMode ?? "map");
   const [filters, setFilters] = useState<AnalyzerFilters>(defaultFilters);
   const [treeWidth, setTreeWidth] = useState(readTreeWidth);
   const [treeOpen, setTreeOpen] = useState(false);
@@ -161,6 +171,7 @@ export function Analyzer() {
   const jobRef = useRef<string | null>(null);
   const startedRef = useRef(0);
   const aliveRef = useRef(true);
+  const initialTriggered = useRef(false);
 
   useEffect(() => {
     let subscribe = true;
@@ -324,6 +335,16 @@ export function Analyzer() {
       setError({ message: errorMessage(scanError), retryable: true });
     }
   };
+
+  useEffect(() => {
+    if (initialPath && !initialTriggered.current) {
+      initialTriggered.current = true;
+      if (initialMode) {
+        setMode(initialMode);
+      }
+      void runScan(initialPath);
+    }
+  }, [initialPath, initialMode]);
 
   const cancel = () => {
     const jobId = jobRef.current;
@@ -845,6 +866,7 @@ export function Analyzer() {
                         totalSize={result.totalSize}
                         onDrill={drill}
                         onReveal={reveal}
+                        onNavigateToCleaner={onNavigateToCleaner}
                       />
                     )}
 
@@ -1003,9 +1025,17 @@ interface SelectionProps {
   totalSize: number;
   onDrill: (node: ScanNode) => void;
   onReveal: (path: string) => void;
+  onNavigateToCleaner?: (targetId?: string) => void;
 }
 
-function SelectionDetails({ node, viewNode, totalSize, onDrill, onReveal }: SelectionProps) {
+function SelectionDetails({
+  node,
+  viewNode,
+  totalSize,
+  onDrill,
+  onReveal,
+  onNavigateToCleaner,
+}: SelectionProps) {
   const isView = node.path === viewNode.path;
   // Share percentages are always based on logical bytes; allocated bytes are
   // presented separately and must not substitute when logical size is zero.
@@ -1014,6 +1044,26 @@ function SelectionDetails({ node, viewNode, totalSize, onDrill, onReveal }: Sele
   const denominator = isView ? totalSize : viewTotal;
   const share = denominator > 0 ? logical / denominator : 0;
   const canDrill = node.kind === "dir" && node.children.length > 0 && !isView;
+
+  const [inspection, setInspection] = useState<CleanableInspection | null>(null);
+
+  useEffect(() => {
+    if (node.kind !== "dir" || !node.path) {
+      setInspection(null);
+      return;
+    }
+    let cancelled = false;
+    api.inspectCleanableDirectory(node.path)
+      .then((res) => {
+        if (!cancelled) setInspection(res);
+      })
+      .catch(() => {
+        if (!cancelled) setInspection(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [node.kind, node.path]);
 
   return (
     <div className="az-node">
@@ -1038,6 +1088,28 @@ function SelectionDetails({ node, viewNode, totalSize, onDrill, onReveal }: Sele
           { label: "Modified", value: formatDate(node.modified) },
         ]}
       />
+
+      {inspection && inspection.isRecognized && (
+        <div style={{ margin: "12px 0", padding: "10px", background: "var(--surface-sunken)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <Badge tone={inspection.risk === "protected" ? "caution" : inspection.risk === "safe" ? "safe" : "accent"}>
+              {inspection.risk === "protected" ? "Protected Directory" : "Cleanable Cache"}
+            </Badge>
+            {inspection.toolLabel && <span className="small muted mono">{inspection.toolLabel}</span>}
+          </div>
+          <p className="small muted" style={{ margin: "4px 0 8px" }}>{inspection.explanation}</p>
+          {inspection.isCleanable && (
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<IconCleaner size={13} />}
+              onClick={() => onNavigateToCleaner?.(inspection.providerId ?? undefined)}
+            >
+              Review for Cleanup ({formatBytes(inspection.expectedReclaimableBytes)})
+            </Button>
+          )}
+        </div>
+      )}
 
       <div className="az-node__actions">
         {canDrill && (

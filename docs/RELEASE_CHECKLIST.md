@@ -9,14 +9,17 @@ This document describes the release engineering steps, verification gates, insta
 Every public release candidate must satisfy all acceptance gates before packaging:
 
 - [ ] **Typecheck**: `npm run typecheck` reports 0 diagnostics.
-- [ ] **Frontend Tests**: `npm test` passes all 71+ vitest suites across all components and API layers.
+- [ ] **Frontend Tests**: `npm test` passes all 71 vitest suites across 7 files.
 - [ ] **Frontend Production Build**: `node scripts/verify-dist.mjs` outputs `DIST_OK`.
-- [ ] **Rust Core Unit Tests**: `cargo test --manifest-path src-tauri/Cargo.toml` passes all 120+ unit tests with 0 failures.
-- [ ] **Destructive Safety Boundaries**: `cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture` passes all 22 boundary audit tests.
-- [ ] **Cleanup & Recovery Stress**: `cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture` passes all tests.
+- [ ] **Rust Core Unit Tests**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib` passes all 134 unit tests with 0 failures.
+- [ ] **Destructive Safety Boundaries**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security -- --nocapture` passes all 25 boundary audit tests.
+- [ ] **Cleanup & Recovery Stress**: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test cleanup_stress -- --nocapture` passes all 5 tests.
 - [ ] **Isolated Cleanup Fixture**: `node scripts/verify-cleanup.mjs` outputs `CLEANUP_FIXTURE_OK`.
+- [ ] **End-to-End Fixture**: `node scripts/verify-e2e.mjs` outputs `RC1_E2E_FIXTURE_OK`.
+- [ ] **Competitive Benchmark**: `node scripts/benchmark-competitive.mjs` outputs `BENCHMARK_OK`.
 - [ ] **Desktop Debug Binary**: `node scripts/verify-desktop-binary.mjs` outputs `DESKTOP_BINARY_OK`.
 - [ ] **Desktop Smoke Test**: `node scripts/smoke-desktop.mjs` outputs `DESKTOP_SMOKE_OK`.
+- [ ] **Release Installer Bundles**: `node scripts/verify-release-bundles.mjs` outputs `RELEASE_BUNDLES_OK`.
 - [ ] **Git History Privacy Audit**: Confirm no unredacted internal session data exists in pending commits.
 
 ---

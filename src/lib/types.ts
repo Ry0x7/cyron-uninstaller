@@ -12,6 +12,17 @@ export type Risk = "safe" | "caution" | "protected";
 
 export type InstallScope = "machine" | "user";
 
+export type AppSource = "win32" | "store" | "steam" | "portable";
+
+export type UninstallSupport =
+  | "standard"
+  | "silent_only"
+  | "store_managed"
+  | "manual_only"
+  | "missing";
+
+export type DetectionConfidence = "confirmed" | "heuristic";
+
 export interface InstalledApp {
   id: string;
   name: string;
@@ -26,8 +37,12 @@ export interface InstalledApp {
   estimatedSize: number | null;
   hive: string;
   scope: InstallScope;
-  architecture: "x64" | "x86";
+  architecture: "x64" | "x86" | "neutral" | string;
   isProtected: boolean;
+  source: AppSource;
+  uninstallSupport: UninstallSupport;
+  confidence: DetectionConfidence;
+  detectionReason?: string | null;
 }
 
 export interface AppInventory {
@@ -487,3 +502,48 @@ export interface BatchUninstallReport {
   restartRequired: number;
   results: BatchUninstallItemResult[];
 }
+
+export interface StartupRoute {
+  view: ViewId;
+  path?: string | null;
+  subview?: string | null;
+  targetAppId?: string | null;
+  action?: string | null;
+  note?: string | null;
+}
+
+export interface ExplorerIntegrationStatus {
+  isRegistered: boolean;
+  folderActionsRegistered: boolean;
+  exeActionsRegistered: boolean;
+  registeredExePath: string | null;
+  currentExePath: string;
+  needsRepair: boolean;
+  details: string[];
+}
+
+export interface CleanableInspection {
+  path: string;
+  isRecognized: boolean;
+  providerId: string | null;
+  toolLabel: string | null;
+  risk: Risk | null;
+  category: string | null;
+  explanation: string;
+  isCleanable: boolean;
+  expectedReclaimableBytes: number;
+  totalOccupiedBytes: number;
+}
+
+export interface CleanupProviderDef {
+  schemaVersion: number;
+  id: string;
+  tool: string;
+  label: string;
+  pathTemplate: string;
+  risk: Risk;
+  category: string;
+  impact: string;
+  patterns: string[];
+}
+

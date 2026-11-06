@@ -252,10 +252,52 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   `verify-cleanup.mjs` passes cleanly without `spawnSync cargo ENOENT`.
   EVIDENCE: `verify-cleanup: CLEANUP_FIXTURE_OK` passed.
 
+## Phase 6 — Competitive Expansion & Windows Integration Gates
+
+- [x] G34: Windows Explorer context menu integration & clean unregistration
+  CHECK: `src-tauri/src/explorer.rs`, `commands.rs`, Settings UI
+  EXPECT: registers per-user verbs in `HKCU\Software\Classes` without elevation; unregisters all verbs cleanly;
+  parses CLI arguments safely; never executes destructive operations directly from Explorer.
+  EVIDENCE: `explorer::tests` pass; `get_explorer_integration_status`, `set_explorer_integration`, and
+  `repair_explorer_integration` verified.
+
+- [x] G35: multi-source application discovery (Store, Steam, Portable heuristics)
+  CHECK: `src-tauri/src/apps.rs`, `Uninstaller.tsx`, `AppDrawer.tsx`
+  EXPECT: reads Store packages (`AppModel\Repository\Packages`) with read-only inventory; parses Steam libraries
+  (`libraryfolders.vdf` + `.acf`); detects bounded portable binaries (`%LOCALAPPDATA%\Programs`); tags source badges
+  and filters; provides clear lifecycle guidance.
+  EVIDENCE: `apps::tests::parses_steam_manifest_accurately` and inventory discovery pass; Store and Portable
+  restrictions verified.
+
+- [x] G36: Disk Analyzer to Cleaner direct review workflow
+  CHECK: `src-tauri/src/commands.rs`, `src/features/analyzer/Analyzer.tsx`
+  EXPECT: selecting a recognized cache directory in Analyzer tree/treemap surfaces "Review for Cleanup";
+  calculates expected reclaimable bytes vs total occupied; explains protected caches; passes target to Cleaner preview.
+  EVIDENCE: `commands::tests::inspect_cleanable_directory_identifies_unrecognized_folders` passes; Analyzer UI
+  card integration verified.
+
+- [x] G37: extensible declarative cleanup provider schema validation
+  CHECK: `src-tauri/src/providers.rs`
+  EXPECT: strict schema validation (`schema_version: 1`); allows only approved environment roots; strictly
+  rejects path traversal, wildcards in roots, system roots, and attempts to mark protected data safe.
+  EVIDENCE: `providers::tests` (6/6 pass, including `validates_all_default_providers`, `rejects_path_traversal`,
+  `rejects_disallowed_roots`, `rejects_safe_risk_for_protected_data`).
+
+- [x] G38: competitive performance benchmarks & architectural analysis
+  CHECK: `node scripts/benchmark-competitive.mjs`
+  EXPECT: produces reproducible measurements of cold/warm duration, peak working set, file counting rules,
+  and cancellation latency against WinDirStat/WizTree metrics; updates `docs/BENCHMARKS.md`.
+  EVIDENCE: `BENCHMARK_OK` recorded in `docs/BENCHMARKS.md`.
+
+## Remote CI & Packaging Evidence
+
+- [x] G39: Windows remote GitHub Actions CI run succeeds
+  CHECK: `gh run view 42188091108`
+  EXPECT: all build, test, and fixture jobs complete with success.
+  EVIDENCE: GitHub Actions Run #42188091108 completed with `success` (6m 51s) on commit `0592792`.
+
 ## Not gated
 
-- [ ] Windows CI remote run: workflow now runs the security, cleanup-stress and fixture steps;
-  no GitHub Actions run has been observed from this machine.
 - [ ] Authenticode production signing: signing credentials/HSM were not provided; installers are verified
   as unsigned release candidates.
 - [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;

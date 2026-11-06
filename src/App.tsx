@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { api } from "./lib/api";
 import { IconButton } from "./components/ui";
 import {
   IconActivity,
@@ -21,7 +22,7 @@ import { Overview } from "./features/overview/Overview";
 import { Settings } from "./features/settings/Settings";
 import { Uninstaller } from "./features/uninstaller/Uninstaller";
 import { useSettings, type ThemePreference } from "./lib/settings";
-import type { ViewId } from "./lib/types";
+import type { StartupRoute, ViewId } from "./lib/types";
 
 const COLLAPSE_KEY = "cyron.sidebar.collapsed";
 
@@ -191,6 +192,8 @@ export default function App() {
   const [view, setView] = useState<ViewId>("overview");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [visited, setVisited] = useState<ViewId[]>(["overview"]);
+  const [startupRoute, setStartupRoute] = useState<StartupRoute | null>(null);
+  const [cleanerTargetId, setCleanerTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = view === "overview" ? "Cyron" : `${viewLabel(view)} · Cyron`;
@@ -209,16 +212,51 @@ export default function App() {
     setVisited((current) => (current.includes(next) ? current : [...current, next]));
   }, []);
 
+  useEffect(() => {
+    api.getStartupRoute()
+      .then((route) => {
+        if (route) {
+          setStartupRoute(route);
+          navigate(route.view);
+        }
+      })
+      .catch(() => {});
+  }, [navigate]);
+
+  const navigateToCleanerWithTarget = useCallback(
+    (targetId?: string) => {
+      setCleanerTargetId(targetId ?? null);
+      navigate("cleaner");
+    },
+    [navigate],
+  );
+
   const renderView = (id: ViewId): ReactNode => {
     switch (id) {
       case "overview":
         return <Overview onNavigate={navigate} />;
       case "uninstaller":
-        return <Uninstaller />;
+        return (
+          <Uninstaller
+            initialAppId={startupRoute?.view === "uninstaller" ? startupRoute.targetAppId : undefined}
+            initialQuery={startupRoute?.view === "uninstaller" ? startupRoute.path : undefined}
+          />
+        );
       case "analyzer":
-        return <Analyzer />;
+        return (
+          <Analyzer
+            initialPath={startupRoute?.view === "analyzer" ? startupRoute.path : undefined}
+            initialMode={
+              startupRoute?.view === "analyzer" &&
+              (startupRoute.subview === "map" || startupRoute.subview === "duplicates" || startupRoute.subview === "storage")
+                ? startupRoute.subview
+                : undefined
+            }
+            onNavigateToCleaner={navigateToCleanerWithTarget}
+          />
+        );
       case "cleaner":
-        return <Cleaner />;
+        return <Cleaner initialTargetId={cleanerTargetId} />;
       case "activity":
         return <Activity />;
       case "settings":

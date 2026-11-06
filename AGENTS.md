@@ -8,17 +8,17 @@ safe to remove but also have the ability to force uninstall and kill process. In
 Revo uninstaller, bleachbit, and windirstat but better indications, material UI, clean simple
 usable for non-tech people.
 
-**Current state: Phases 1, 2, 3, 4, and 5 are implemented and verified.** Application inventory, disk analysis with a
-treemap plus persistent synchronized folder tree, MFT/directory scanning, duplicate verification,
-storage categorization, developer/AI cache inspection, review-first cache cleaning with a recoverable
-quarantine, application uninstallation with exit code 3010 reboot recognition, process discovery and
-snapshot-verified termination with critical-process protection and PID recycling denial, leftover scanning
-with confidence & risk ratings, automatic recursive multi-type .reg backup before subkey deletion,
-sequential batch uninstallation, and release installer bundling (NSIS and WiX MSI) are implemented and tested.
+**Current state: Phases 1, 2, 3, 4, 5, and 6 are implemented and verified.** Application inventory across Win32, Microsoft Store,
+Steam games, and portable apps; disk analysis with a treemap plus persistent synchronized folder tree, MFT/directory scanning,
+duplicate verification, storage categorization, direct Analyzer → Cleaner review integration, extensible declarative cleanup providers,
+review-first cache cleaning with a crash-consistent recoverable quarantine, application uninstallation with exit code 3010 reboot recognition,
+process discovery and snapshot-verified termination with critical-process protection and PID recycling denial, leftover scanning
+with confidence & risk ratings, automatic recursive multi-type .reg backup before subkey deletion, sequential batch uninstallation,
+optional Windows Explorer context menu integration, and release installer bundling (NSIS and WiX MSI) are implemented and tested.
 Priority 0 hardening (crash-consistent write-ahead recovery journal with sync_all, atomic MoveFileExW no-overwrite
 restoration, approved snapshot binding, purge preservation, quarantine storage caps) is complete.
 The desktop build and launch are verified (`DESKTOP_BINARY_OK`, `DESKTOP_SMOKE_OK`), as are the
-isolated cleanup fixture (`CLEANUP_FIXTURE_OK`), the end-to-end fixture (`RC1_E2E_FIXTURE_OK`), all test suites (71 frontend, 157 Rust), and release installer
+isolated cleanup fixture (`CLEANUP_FIXTURE_OK`), the end-to-end fixture (`RC1_E2E_FIXTURE_OK`), all test suites (71 frontend, 171 Rust), and release installer
 bundles (`RELEASE_BUNDLES_OK`).
 
 ## Stack
@@ -31,30 +31,25 @@ bundles (`RELEASE_BUNDLES_OK`).
 
 ## How it works (the non-obvious parts)
 
-- **IPC surface** is twenty-eight commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
+- **IPC surface** is thirty-four commands in `src-tauri/src/commands.rs`, registered in `lib.rs`:
   discovery/scan/duplicate/measurement/reveal, `clear_history`, eight cleanup commands
   (`get_cleanup_mode`, `set_cleanup_mode`, `preview_cleanup`, `start_cleanup`, `list_quarantine`,
-  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`), and nine Phase 4/5 uninstaller commands
+  `restore_quarantine`, `purge_quarantine`, `get_cleanup_log`), nine Phase 4/5 uninstaller commands
   (`prepare_uninstall`, `prepare_batch_uninstall`, `discover_app_processes`, `terminate_app_processes`,
-  `parse_uninstall_command`, `execute_uninstall`, `scan_app_leftovers`, `clean_app_leftovers`, `execute_batch_uninstall`). A running job id is
-  rejected rather than silently re-registered. Payloads use `#[serde(rename_all = "camelCase")]`;
+  `parse_uninstall_command`, `execute_uninstall`, `scan_app_leftovers`, `clean_app_leftovers`, `execute_batch_uninstall`),
+  and six Phase 6 expansion commands (`get_startup_route`, `get_explorer_integration_status`, `set_explorer_integration`,
+  `repair_explorer_integration`, `list_cleanup_providers`, `inspect_cleanable_directory`).
+  A running job id is rejected rather than silently re-registered. Payloads use `#[serde(rename_all = "camelCase")]`;
   `src/lib/types.ts` mirrors the data contract. Change both together.
-- **Cleanup engine** (`cleanup.rs`) is the only module that modifies user files. `preview_cleanup`
-  resolves catalog ids, guards each path, walks it for exact totals (400 listed paths, 100,000
-  files per target) and stores a `CleanupPlan` server-side for 10 minutes. `start_cleanup` consumes
-  that plan once, re-checks its selection, the TTL and the read-only switch, re-guards every target,
-  re-validates each file (regular file, no reparse attribute, canonical parent inside the target)
-  and renames it into the run's quarantine batch. Nothing is deleted except by `purge_quarantine`,
-  which only removes manifest items still inside that batch. Restore never overwrites. The backend
-  starts read-only; Settings exclusions are validated and enforced in the backend.
-- **Cleanup catalog** is the 48-entry `caches::CATALOG`: 27 safe, 9 caution, 12 protected. Protected
-  entries (histories, models, settings, Docker/WSL data, Firefox profiles, Windows Update
-  downloads) are measured and never planned; the Windows Update cache is explicitly not
-  manipulated. Per-entry `impact` text explains whether data regenerates or is re-downloaded.
-- **Application discovery** (`apps.rs`) reads HKLM/HKCU uninstall keys in the 64-bit view plus
-  `WOW6432Node`, drops updates/patches/system components, deduplicates by name+version+location
-  (preferring machine-64), and reports `estimatedSize: null` when the installer recorded nothing.
-  Windows Store/MSIX apps are not covered yet.
+- **Explorer Integration** (`explorer.rs`) registers per-user shell verbs in `HKCU\Software\Classes` without requiring elevation.
+  Supports Folders & Drives (Analyze, Duplicates, Storage) and Executables (Uninstall Review, Related Files). Safe startup argument
+  parsing routes the application to the requested view without ever executing destructive actions directly from Explorer.
+- **Extensible Providers** (`providers.rs`) validates versioned provider definitions (`schema_version: 1`), enforcing approved
+  environment roots, rejecting path traversals and wildcards, and preventing sensitive data from being marked safe.
+- **Application discovery** (`apps.rs`) reads HKLM/HKCU uninstall keys in the 64-bit and 32-bit views, discovers modern Store
+  packages (`AppModel\Repository\Packages`), parses Steam game libraries (`libraryfolders.vdf`), and heuristically identifies
+  standalone portable binaries in `%LOCALAPPDATA%\Programs`. Provides explicit source tags, uninstall support classifications, and
+  lifecycle explanations.
 - **Directory enumeration** (`fs.rs`) uses `GetFileInformationByHandleEx(FileIdBothDirectoryInfo)`
   for logical size, allocated size and a stable file id, with a `std::fs` fallback. Reparse points
   (junctions/symlinks/mount points) are never followed.
