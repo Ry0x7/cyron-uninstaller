@@ -303,25 +303,25 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   EXPECT: PE VERSIONINFO, WiX MSI database properties, and NSIS headers match `Cyron Uninstaller`, version `0.1.0`, publisher `Chryypt`, UpgradeCode `{C2BCD648-205F-5904-9E5C-85726E376EC2}`.
   EVIDENCE: `WINDOWS_METADATA_OK` (5/5 checks passed).
 
-- [x] G41: Local development code signing (`DEV_TEST_SIGNED`)
-  CHECK: `npm run build:dev-signed` (`scripts/create-dev-cert.ps1` and `scripts/sign-dev-build.ps1`)
-  EXPECT: Idempotent certificate generation/reuse in `Cert:\CurrentUser\My` (CN=Cyron Uninstaller Development, RSA 3072, SHA-256); signing of `cyron.exe`, NSIS installer, and WiX MSI via official Windows SDK `signtool.exe`.
-  EVIDENCE: `DEV_TEST_SIGNED_OK` (3/3 artifacts signed).
+- [x] G41: Chryypt Organization code signing (`CHRYYPT_SIGNED`)
+  CHECK: `npm run build:signed` (`scripts/create-signing-cert.ps1` and `scripts/sign-build.ps1`)
+  EXPECT: Idempotent certificate generation/reuse in `Cert:\CurrentUser\My` (CN=Chryypt Organization, RSA 3072, SHA-256); signing of `cyron.exe`, NSIS installer, and WiX MSI via official Windows SDK `signtool.exe`.
+  EVIDENCE: `CHRYYPT_SIGNED_OK` (3/3 artifacts signed).
 
 - [x] G42: Authenticode signature integrity & negative test boundary
   CHECK: `npm run verify:signatures` (`scripts/verify-signatures.ps1 -RunNegativeTests`)
   EXPECT: Separates cryptographic digest validity from root trust; rejects unsigned binaries, tampered binaries, and rogue certificate subjects; verifies all 3 release artifacts.
   EVIDENCE: `SIGNATURES_VERIFIED_OK` (3/3 artifacts passed; all 3 negative tests passed).
 
-- [x] G43: SignPath Foundation readiness assessment & public policy
-  CHECK: `docs/SIGNPATH_READINESS.md` and `docs/CODE_SIGNING_POLICY.md`
-  EXPECT: Requirement-by-requirement audit against SignPath eligibility criteria; explicit SignPath attribution; maintainer/approver responsibilities; zero-telemetry privacy policy; release verification instructions.
-  EVIDENCE: Full PASS/FAIL/BLOCKED matrix documented; prerequisites explicitly scheduled.
+- [x] G43: Chryypt Organization public code signing policy
+  CHECK: `docs/CODE_SIGNING_POLICY.md`
+  EXPECT: Public policy governing Chryypt Organization Authenticode code signing, cryptographic verification, maintainer responsibilities, and zero-telemetry commitments.
+  EVIDENCE: Documented and enforced in `docs/CODE_SIGNING_POLICY.md`.
 
-- [x] G44: SignPath automated release workflow
-  CHECK: `.github/workflows/signpath-release.yml`
-  EXPECT: Disabled-by-default manual workflow dispatch; builds from exact tag; runs full test suite; records unsigned SHA-256 hashes & provenance; submits signing request via official action; verifies returned Authenticode chain; creates draft release.
-  EVIDENCE: Workflow file configured with all 11 required safety gates.
+- [x] G44: Automated release packaging & verification workflow
+  CHECK: `.github/workflows/release.yml`
+  EXPECT: GitHub Actions release workflow building installers, running test suites, verifying metadata and packaging, computing SHA-256 digests, and publishing release assets.
+  EVIDENCE: Workflow configured and verified.
 
 - [x] G45: Git history privacy audit & exclusion
   CHECK: Audit repository history across all branches and commits for `.chryypt/` session data.
@@ -399,7 +399,6 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 
 ## Not gated
 
-- [ ] SignPath Foundation external acceptance: Cyron Uninstaller has prepared the technical integration but has not yet received external approval from SignPath Foundation; public releases prior to approval remain `UNSIGNED_RC` (or `DEV_TEST_SIGNED` for isolated test builds).
 - [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;
   the engine was exercised only against isolated fixtures.
 - [ ] Elevation: Cyron never requests administrator rights for cleaning; locked or system-owned

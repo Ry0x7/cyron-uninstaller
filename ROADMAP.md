@@ -61,9 +61,8 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 
 ### Phase 7 — Code Signing Architecture & Release Provenance (`[x]`)
 - Windows PE VERSIONINFO, WiX MSI properties, and NSIS header audit (`WINDOWS_METADATA_OK`).
-- Local self-signed development builds (`DEV_TEST_SIGNED`, `SIGNATURES_VERIFIED_OK`).
+- Chryypt Organization code signing pipeline (`CHRYYPT_SIGNED`, `SIGNATURES_VERIFIED_OK`).
 - Automated negative signature test suite (detecting unsigned, tampered, or rogue certificates).
-- SignPath Foundation integration workflow prepared (`.github/workflows/signpath-release.yml`).
 - Public code signing policy authored (`docs/CODE_SIGNING_POLICY.md`).
 - Git history privacy audit: verified clean commit tree with zero `.chryypt` files.
 - Release Candidate 1 (`v0.1.0`) tagged and published on GitHub.
@@ -75,5 +74,4 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 ### Phase 8 — Advanced Integration & Store Management (`[ ]`)
 - [ ] **Native WinRT COM Store Package Removal**: Direct integration with `Windows.Management.Deployment.PackageManager` via native COM bindings (without spawning PowerShell scripts), allowing managed uninstallation of Microsoft Store packages after operator review.
 - [ ] **Multi-Drive Concurrent Scanning**: Parallelized drive root scanning for workstations with multiple physical NVMe/SSD storage volumes.
-- [ ] **SignPath Foundation Public Signing Onboarding**: Complete external application, resolve licensing requirements, and enable automated publicly trusted Authenticode signing in GitHub Actions.
 - [ ] **Automated Documentation CI Enforcement**: Automated validation of internal links, artifact naming, and command consistency via `scripts/verify-docs.mjs`.

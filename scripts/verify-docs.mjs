@@ -109,7 +109,6 @@ const requiredDocs = [
   "docs/BENCHMARKS.md",
   "docs/RELEASE_CHECKLIST.md",
   "docs/BUILD_AND_SIGNING.md",
-  "docs/SIGNPATH_READINESS.md",
   "docs/CODE_SIGNING_POLICY.md",
   "docs/development/DESIGN.md",
   "docs/archive/PHASE_HISTORY.md",
