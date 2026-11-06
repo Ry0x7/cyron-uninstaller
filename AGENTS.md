@@ -14,7 +14,7 @@ Cyron is a Windows desktop application (Tauri v2 + Rust backend, React 19 + Type
 
 ## Architectural Invariants (Non-Negotiable)
 
-1. **IPC Surface:** 37 commands in `src-tauri/src/commands.rs`, registered in `lib.rs`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the contract. Change both together. Never accept free-form execution commands from the frontend.
+1. **IPC Surface:** 39 commands in `src-tauri/src/commands.rs`, registered in `lib.rs`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the contract. Change both together. Never accept free-form execution commands from the frontend.
 2. **Scanner is Strictly Read-Only:** Directory walk (`fs.rs`, `scan.rs`), direct NTFS MFT reader (`mft.rs`), duplicate finder (`duplicates.rs`), and storage categorization (`storage.rs`) never modify the filesystem. Reparse points (junctions, symlinks) are never followed.
 3. **Review-First Destructive Operations:** All modifications (cache cleaning, uninstallation, process termination, leftover removal) require server-held, single-use, 10-minute expiring confirmation plans (`CleanupPlan`, `UninstallPlan`, `BatchUninstallPlan`, `LeftoverPlan`).
 4. **Quarantine Over Deletion:** Files are moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\` using Win32 renames; files are never deleted in place during cleanup. Every move is preceded by a durable write-ahead recovery journal (`recovery_journal.jsonl`) with `sync_all`. `purge_quarantine` is the only permanent removal and is strictly manifest-scoped.

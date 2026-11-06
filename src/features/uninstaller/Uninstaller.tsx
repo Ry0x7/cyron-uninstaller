@@ -19,6 +19,7 @@ import {
 } from "../../components/ui";
 import { IconApps, IconLock, IconPlay, IconRefresh, IconShield, IconTrash } from "../../components/Icons";
 import { AppDrawer } from "./AppDrawer";
+import { UninstallWizard } from "./UninstallWizard";
 import "./uninstaller.css";
 
 type ScopeFilter = "all" | "machine" | "user";
@@ -73,6 +74,7 @@ export function Uninstaller({
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [sort, setSort] = useState<SortKey>("name");
   const [selected, setSelected] = useState<InstalledApp | null>(null);
+  const [wizardApp, setWizardApp] = useState<InstalledApp | null>(null);
 
   // Batch selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -460,14 +462,28 @@ export function Uninstaller({
                         {app.estimatedSize === null ? "—" : formatBytes(app.estimatedSize)}
                       </td>
                       <td>
-                        <div className="un-scope" style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
-                          <Badge tone={app.source === "store" ? "accent" : app.source === "steam" ? "accent" : app.source === "portable" ? "caution" : "neutral"}>
-                            {app.source === "store" ? "Store" : app.source === "steam" ? "Steam" : app.source === "portable" ? "Portable" : (app.scope === "machine" ? "Machine" : "User")}
-                          </Badge>
-                          {app.uninstallSupport === "missing" && (
-                            <Badge tone="danger">Broken</Badge>
-                          )}
-                          <span className="un-arch">{app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : ""}</span>
+                        <div className="un-scope" style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+                          <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+                            <Badge tone={app.source === "store" ? "accent" : app.source === "steam" ? "accent" : app.source === "portable" ? "caution" : "neutral"}>
+                              {app.source === "store" ? "Store" : app.source === "steam" ? "Steam" : app.source === "portable" ? "Portable" : (app.scope === "machine" ? "Machine" : "User")}
+                            </Badge>
+                            {app.uninstallSupport === "missing" && (
+                              <Badge tone="danger">Broken</Badge>
+                            )}
+                            <span className="un-arch">{app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : ""}</span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant={app.uninstallSupport === "missing" ? "secondary" : "danger"}
+                            icon={<IconTrash size={12} />}
+                            disabled={app.isProtected}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setWizardApp(app);
+                            }}
+                          >
+                            {app.uninstallSupport === "missing" ? "Force Clean" : "Uninstall"}
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -513,6 +529,18 @@ export function Uninstaller({
         app={selected}
         onClose={() => setSelected(null)}
         onUninstallSuccess={() => {
+          invalidateInstalledApps();
+          inventory.reload();
+        }}
+      />
+
+      {/* Guided Uninstall Wizard */}
+      <UninstallWizard
+        app={wizardApp}
+        isOpen={Boolean(wizardApp)}
+        onClose={() => setWizardApp(null)}
+        onComplete={() => {
+          setWizardApp(null);
           invalidateInstalledApps();
           inventory.reload();
         }}

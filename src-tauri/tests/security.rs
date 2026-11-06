@@ -734,6 +734,7 @@ fn critical_system_processes_cannot_be_terminated() {
     let snapshot = process::StoredProcessSnapshot {
         app_id: "test-app".into(),
         install_location: "C:\\Program Files\\TestApp".into(),
+        candidate_roots: Vec::new(),
         timestamp: now,
         processes: vec![
             process::AppProcess {
@@ -936,6 +937,7 @@ fn process_creation_time_fails_closed_when_unverified() {
     let snapshot = process::StoredProcessSnapshot {
         app_id: "test-app".into(),
         install_location: "C:\\Program Files\\TestApp".into(),
+        candidate_roots: Vec::new(),
         timestamp: now,
         processes: vec![process::AppProcess {
             pid: std::process::id(),

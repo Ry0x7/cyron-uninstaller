@@ -140,6 +140,19 @@ pub fn scan_app_leftovers(
     publisher: Option<&str>,
     install_location: Option<&str>,
 ) -> (StoredLeftoverPlan, LeftoverScanReport) {
+    scan_app_leftovers_expanded(app_id, app_name, publisher, install_location, None, None, "")
+}
+
+/// Expanded leftover scan taking candidate uninstaller command, display icon, and registry hive.
+pub fn scan_app_leftovers_expanded(
+    app_id: &str,
+    app_name: &str,
+    publisher: Option<&str>,
+    install_location: Option<&str>,
+    uninstall_string: Option<&str>,
+    display_icon: Option<&str>,
+    hive: &str,
+) -> (StoredLeftoverPlan, LeftoverScanReport) {
     let mut candidates = Vec::new();
     let mut total_size = 0u64;
     let mut total_files = 0u64;
@@ -148,12 +161,17 @@ pub fn scan_app_leftovers(
     let clean_app_name = sanitize_for_path(app_name);
     let clean_pub = publisher.map(sanitize_for_path);
 
-    // 1. Check install location if it exists
-    if let Some(loc) = install_location {
-        let path = PathBuf::from(loc.trim());
+    // 1. Check install location and candidate roots
+    let candidate_dirs = crate::process::extract_candidate_roots(
+        install_location,
+        uninstall_string,
+        display_icon,
+    );
+
+    for path in candidate_dirs {
         if path.exists() && guard_leftover_path(&path).is_ok() {
             let (size, files) = measure_directory_shallow(&path);
-            if files > 0 {
+            if files > 0 && !candidates.iter().any(|c: &LeftoverCandidate| c.path == path.to_string_lossy()) {
                 total_size += size;
                 total_files += files;
                 candidates.push(LeftoverCandidate {
@@ -162,7 +180,7 @@ pub fn scan_app_leftovers(
                     path: path.to_string_lossy().to_string(),
                     confidence: "high".into(),
                     risk: "safe".into(),
-                    reason: "Remaining installation folder after uninstall.".into(),
+                    reason: "Application installation folder.".into(),
                     size,
                     file_count: files,
                     selected: true,
@@ -253,13 +271,19 @@ pub fn scan_app_leftovers(
         }
     }
 
-    // 3. Check Registry
+    // 3. Check Shortcuts (Start Menu and Desktop)
+    check_shortcut_candidates(&clean_app_name, &mut candidates, &mut total_size, &mut total_files);
+
+    // 4. Check Registry settings
     check_registry_candidates(
         &clean_app_name,
         clean_pub.as_deref(),
         &mut candidates,
         &mut reg_count,
     );
+
+    // 5. Check Uninstall registry registration key
+    check_uninstall_key_candidate(app_id, hive, &mut candidates, &mut reg_count);
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -386,6 +410,144 @@ fn check_registry_candidates(
     }
 }
 
+fn check_shortcut_candidates(
+    clean_app_name: &str,
+    candidates: &mut Vec<LeftoverCandidate>,
+    total_size: &mut u64,
+    total_files: &mut u64,
+) {
+    let mut shortcut_dirs = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        shortcut_dirs.push(PathBuf::from(appdata).join(r"Microsoft\Windows\Start Menu\Programs"));
+    }
+    if let Ok(progdata) = std::env::var("PROGRAMDATA") {
+        shortcut_dirs.push(PathBuf::from(progdata).join(r"Microsoft\Windows\Start Menu\Programs"));
+    }
+    if let Ok(userprof) = std::env::var("USERPROFILE") {
+        shortcut_dirs.push(PathBuf::from(userprof).join("Desktop"));
+    }
+    if let Ok(pubprof) = std::env::var("PUBLIC") {
+        shortcut_dirs.push(PathBuf::from(pubprof).join("Desktop"));
+    }
+
+    let needle = clean_app_name.to_ascii_lowercase();
+
+    for dir in shortcut_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        scan_shortcuts_in_dir(&dir, &needle, candidates, total_size, total_files, 0);
+    }
+}
+
+fn scan_shortcuts_in_dir(
+    dir: &Path,
+    needle: &str,
+    candidates: &mut Vec<LeftoverCandidate>,
+    total_size: &mut u64,
+    total_files: &mut u64,
+    depth: usize,
+) {
+    if depth > 2 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if is_reparse(&meta) {
+            continue;
+        }
+        if meta.is_dir() {
+            let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+            if dir_name.contains(needle) {
+                if guard_leftover_path(&path).is_ok() {
+                    let (size, files) = measure_directory_shallow(&path);
+                    if files > 0 && !candidates.iter().any(|c| c.path == path.to_string_lossy()) {
+                        *total_size += size;
+                        *total_files += files;
+                        candidates.push(LeftoverCandidate {
+                            id: format!("cand-{}", candidates.len()),
+                            kind: "directory".into(),
+                            path: path.to_string_lossy().to_string(),
+                            confidence: "high".into(),
+                            risk: "safe".into(),
+                            reason: "Start menu shortcut group for application.".into(),
+                            size,
+                            file_count: files,
+                            selected: true,
+                        });
+                    }
+                }
+            } else {
+                scan_shortcuts_in_dir(&path, needle, candidates, total_size, total_files, depth + 1);
+            }
+        } else if meta.is_file() {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+            if ext == "lnk" {
+                let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
+                if stem.contains(needle) && !candidates.iter().any(|c| c.path == path.to_string_lossy()) {
+                    let size = meta.len();
+                    *total_size += size;
+                    *total_files += 1;
+                    candidates.push(LeftoverCandidate {
+                        id: format!("cand-{}", candidates.len()),
+                        kind: "file".into(),
+                        path: path.to_string_lossy().to_string(),
+                        confidence: "high".into(),
+                        risk: "safe".into(),
+                        reason: "Application shortcut (.lnk).".into(),
+                        size,
+                        file_count: 1,
+                        selected: true,
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn check_uninstall_key_candidate(
+    app_id: &str,
+    hive: &str,
+    candidates: &mut Vec<LeftoverCandidate>,
+    reg_count: &mut u64,
+) {
+    if app_id.is_empty() {
+        return;
+    }
+    let subkey_path = match hive {
+        "machine-64" => format!("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
+        "machine-32" => format!("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
+        "user-64" => format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
+        "user-32" => format!("HKCU\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"),
+        _ => return,
+    };
+
+    if let Ok((root, sub)) = parse_reg_path(&subkey_path) {
+        if root.open_subkey(&sub).is_ok() && !candidates.iter().any(|c| c.path == subkey_path) {
+            candidates.push(LeftoverCandidate {
+                id: format!("cand-{}", candidates.len()),
+                kind: "registry_key".into(),
+                path: subkey_path,
+                confidence: "high".into(),
+                risk: "safe".into(),
+                reason: "Windows Application Uninstall registration key.".into(),
+                size: 0,
+                file_count: 0,
+                selected: true,
+            });
+            *reg_count += 1;
+        }
+    }
+}
+
 /// Cleans approved leftover candidates from a backend-verified single-use plan:
 /// 1. Revalidates every candidate against safety guards.
 /// 2. Exports selected registry keys to a complete, verified .reg backup file.
@@ -419,6 +581,11 @@ pub fn clean_leftovers(
         .candidates
         .iter()
         .filter(|c| selected_ids.iter().any(|id| id == &c.id) && c.kind == "directory")
+        .collect();
+    let selected_files: Vec<&LeftoverCandidate> = plan
+        .candidates
+        .iter()
+        .filter(|c| selected_ids.iter().any(|id| id == &c.id) && c.kind == "file")
         .collect();
     let selected_regs: Vec<&LeftoverCandidate> = plan
         .candidates
@@ -531,6 +698,53 @@ pub fn clean_leftovers(
         }
 
         remove_empty_dir_tree(&dir_path);
+    }
+
+    for file_cand in selected_files {
+        let file_path = PathBuf::from(&file_cand.path);
+        if !file_path.exists() {
+            continue;
+        }
+        let meta = match fs::symlink_metadata(&file_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.file_type().is_file() || is_reparse(&meta) {
+            errors.push(format!("Refused non-regular or link file: {}", file_cand.path));
+            continue;
+        }
+        let size = meta.len();
+        index += 1;
+        let dest_name = format!("{index}-{}", file_path.file_name().unwrap_or_default().to_string_lossy());
+        let dest = batch.join(dest_name);
+
+        let item = serde_json::json!({
+            "originalPath": file_path.to_string_lossy(),
+            "storedPath": dest.to_string_lossy(),
+            "size": size
+        });
+        let line = serde_json::to_string(&item).unwrap_or_default();
+        use std::io::Write;
+        let journal_res: Result<(), std::io::Error> = (|| {
+            let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
+            writeln!(jf, "{line}")?;
+            jf.flush()?;
+            jf.sync_all()?;
+            Ok(())
+        })();
+
+        if let Err(e) = journal_res {
+            errors.push(format!("Journal write failed for {}: {e}; skipped moving", file_path.display()));
+            continue;
+        }
+
+        if fs::rename(&file_path, &dest).is_ok() {
+            quarantined_files += 1;
+            quarantined_bytes += size;
+            manifest_items.push(item);
+        } else {
+            errors.push(format!("Could not move {} to quarantine", file_path.display()));
+        }
     }
 
     // Write quarantine manifest
@@ -916,6 +1130,23 @@ pub fn is_safe_to_delete_reg_key(full_path: &str) -> bool {
         return false;
     }
 
+    // Protect Windows system trees under Microsoft\Windows
+    if lower.contains("software\\microsoft\\windows") {
+        if lower.contains("currentversion\\uninstall") {
+            let last_part = parts.last().unwrap_or(&"");
+            if *last_part == "uninstall"
+                || *last_part == "currentversion"
+                || *last_part == "windows"
+                || *last_part == "microsoft"
+                || *last_part == "wow6432node"
+            {
+                return false;
+            }
+            return parts.len() >= 7;
+        }
+        return false;
+    }
+
     // Direct vendor key e.g. HKCU\Software\Microsoft
     if parts.len() == 3 {
         for vendor in SHARED_VENDORS {
@@ -1084,6 +1315,10 @@ mod tests {
         assert!(!is_safe_to_delete_reg_key("HKCU\\Software\\Intel"));
         assert!(!is_safe_to_delete_reg_key("HKCU\\Software"));
         assert!(!is_safe_to_delete_reg_key("HKLM\\Software"));
+        assert!(!is_safe_to_delete_reg_key("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"));
+        assert!(!is_safe_to_delete_reg_key("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion"));
+        assert!(is_safe_to_delete_reg_key("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{1234-5678}"));
+        assert!(is_safe_to_delete_reg_key("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MyApp"));
     }
 
     #[test]

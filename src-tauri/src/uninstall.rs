@@ -457,8 +457,16 @@ pub fn execute_uninstaller(
     }
 
     let started = Instant::now();
-    let mut child = Command::new(&cmd.executable)
-        .args(&cmd.arguments)
+    let working_dir = Path::new(&cmd.executable)
+        .parent()
+        .filter(|p| p.is_dir());
+
+    let mut command = Command::new(&cmd.executable);
+    command.args(&cmd.arguments);
+    if let Some(wd) = working_dir {
+        command.current_dir(wd);
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| format!("Failed to launch uninstaller: {error}"))?;
 
@@ -481,17 +489,20 @@ pub fn execute_uninstaller(
         match child.try_wait() {
             Ok(Some(status)) => {
                 let code = status.code().unwrap_or(-1);
-                let restart_required = code == 3010;
+                let restart_required = code == 3010 || code == 1641;
                 let status_str = match code {
-                    0 => "completed",
-                    3010 => "restart_required",
+                    0 | 3010 | 1641 => "completed",
                     1602 => "cancelled",
                     _ => "failed",
                 };
                 let message = match code {
                     0 => "Uninstaller completed successfully.".to_string(),
                     3010 => "Uninstaller finished; a system restart is required to complete removal.".to_string(),
+                    1641 => "Uninstaller finished; a system restart has been initiated.".to_string(),
                     1602 => "Uninstallation was cancelled by the user in the installer wizard.".to_string(),
+                    1603 => "Fatal error during uninstallation (error 1603). The uninstaller may require elevated privileges or has missing files.".to_string(),
+                    1618 => "Another installation is already in progress. Please wait for it to complete.".to_string(),
+                    1605 => "This action is only valid for products that are currently installed (error 1605).".to_string(),
                     other => format!("Uninstaller exited with code {other}."),
                 };
                 return Ok(UninstallExecutionResult {

@@ -680,11 +680,33 @@ pub async fn discover_app_processes(
 ) -> Result<Vec<process::AppProcess>, String> {
     let app_id_trimmed = app_id.trim().to_string();
     let inventory = run_blocking("Application lookup for process discovery", apps::discover_apps).await?;
-    let app = inventory.apps.iter().find(|a| a.id == app_id_trimmed);
-    let install_location = app.and_then(|a| a.install_location.clone());
+    let app = inventory
+        .apps
+        .iter()
+        .find(|a| a.id == app_id_trimmed)
+        .cloned()
+        .or_else(|| {
+            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+        });
+
+    if let Some(ref a) = app {
+        if let Ok(mut snapshots) = state.app_snapshots.lock() {
+            snapshots.insert(a.id.clone(), a.clone());
+        }
+    }
+
+    let candidate_roots = if let Some(ref a) = app {
+        process::extract_candidate_roots(
+            a.install_location.as_deref(),
+            a.uninstall_string.as_deref(),
+            a.display_icon.as_deref(),
+        )
+    } else {
+        Vec::new()
+    };
 
     let (snapshot, procs) = run_blocking("Process discovery", move || {
-        process::discover_app_processes(&app_id_trimmed, install_location.as_deref())
+        process::discover_app_processes_with_candidates(&app_id_trimmed, &candidate_roots)
     })
     .await?;
 
@@ -749,9 +771,14 @@ pub async fn prepare_uninstall(
         .apps
         .iter()
         .find(|a| a.id == app_id_trimmed)
+        .cloned()
         .ok_or_else(|| "Application is not registered in uninstall inventory.".to_string())?;
 
-    let plan = uninstall::create_uninstall_plan(app, quiet)?;
+    if let Ok(mut snapshots) = state.app_snapshots.lock() {
+        snapshots.insert(app.id.clone(), app.clone());
+    }
+
+    let plan = uninstall::create_uninstall_plan(&app, quiet)?;
     let public_plan = uninstall::to_public_plan(&plan);
 
     let mut plans = state
@@ -799,7 +826,15 @@ pub async fn execute_uninstall(
         .apps
         .iter()
         .find(|a| a.id == app_id)
+        .cloned()
+        .or_else(|| {
+            state.app_snapshots.lock().ok()?.get(&app_id).cloned()
+        })
         .ok_or_else(|| "Application is no longer registered in uninstall inventory.".to_string())?;
+
+    if let Ok(mut snapshots) = state.app_snapshots.lock() {
+        snapshots.insert(live_app.id.clone(), live_app.clone());
+    }
 
     let live_cmd = if plan.command.arguments.iter().any(|a| a == "/qn" || a == "/quiet" || a == "/s" || a == "/S") && live_app.quiet_uninstall_string.is_some() {
         live_app.quiet_uninstall_string.as_deref().unwrap_or(&plan.raw_command)
@@ -823,6 +858,31 @@ pub async fn execute_uninstall(
 }
 
 #[tauri::command]
+pub async fn snapshot_app_identity(
+    state: State<'_, AppState>,
+    app_id: String,
+) -> Result<apps::InstalledApp, String> {
+    let app_id_trimmed = app_id.trim().to_string();
+    let inventory = run_blocking("Application lookup for snapshot", apps::discover_apps).await?;
+    let app = inventory
+        .apps
+        .iter()
+        .find(|a| a.id == app_id_trimmed)
+        .cloned()
+        .or_else(|| {
+            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+        })
+        .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
+
+    let mut snapshots = state
+        .app_snapshots
+        .lock()
+        .map_err(|_| "Application snapshot registry is unavailable.".to_string())?;
+    snapshots.insert(app.id.clone(), app.clone());
+    Ok(app)
+}
+
+#[tauri::command]
 pub async fn scan_app_leftovers(
     state: State<'_, AppState>,
     app_id: String,
@@ -833,14 +893,29 @@ pub async fn scan_app_leftovers(
         .apps
         .iter()
         .find(|a| a.id == app_id_trimmed)
-        .ok_or_else(|| "Application not found in uninstall inventory.".to_string())?;
+        .cloned()
+        .or_else(|| {
+            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+        })
+        .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
 
     let name = app.name.clone();
     let publisher = app.publisher.clone();
     let install_location = app.install_location.clone();
+    let uninstall_string = app.uninstall_string.clone();
+    let display_icon = app.display_icon.clone();
+    let app_hive = app.hive.clone();
 
     let (plan, report) = run_blocking("Leftover scan", move || {
-        leftovers::scan_app_leftovers(&app_id_trimmed, &name, publisher.as_deref(), install_location.as_deref())
+        leftovers::scan_app_leftovers_expanded(
+            &app_id_trimmed,
+            &name,
+            publisher.as_deref(),
+            install_location.as_deref(),
+            uninstall_string.as_deref(),
+            display_icon.as_deref(),
+            &app_hive,
+        )
     })
     .await?;
 
@@ -853,6 +928,68 @@ pub async fn scan_app_leftovers(
     plans.insert(plan.plan_id.clone(), plan);
 
     Ok(report)
+}
+
+#[tauri::command]
+pub async fn clean_broken_inventory_entry(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    app_id: String,
+) -> Result<leftovers::LeftoverCleanReport, String> {
+    let app_id_trimmed = app_id.trim().to_string();
+    if app_id_trimmed.is_empty() {
+        return Err("Application ID is required.".into());
+    }
+
+    let inventory = run_blocking("Application lookup for broken entry cleanup", apps::discover_apps).await?;
+    let found_app = inventory
+        .apps
+        .iter()
+        .find(|a| a.id == app_id_trimmed)
+        .cloned()
+        .or_else(|| {
+            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+        })
+        .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
+
+    let subkey_path = match found_app.hive.as_str() {
+        "machine-64" => format!("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
+        "machine-32" => format!("HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
+        "user-64" => format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
+        "user-32" => format!("HKCU\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id_trimmed}"),
+        _ => return Err("Unsupported application registry hive for inventory entry cleanup.".into()),
+    };
+
+    if !leftovers::is_safe_to_delete_reg_key(&subkey_path) {
+        return Err("Refusing deletion of protected system registry key.".into());
+    }
+
+    let candidate = leftovers::LeftoverCandidate {
+        id: "cand-0".into(),
+        kind: "registry_key".into(),
+        path: subkey_path,
+        confidence: "high".into(),
+        risk: "safe".into(),
+        reason: "Broken Windows application uninstall registration key.".into(),
+        size: 0,
+        file_count: 0,
+        selected: true,
+    };
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let plan = leftovers::StoredLeftoverPlan {
+        plan_id: format!("broken-entry-{now}-{}", std::process::id()),
+        app_id: app_id_trimmed.clone(),
+        app_name: found_app.name.clone(),
+        candidates: vec![candidate],
+        expires_at: now + 300,
+    };
+
+    let quarantine_root = cleanup_quarantine_root(&app)?;
+    run_blocking("Clean broken inventory entry", move || {
+        leftovers::clean_leftovers(&plan, &["cand-0".to_string()], &quarantine_root)
+    })
+    .await?
 }
 
 #[tauri::command]

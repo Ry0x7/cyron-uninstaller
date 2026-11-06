@@ -11,6 +11,7 @@ import type {
   DuplicateOptions,
   DuplicateReport,
   HistoryEntry,
+  InstalledApp,
   LeftoverCleanReport,
   LeftoverScanReport,
   Measured,
@@ -115,6 +116,10 @@ export const api = {
     call<LeftoverScanReport>("scan_app_leftovers", { appId }),
   cleanAppLeftovers: (appId: string, planId: string, candidateIds: string[]) =>
     call<LeftoverCleanReport>("clean_app_leftovers", { appId, planId, candidateIds }),
+  snapshotAppIdentity: (appId: string) =>
+    call<InstalledApp>("snapshot_app_identity", { appId }),
+  cleanBrokenInventoryEntry: (appId: string) =>
+    call<LeftoverCleanReport>("clean_broken_inventory_entry", { appId }),
   prepareBatchUninstall: (appIds: string[], quiet = false) =>
     call<BatchUninstallPlan>("prepare_batch_uninstall", { appIds, quiet }),
   executeBatchUninstall: (planId: string) =>

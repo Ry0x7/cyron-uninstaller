@@ -36,6 +36,7 @@ pub struct ProcessTerminateResult {
 pub struct StoredProcessSnapshot {
     pub app_id: String,
     pub install_location: String,
+    pub candidate_roots: Vec<String>,
     pub timestamp: u64,
     pub processes: Vec<AppProcess>,
 }
@@ -134,45 +135,173 @@ pub fn get_process_creation_time(pid: u32) -> Option<u64> {
     }
 }
 
-/// Enumerates running processes belonging to the given application install location
-/// and captures a verified process snapshot.
-pub fn discover_app_processes(
-    app_id: &str,
+/// Determines if a path is safe to use as an application process search root.
+/// Rejects drive roots, Windows/system directories, and bare user profile or Program Files roots.
+pub fn is_candidate_root_safe(path: &Path) -> bool {
+    let key = normalize_key(path);
+    let parts: Vec<&str> = key.split('\\').filter(|p| !p.is_empty()).collect();
+    if parts.len() < 2 {
+        return false;
+    }
+
+    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
+    let windir_key = normalize_key(Path::new(&windir));
+    if key == windir_key || is_within_key(&key, &windir_key) {
+        return false;
+    }
+
+    // Refuse direct system folders
+    let lower = key.to_ascii_lowercase();
+    if lower == "c:" || lower == "c:\\" {
+        return false;
+    }
+    if let Ok(prog) = std::env::var("ProgramFiles") {
+        if normalize_key(Path::new(&prog)) == key {
+            return false;
+        }
+    }
+    if let Ok(prog86) = std::env::var("ProgramFiles(x86)") {
+        if normalize_key(Path::new(&prog86)) == key {
+            return false;
+        }
+    }
+    if let Ok(userprof) = std::env::var("USERPROFILE") {
+        if normalize_key(Path::new(&userprof)) == key {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Extracts safe candidate root directories from an application's install location,
+/// uninstall command string, and display icon.
+pub fn extract_candidate_roots(
     install_location: Option<&str>,
+    uninstall_string: Option<&str>,
+    display_icon: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    if let Some(loc) = install_location {
+        let trimmed = loc.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            if is_candidate_root_safe(&p) {
+                roots.push(p);
+            }
+        }
+    }
+
+    if let Some(cmd) = uninstall_string {
+        if let Some(parent) = extract_parent_from_command(cmd) {
+            if is_candidate_root_safe(&parent) && !roots.iter().any(|r| normalize_key(r) == normalize_key(&parent)) {
+                roots.push(parent.clone());
+            }
+            if let Some(file_name) = parent.file_name().and_then(|f| f.to_str()) {
+                let lower_name = file_name.to_ascii_lowercase();
+                if lower_name == "bin" || lower_name.starts_with("app-") {
+                    if let Some(gp) = parent.parent() {
+                        let gp_buf = gp.to_path_buf();
+                        if is_candidate_root_safe(&gp_buf) && !roots.iter().any(|r| normalize_key(r) == normalize_key(&gp_buf)) {
+                            roots.push(gp_buf);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(icon) = display_icon {
+        if let Some(parent) = extract_parent_from_icon(icon) {
+            if is_candidate_root_safe(&parent) && !roots.iter().any(|r| normalize_key(r) == normalize_key(&parent)) {
+                roots.push(parent);
+            }
+        }
+    }
+
+    roots
+}
+
+fn extract_parent_from_command(cmd: &str) -> Option<PathBuf> {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let exe_str = if trimmed.starts_with('"') {
+        let end_idx = trimmed[1..].find('"')?;
+        &trimmed[1..=end_idx]
+    } else {
+        trimmed.split_whitespace().next()?
+    };
+
+    let p = Path::new(exe_str);
+    let file_name = p.file_name()?.to_string_lossy().to_ascii_lowercase();
+    if matches!(
+        file_name.as_str(),
+        "msiexec.exe" | "cmd.exe" | "powershell.exe" | "pwsh.exe" | "rundll32.exe" | "regsvr32.exe"
+    ) {
+        return None;
+    }
+
+    p.parent().map(|parent| parent.to_path_buf())
+}
+
+fn extract_parent_from_icon(icon: &str) -> Option<PathBuf> {
+    let mut trimmed = icon.trim();
+    if trimmed.starts_with('"') {
+        if let Some(end) = trimmed[1..].find('"') {
+            trimmed = &trimmed[1..=end];
+        }
+    } else if let Some(comma) = trimmed.find(',') {
+        trimmed = trimmed[..comma].trim();
+    }
+
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let p = Path::new(trimmed);
+    p.parent().map(|parent| parent.to_path_buf())
+}
+
+/// Enumerates running processes belonging to candidate root directories
+/// and captures a verified process snapshot.
+pub fn discover_app_processes_with_candidates(
+    app_id: &str,
+    candidate_roots: &[PathBuf],
 ) -> (StoredProcessSnapshot, Vec<AppProcess>) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
+    let safe_roots: Vec<PathBuf> = candidate_roots
+        .iter()
+        .filter(|p| is_candidate_root_safe(p))
+        .cloned()
+        .collect();
+
     let empty_snapshot = StoredProcessSnapshot {
         app_id: app_id.to_string(),
         install_location: String::new(),
+        candidate_roots: Vec::new(),
         timestamp: now,
         processes: Vec::new(),
     };
 
-    let Some(location) = install_location else {
-        return (empty_snapshot, Vec::new());
-    };
-    let location_trimmed = location.trim();
-    if location_trimmed.is_empty() {
-        return (empty_snapshot, Vec::new());
-    }
-    let target_root = match std::fs::canonicalize(location_trimmed) {
-        Ok(canonical) => canonical,
-        Err(_) => PathBuf::from(location_trimmed),
-    };
-    let target_root_key = normalize_key(&target_root);
-    if target_root_key.is_empty() || target_root_key.split('\\').count() < 2 {
+    if safe_roots.is_empty() {
         return (empty_snapshot, Vec::new());
     }
 
-    // Refuse system root or profile root
-    let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
-    if target_root_key == normalize_key(Path::new(&windir)) {
-        return (empty_snapshot, Vec::new());
-    }
+    let normalized_root_keys: Vec<String> = safe_roots
+        .iter()
+        .map(|r| match std::fs::canonicalize(r) {
+            Ok(c) => normalize_key(&c),
+            Err(_) => normalize_key(r),
+        })
+        .collect();
 
     let pids = enum_all_pids();
     let mut matching = Vec::new();
@@ -186,7 +315,10 @@ pub fn discover_app_processes(
             continue;
         };
         let path_key = normalize_key(Path::new(full_path));
-        if is_within_key(&path_key, &target_root_key) {
+        let belongs = normalized_root_keys
+            .iter()
+            .any(|root_key| is_within_key(&path_key, root_key));
+        if belongs {
             let critical = is_critical_process(pid, &exe_name, exe_path.as_deref());
             let creation_time = match get_process_creation_time(pid) {
                 Some(t) if t != 0 => t,
@@ -203,14 +335,33 @@ pub fn discover_app_processes(
         }
     }
 
+    let primary_location = safe_roots
+        .first()
+        .map(|r| r.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     let snapshot = StoredProcessSnapshot {
         app_id: app_id.to_string(),
-        install_location: target_root.to_string_lossy().to_string(),
+        install_location: primary_location,
+        candidate_roots: normalized_root_keys,
         timestamp: now,
         processes: matching.clone(),
     };
 
     (snapshot, matching)
+}
+
+/// Enumerates running processes belonging to the given application install location
+/// and captures a verified process snapshot.
+pub fn discover_app_processes(
+    app_id: &str,
+    install_location: Option<&str>,
+) -> (StoredProcessSnapshot, Vec<AppProcess>) {
+    let candidate = install_location
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| PathBuf::from(s.trim()));
+    let roots = candidate.into_iter().collect::<Vec<_>>();
+    discover_app_processes_with_candidates(app_id, &roots)
 }
 
 /// Controlled termination for a list of process IDs with re-validation against a verified snapshot.
@@ -323,7 +474,9 @@ pub fn terminate_processes_verified(
         };
 
         let current_path_key = normalize_key(Path::new(current_path));
-        if !is_within_key(&current_path_key, &target_root_key) {
+        let belongs = (!target_root_key.is_empty() && is_within_key(&current_path_key, &target_root_key))
+            || snapshot.candidate_roots.iter().any(|r| is_within_key(&current_path_key, r));
+        if !belongs {
             results.push(ProcessTerminateResult {
                 pid,
                 name,
@@ -632,6 +785,7 @@ mod tests {
         let snapshot = StoredProcessSnapshot {
             app_id: "app-1".into(),
             install_location: "C:\\Program Files\\App1".into(),
+            candidate_roots: vec!["c:\\program files\\app1".into()],
             timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
             processes: vec![AppProcess {
                 pid: 999999,
@@ -647,5 +801,26 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert!(!results[0].success);
         assert!(results[0].error.as_ref().unwrap().contains("was not found in the verified process snapshot"));
+    }
+
+    #[test]
+    fn candidate_root_extraction_handles_missing_install_location() {
+        let candidates = extract_candidate_roots(
+            None,
+            Some("\"C:\\Users\\User\\AppData\\Local\\CustomApp\\unins000.exe\" /SILENT"),
+            Some("C:\\Users\\User\\AppData\\Local\\CustomApp\\App.exe,0"),
+        );
+        assert!(!candidates.is_empty());
+        let normalized: Vec<String> = candidates.iter().map(|p| normalize_key(p)).collect();
+        assert!(normalized.contains(&"c:\\users\\user\\appdata\\local\\customapp".to_string()));
+    }
+
+    #[test]
+    fn candidate_root_safety_guards_system_roots() {
+        assert!(!is_candidate_root_safe(Path::new("C:\\")));
+        assert!(!is_candidate_root_safe(Path::new("C:\\Windows")));
+        assert!(!is_candidate_root_safe(Path::new("C:\\Windows\\System32")));
+        assert!(is_candidate_root_safe(Path::new("C:\\Program Files\\MyVendor\\MyApp")));
+        assert!(is_candidate_root_safe(Path::new("C:\\Users\\User\\AppData\\Local\\Programs\\MyApp")));
     }
 }

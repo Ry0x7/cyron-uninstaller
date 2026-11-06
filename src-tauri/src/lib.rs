@@ -31,6 +31,7 @@ pub struct AppState {
     pub batch_uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredBatchUninstallPlan>>>,
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
+    pub app_snapshots: Arc<Mutex<HashMap<String, apps::InstalledApp>>>,
     pub startup_route: Arc<Mutex<Option<explorer::StartupRoute>>>,
     pub index_manager: Arc<index::IndexManager>,
     /// True until the user deliberately enables cleaning.
@@ -48,6 +49,7 @@ impl Default for AppState {
             batch_uninstall_plans: Arc::default(),
             process_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
+            app_snapshots: Arc::default(),
             startup_route: Arc::default(),
             index_manager: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
@@ -102,6 +104,8 @@ pub fn run() {
             commands::query_directory_children,
             commands::search_indexed_files,
             commands::get_scan_index_stats,
+            commands::snapshot_app_identity,
+            commands::clean_broken_inventory_entry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");

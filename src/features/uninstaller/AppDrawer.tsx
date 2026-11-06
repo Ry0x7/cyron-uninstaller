@@ -28,6 +28,7 @@ import {
   IconStop,
   IconTrash,
 } from "../../components/Icons";
+import { UninstallWizard } from "./UninstallWizard";
 
 const HIVE_LABEL: Record<string, string> = {
   "machine-64": "HKLM · 64-bit view",
@@ -48,6 +49,7 @@ export function AppDrawer({
   onUninstallSuccess?: () => void;
 }) {
   const [tab, setTab] = useState<DrawerTab>("overview");
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   // Measurement state
   const [measurement, setMeasurement] = useState<{ appId: string; value: Measured } | null>(null);
@@ -333,6 +335,18 @@ export function AppDrawer({
       {/* Tab 1: Overview */}
       {tab === "overview" && (
         <>
+          <div style={{ marginBottom: 14 }}>
+            <Button
+              variant="danger"
+              icon={<IconTrash size={14} />}
+              disabled={app.isProtected}
+              onClick={() => setWizardOpen(true)}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              {app.uninstallSupport === "missing" ? "Start Forced Removal…" : "Uninstall Application (Guided Wizard)…"}
+            </Button>
+          </div>
+
           <KeyValue
             items={[
               { label: "Publisher", value: app.publisher ?? "—" },
@@ -764,6 +778,17 @@ export function AppDrawer({
       )}
 
       {revealError && <p className="un-inline-error">{revealError}</p>}
+
+      <UninstallWizard
+        app={app}
+        isOpen={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onComplete={() => {
+          setWizardOpen(false);
+          onClose();
+          onUninstallSuccess?.();
+        }}
+      />
     </Drawer>
   );
 }
