@@ -17,6 +17,8 @@ export interface AppSettings {
   exclusions: string[];
   /** When true the backend refuses to execute any cleanup (the default). */
   readOnly: boolean;
+  /** Whether to show the floating Hunter Mode crosshair widget on the desktop. */
+  showHunterWidget: boolean;
 }
 
 const STORAGE_KEY = "cyron.settings.v1";
@@ -26,6 +28,7 @@ const DEFAULTS: AppSettings = {
   includeHidden: true,
   exclusions: [],
   readOnly: true,
+  showHunterWidget: false,
 };
 
 function readSettings(): AppSettings {
@@ -45,6 +48,10 @@ function readSettings(): AppSettings {
         : [],
       // Settings saved before Phase 3 have no flag; they stay read-only.
       readOnly: typeof parsed.readOnly === "boolean" ? parsed.readOnly : DEFAULTS.readOnly,
+      showHunterWidget:
+        typeof parsed.showHunterWidget === "boolean"
+          ? parsed.showHunterWidget
+          : DEFAULTS.showHunterWidget,
     };
   } catch {
     return DEFAULTS;
@@ -58,6 +65,7 @@ interface SettingsContextValue {
   setExclusions: (paths: string[]) => void;
   /** Enable or disable cleaning; the backend enforces the same flag. */
   setReadOnly: (readOnly: boolean) => void;
+  setShowHunterWidget: (show: boolean) => void;
   reset: () => void;
 }
 
@@ -110,11 +118,23 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     (readOnly: boolean) => setSettings((current) => ({ ...current, readOnly })),
     [],
   );
+  const setShowHunterWidget = useCallback(
+    (showHunterWidget: boolean) => setSettings((current) => ({ ...current, showHunterWidget })),
+    [],
+  );
   const reset = useCallback(() => setSettings(DEFAULTS), []);
 
   const value = useMemo(
-    () => ({ settings, setTheme, setIncludeHidden, setExclusions, setReadOnly, reset }),
-    [settings, setTheme, setIncludeHidden, setExclusions, setReadOnly, reset],
+    () => ({
+      settings,
+      setTheme,
+      setIncludeHidden,
+      setExclusions,
+      setReadOnly,
+      setShowHunterWidget,
+      reset,
+    }),
+    [settings, setTheme, setIncludeHidden, setExclusions, setReadOnly, setShowHunterWidget, reset],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

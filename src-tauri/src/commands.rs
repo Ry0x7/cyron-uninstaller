@@ -1518,6 +1518,43 @@ pub fn list_cleanup_providers() -> Result<Vec<crate::providers::CleanupProviderD
     Ok(crate::providers::get_default_providers())
 }
 
+fn recognize_generic_cache_dir(path: &std::path::Path) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    let lower = path.to_string_lossy().to_lowercase();
+    let file_name = path.file_name()?.to_string_lossy().to_lowercase();
+
+    if file_name == "$recycle.bin" || lower.ends_with(r"\$recycle.bin") {
+        return Some(("Windows", "windows", "safe", "Windows volume Recycle Bin containing deleted items."));
+    }
+    if file_name == "temp" || file_name == "tmp" {
+        return Some(("Temporary Files", "windows", "safe", "Temporary workspace and logging files."));
+    }
+    if file_name == "node_modules" {
+        return Some(("Node.js", "packages", "safe", "Project dependency packages; can be re-installed using npm/pnpm/yarn install."));
+    }
+    if file_name == "_cacache" || file_name == "npm-cache" {
+        return Some(("npm", "packages", "safe", "npm content-addressable package tarball cache."));
+    }
+    if file_name == "caches" && lower.contains(".gradle") {
+        return Some(("Gradle", "packages", "safe", "Gradle build dependency and distribution cache."));
+    }
+    if file_name == "cache" && lower.contains(".cargo") {
+        return Some(("Cargo", "packages", "safe", "Cargo crates.io package download cache."));
+    }
+    if file_name == "downloading" && lower.contains("steamapps") {
+        return Some(("Steam", "packages", "safe", "Incomplete or staging game downloads in Steam Library."));
+    }
+    if file_name == "shadercache" && lower.contains("steamapps") {
+        return Some(("Steam", "packages", "safe", "Pre-compiled graphics shaders for Steam games."));
+    }
+    if (file_name == "debug" || file_name == "release") && lower.contains(r"\target\") {
+        return Some(("Rust Cargo", "packages", "safe", "Compiled Rust build target binaries."));
+    }
+    if file_name == ".pnpm-store" || (file_name == "store" && lower.contains("pnpm")) {
+        return Some(("pnpm", "packages", "caution", "Global content-addressable package store for pnpm."));
+    }
+    None
+}
+
 #[tauri::command]
 pub fn inspect_cleanable_directory(
     path: String,
@@ -1542,6 +1579,22 @@ pub fn inspect_cleanable_directory(
             risk: Some(provider.risk.clone()),
             category: Some(provider.category.clone()),
             explanation,
+            is_cleanable,
+            expected_reclaimable_bytes: if is_cleanable { measured.allocated } else { 0 },
+            total_occupied_bytes: measured.allocated,
+        })
+    } else if let Some((tool, category, risk, explanation)) = recognize_generic_cache_dir(&canonical) {
+        let is_cleanable = risk != "protected";
+        let measured = scan::measure_path(&canonical);
+        let encoded_id = format!("custom-dir-{}", crate::cleanup::encode_hex(canonical.to_string_lossy().as_bytes()));
+        Ok(CleanableInspection {
+            path: canonical.to_string_lossy().to_string(),
+            is_recognized: true,
+            provider_id: Some(encoded_id),
+            tool_label: Some(tool.to_string()),
+            risk: Some(risk.to_string()),
+            category: Some(category.to_string()),
+            explanation: format!("{explanation} Space will be reclaimed via quarantine."),
             is_cleanable,
             expected_reclaimable_bytes: if is_cleanable { measured.allocated } else { 0 },
             total_occupied_bytes: measured.allocated,

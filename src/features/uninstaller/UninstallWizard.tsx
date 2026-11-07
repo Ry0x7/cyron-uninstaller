@@ -940,17 +940,29 @@ export function UninstallWizard({
             <Button variant="ghost" onClick={onClose}>
               {leftoverReport && leftoverReport.candidates.length === 0 ? "Finish & Close" : "Skip Leftovers & Close"}
             </Button>
-            {leftoverReport && leftoverReport.candidates.length === 0 && mode === "forced" ? (
+            {leftoverReport && leftoverReport.candidates.length === 0 ? (
               <Button
-                variant="primary"
-                loading={preparingBrokenPlan}
+                variant="danger"
+                icon={<IconTrash size={14} />}
+                loading={cleaning || preparingBrokenPlan}
                 onClick={async () => {
-                  setMode("clean_entry");
-                  setStep("mode");
-                  handlePrepareCleanEntry();
+                  try {
+                    setCleaning(true);
+                    setCleanError(null);
+                    const plan = await api.prepareBrokenInventoryCleanup(app.id);
+                    const rep = await api.executeBrokenInventoryCleanup(plan.planId, plan.registryKeyPath);
+                    setCleanReport(rep);
+                    invalidateInstalledApps();
+                    setStep("complete");
+                    onComplete?.();
+                  } catch (err) {
+                    setCleanError(errorMessage(err));
+                  } finally {
+                    setCleaning(false);
+                  }
                 }}
               >
-                Clean Ghost Entry →
+                Purge Registration Entry
               </Button>
             ) : (
               <Button

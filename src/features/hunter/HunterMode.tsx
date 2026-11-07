@@ -15,8 +15,10 @@ import "./hunter.css";
 
 export function HunterMode({
   installedApps = [],
+  showFloatingTrigger = false,
 }: {
   installedApps?: InstalledApp[];
+  showFloatingTrigger?: boolean;
 }) {
   const [isActive, setIsActive] = useState(false);
   const [isTargeting, setIsTargeting] = useState(false);
@@ -28,6 +30,17 @@ export function HunterMode({
   const [confirmKill, setConfirmKill] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const onStartHunter = () => {
+      setIsActive(true);
+      setIsTargeting(true);
+      setConfirmKill(false);
+      setActionMessage("Move cursor over any desktop window or drag the crosshair icon to lock target (Space/Enter to lock, Esc to cancel)...");
+    };
+    window.addEventListener("cyron:start-hunter", onStartHunter);
+    return () => window.removeEventListener("cyron:start-hunter", onStartHunter);
+  }, []);
 
   useEffect(() => {
     const onDrawerChange = (e: Event) => {
@@ -172,6 +185,10 @@ export function HunterMode({
     navigator.clipboard.writeText(target.processPath);
     setActionMessage("Path copied to clipboard.");
   };
+
+  if (!showFloatingTrigger && !isActive && !isTargeting) {
+    return null;
+  }
 
   return (
     <>

@@ -21,14 +21,14 @@ pub const RETENTION_DAYS: u64 = 7;
 pub const PLAN_TTL_SECS: u64 = 600;
 /// How many affected paths a preview lists; totals are still exact.
 pub const MAX_PREVIEW_FILES: usize = 400;
-/// Hard cap on files considered for one catalog location.
-pub const MAX_FILES_PER_TARGET: usize = 100_000;
+/// Hard cap on files considered for one catalog location (1 million files for large dev caches like npm).
+pub const MAX_FILES_PER_TARGET: usize = 1_000_000;
 pub const CLEANUP_EVENT: &str = "cyron-cleanup-progress";
 pub const JOURNAL_FILE: &str = "recovery_journal.jsonl";
 pub const MIN_FREE_SPACE_BYTES: u64 = 512 * 1024 * 1024; // 512 MB
 pub const MAX_QUARANTINE_TOTAL_BYTES: u64 = 20 * 1024 * 1024 * 1024; // 20 GB
 
-const MAX_DIRS: usize = 20_000;
+const MAX_DIRS: usize = 200_000;
 const MAX_ERRORS: usize = 20;
 const MAX_SKIPS: usize = 100;
 const MAX_ITEMS: usize = 500;
@@ -244,6 +244,104 @@ pub struct BatchManifest {
     pub backup_size_bytes: Option<u64>,
 }
 
+pub fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
+    if s.len() % 2 != 0 {
+        return Err("Invalid hex string length".into());
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
+        .collect()
+}
+
+fn resolve_drive_or_custom_target(id: &str) -> Option<Result<CleanupSpec, String>> {
+    if let Some(rest) = id.strip_prefix("drive-") {
+        let parts: Vec<&str> = rest.splitn(2, '-').collect();
+        if parts.len() == 2 && parts[0].len() == 1 {
+            let letter = parts[0].to_ascii_uppercase();
+            let kind = parts[1];
+            let (rel_path, tool, label, risk, category, impact) = match kind {
+                "recycle-bin" => (
+                    "$Recycle.Bin",
+                    "Windows",
+                    format!("Recycle Bin ({letter}:)"),
+                    "safe",
+                    "windows",
+                    format!("Files in volume {letter}: Recycle Bin will be moved to quarantine."),
+                ),
+                "temp" => (
+                    "Temp",
+                    "Temporary Files",
+                    format!("Volume Temp ({letter}:)"),
+                    "safe",
+                    "windows",
+                    format!("Temporary files in {letter}:\\Temp will be moved to quarantine."),
+                ),
+                "steam-downloading" => (
+                    r"SteamLibrary\steamapps\downloading",
+                    "Steam",
+                    format!("Steam Downloads ({letter}:)"),
+                    "safe",
+                    "packages",
+                    format!("Incomplete game downloads in {letter}: Steam Library will be moved to quarantine."),
+                ),
+                "steam-shadercache" => (
+                    r"SteamLibrary\steamapps\shadercache",
+                    "Steam",
+                    format!("Steam Shader Cache ({letter}:)"),
+                    "safe",
+                    "packages",
+                    format!("Pre-compiled graphics shaders on drive {letter}: will be moved to quarantine."),
+                ),
+                "npm-cache" => (
+                    "npm-cache",
+                    "npm",
+                    format!("npm Cache ({letter}:)"),
+                    "safe",
+                    "packages",
+                    format!("npm package cache on drive {letter}: will be moved to quarantine."),
+                ),
+                _ => return None,
+            };
+            let path = PathBuf::from(format!("{letter}:\\{rel_path}"));
+            return Some(Ok(CleanupSpec {
+                id: id.to_string(),
+                tool: tool.to_string(),
+                label,
+                risk: risk.to_string(),
+                category: category.to_string(),
+                note: format!("Discovered on drive {letter}:."),
+                impact,
+                path,
+            }));
+        }
+    } else if let Some(hex_part) = id.strip_prefix("custom-dir-") {
+        let res = (|| {
+            let bytes = decode_hex(hex_part)?;
+            let path_str = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+            let path = PathBuf::from(&path_str);
+            guard_path(&path)?;
+            let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            Ok(CleanupSpec {
+                id: id.to_string(),
+                tool: "Custom Directory".into(),
+                label: file_name,
+                risk: "safe".into(),
+                category: "packages".into(),
+                note: format!("Cleanable directory identified at {}", path.display()),
+                impact: "Files will be moved to durable 7-day quarantine before deletion.".into(),
+                path,
+            })
+        })();
+        return Some(res);
+    }
+    None
+}
+
 /* ------------------------------------------------------- plan construction */
 
 /// Resolves catalog ids to specs. Unknown and protected ids are refused here,
@@ -268,6 +366,12 @@ pub fn catalog_specs(ids: &[String]) -> Result<Vec<CleanupSpec>, String> {
         if !seen.insert(id.to_string()) {
             continue;
         }
+
+        if let Some(resolved) = resolve_drive_or_custom_target(id) {
+            specs.push(resolved?);
+            continue;
+        }
+
         let definition =
             caches::find(id).ok_or_else(|| format!("Unknown cleanup target: {id}"))?;
         if definition.risk == "protected" {
@@ -529,19 +633,23 @@ pub fn get_available_disk_space(path: &Path) -> Result<u64, String> {
     Ok(free_bytes_available)
 }
 
-fn append_journal_entry(journal_path: &Path, item: &ManifestItem) -> Result<(), String> {
+fn append_journal_entry_file(file: &mut fs::File, item: &ManifestItem) -> Result<(), String> {
     use std::io::Write;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(journal_path)
-        .map_err(|error| format!("Could not open recovery journal: {error}"))?;
     let json = serde_json::to_string(item)
         .map_err(|error| format!("Could not encode journal item: {error}"))?;
     writeln!(file, "{json}").map_err(|error| format!("Could not write to recovery journal: {error}"))?;
     file.flush().map_err(|error| format!("Could not flush recovery journal: {error}"))?;
     file.sync_all().map_err(|error| format!("Could not sync recovery journal: {error}"))?;
     Ok(())
+}
+
+fn append_journal_entry(journal_path: &Path, item: &ManifestItem) -> Result<(), String> {
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(journal_path)
+        .map_err(|error| format!("Could not open recovery journal: {error}"))?;
+    append_journal_entry_file(&mut file, item)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -614,6 +722,11 @@ pub fn execute_plan(
     let journal_path = batch.join(JOURNAL_FILE);
     fs::create_dir_all(&batch)
         .map_err(|error| format!("Could not create the quarantine folder: {error}"))?;
+    let mut journal_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&journal_path)
+        .map_err(|error| format!("Could not open recovery journal: {error}"))?;
 
     let mut manifest = BatchManifest {
         run_id: run_id.clone(),
@@ -709,7 +822,7 @@ pub fn execute_plan(
                 continue;
             }
 
-            match quarantine_file(&path, &target_root, &batch, index, &journal_path) {
+            match quarantine_file(&path, &target_root, &batch, index, &mut journal_file) {
                 Ok((stored, size)) => {
                     quarantined += 1;
                     moved_bytes += size;
@@ -782,6 +895,7 @@ pub fn execute_plan(
         }
     }
 
+    drop(journal_file);
     if quarantined > 0 {
         write_manifest(&batch, &manifest)?;
     } else {
@@ -833,7 +947,7 @@ fn quarantine_file(
     target_root: &Path,
     batch: &Path,
     index: usize,
-    journal_path: &Path,
+    journal_file: &mut fs::File,
 ) -> Result<(PathBuf, u64), MoveError> {
     let meta = fs::symlink_metadata(file)
         .map_err(|error| MoveError::Failed(describe(file, &error)))?;
@@ -869,7 +983,7 @@ fn quarantine_file(
         stored_path: destination.to_string_lossy().to_string(),
         size,
     };
-    append_journal_entry(journal_path, &item)
+    append_journal_entry_file(journal_file, &item)
         .map_err(|error| MoveError::Failed(error))?;
 
     fs::rename(file, &destination).map_err(|error| MoveError::Failed(describe(file, &error)))?;
