@@ -3,8 +3,8 @@
 Cyron is a modern, transparent Windows uninstaller, disk space analyzer, and developer cache cleaner built with Tauri v2, Rust, and React. It combines the deep uninstallation of Revo Uninstaller, the visual disk exploration of WinDirStat/WizTree, and the bloat cleanup of BleachBit with safety-first guardrails, clear indications, and crash-consistent recovery.
 
 > [!NOTE]
-> **Build Status:** `CHRYYPT_SIGNED` / `Release Candidate 1`  
-> These binaries are Authenticode signed with a SHA-256 RSA-3072 certificate under the authority of the **Chryypt Organization** (`CN=Chryypt Organization`, publisher `Chryypt`).
+> **Publisher Metadata:** `Chryypt`  
+> Complete Windows PE VERSIONINFO and WiX MSI properties verified under publisher **Chryypt** (Product Name: `Cyron Uninstaller`, Version: `0.1.0`, UpgradeCode: `{C2BCD648-205F-5904-9E5C-85726E376EC2}`).
 
 ---
 
@@ -41,13 +41,13 @@ Cyron is a modern, transparent Windows uninstaller, disk space analyzer, and dev
 
 ---
 
-### Verified Release Assets (`CHRYYPT_SIGNED`)
+### Verified Release Assets (Publisher: `Chryypt`)
 
 | File | Size | SHA-256 Checksum |
 |---|---|---|
-| `Cyron Uninstaller_0.1.0_x64-setup.exe` | 1.54 MiB | `cb4058ede0474d966559987f291f792e35ff08d3f36578aecf1b85482c97d886` |
-| `Cyron Uninstaller_0.1.0_x64_en-US.msi` | 2.14 MiB | `c0eb689226724e10478b3094496989b2659e94aefa1232884cf0c8a844e46211` |
-| `cyron.exe` | 13.7 MiB | `a88fd868d185bd50f73b30c844d4f5ed1f9d753cf37c028464ed8162f711c026` |
+| `Cyron Uninstaller_0.1.0_x64-setup.exe` | 1.86 MiB | `52ae5559ff5ad1aa7fe4863c7c47142119eba4a7cbd5ef29748fd78f4ba4fe62` |
+| `Cyron Uninstaller_0.1.0_x64_en-US.msi` | 2.66 MiB | `a0bfdf78a4bab17c6c765273bccc2bd0597fa32136f8888f5d1a90496e62c8d1` |
+| `cyron.exe` | 14.6 MiB | `103ca4e1606de9dc43237fe9a106cdfc9a0e538a7b1c95856774ce22d361a0b9` |
 | `SHA256SUMS.txt` | 240 B | *Cryptographic checksum manifest attached below* |
 
 ---
@@ -57,6 +57,5 @@ Cyron is a modern, transparent Windows uninstaller, disk space analyzer, and dev
 - **Frontend Test Suite:** 83 Vitest tests passed across 9 test suites.
 - **TypeScript Diagnostics:** 0 errors (`npm run typecheck`).
 - **Documentation Integrity:** 54 markdown files audited with 0 broken links (`npm run docs:check`).
-- **Authenticode Signature Verification:** 3/3 artifacts verified under `CN=Chryypt Organization`, 3/3 negative tampering tests passed.
-- **Windows PE / MSI Metadata:** Fully verified with publisher `Chryypt` and upgrade code `{C2BCD648-205F-5904-9E5C-85726E376EC2}`.
+- **Windows PE & WiX Metadata Audit:** 5/5 metadata checks passed with publisher `Chryypt` (`npm run verify:metadata`).
 - **End-to-End Test Suite:** 8/8 disposable GUI and system targeting scenarios passed (`RC1_E2E_FIXTURE_OK`).
