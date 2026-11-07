@@ -352,6 +352,15 @@ pub const CATALOG: &[TargetDef] = &[
         note: "npm's content-addressable package cache; rebuilt from the registry.",
     },
     TargetDef {
+        id: "npm-cache-roaming",
+        tool: "npm",
+        label: "Package cache (Roaming)",
+        path: "%APPDATA%\\npm-cache",
+        risk: SAFE,
+        category: PACKAGES,
+        note: "npm's content-addressable package cache in Roaming AppData; rebuilt from the registry.",
+    },
+    TargetDef {
         id: "pnpm-store",
         tool: "pnpm",
         label: "Global content store",
@@ -593,6 +602,8 @@ pub fn discover_caches() -> CacheInventory {
         });
     }
 
+    discover_secondary_drive_caches(&mut seen, &mut targets);
+
     targets.sort_by(|a, b| {
         category_rank(&a.category)
             .cmp(&category_rank(&b.category))
@@ -609,6 +620,90 @@ pub fn discover_caches() -> CacheInventory {
         targets,
         scanned_at: seconds_now(),
         warnings,
+    }
+}
+
+fn discover_secondary_drive_caches(seen: &mut HashSet<String>, targets: &mut Vec<CacheTarget>) {
+    let volumes = crate::volumes::list_volumes();
+    for vol in volumes {
+        let mount = vol.mount.trim_end_matches('\\');
+        let letter = mount.chars().next().unwrap_or('C').to_ascii_uppercase();
+        let letter_lower = letter.to_ascii_lowercase();
+
+        let candidates = [
+            (
+                format!("drive-{letter_lower}-recycle-bin"),
+                "Windows",
+                format!("Recycle Bin ({letter}:)"),
+                format!("{mount}\\$Recycle.Bin"),
+                SAFE,
+                WINDOWS,
+                format!("Deleted files held in the {letter}: volume Recycle Bin."),
+            ),
+            (
+                format!("drive-{letter_lower}-temp"),
+                "Temporary Files",
+                format!("Volume Temp ({letter}:)"),
+                format!("{mount}\\Temp"),
+                SAFE,
+                WINDOWS,
+                format!("Temporary files and logs stored under {letter}:\\Temp."),
+            ),
+            (
+                format!("drive-{letter_lower}-steam-downloading"),
+                "Steam",
+                format!("Steam Downloads ({letter}:)"),
+                format!("{mount}\\SteamLibrary\\steamapps\\downloading"),
+                SAFE,
+                PACKAGES,
+                format!("Staging and incomplete game downloads in {letter}: Steam Library."),
+            ),
+            (
+                format!("drive-{letter_lower}-steam-shadercache"),
+                "Steam",
+                format!("Steam Shader Cache ({letter}:)"),
+                format!("{mount}\\SteamLibrary\\steamapps\\shadercache"),
+                SAFE,
+                PACKAGES,
+                format!("Pre-compiled graphics shaders for games on drive {letter}:."),
+            ),
+            (
+                format!("drive-{letter_lower}-npm-cache"),
+                "npm",
+                format!("npm Cache ({letter}:)"),
+                format!("{mount}\\npm-cache"),
+                SAFE,
+                PACKAGES,
+                format!("npm package cache stored on drive {letter}:."),
+            ),
+        ];
+
+        for (id, tool, label, path, risk, category, note) in candidates {
+            if !seen.insert(path.to_lowercase()) {
+                continue;
+            }
+            let p = Path::new(&path);
+            if p.exists() {
+                let m = measure_target(&path);
+                if m.exists && m.file_count > 0 {
+                    targets.push(CacheTarget {
+                        id,
+                        tool: tool.to_string(),
+                        label,
+                        path,
+                        exists: true,
+                        size: m.size,
+                        allocated: m.allocated,
+                        file_count: m.file_count,
+                        dir_count: m.dir_count,
+                        risk: risk.to_string(),
+                        category: category.to_string(),
+                        note,
+                        last_modified: m.last_modified,
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -892,7 +987,7 @@ mod tests {
     fn discovery_reports_catalog_and_consistent_totals() {
         let inventory = discover_caches();
         assert!(
-            inventory.targets.len() >= 40 && inventory.targets.len() <= CATALOG.len(),
+            inventory.targets.len() >= 40 && inventory.targets.len() <= CATALOG.len() + 32,
             "expected most of the catalog to resolve, got {}",
             inventory.targets.len()
         );

@@ -210,6 +210,7 @@ const ViewSlot = memo(function ViewSlot({ active, label, children }: ViewSlotPro
 });
 
 export default function App() {
+  const { settings } = useSettings();
   const [view, setView] = useState<ViewId>("overview");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [visited, setVisited] = useState<ViewId[]>(["overview"]);
@@ -323,7 +324,7 @@ export default function App() {
           </ViewSlot>
         ))}
       </main>
-      <HunterMode installedApps={apps} />
+      <HunterMode installedApps={apps} showFloatingTrigger={settings.showHunterWidget} />
     </div>
   );
 }

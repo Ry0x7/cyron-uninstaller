@@ -20,6 +20,7 @@ import {
 import {
   IconApps,
   IconCopy,
+  IconCrosshair,
   IconFolder,
   IconLock,
   IconPlay,
@@ -283,6 +284,16 @@ export function Uninstaller({
         actions={
           <>
             <Badge tone="safe">Verified Engine</Badge>
+            <Button
+              variant="secondary"
+              icon={<IconCrosshair size={14} />}
+              title="Target a desktop window using Hunter Mode crosshair"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("cyron:start-hunter"));
+              }}
+            >
+              Hunter Mode
+            </Button>
             <Button
               icon={<IconRefresh size={15} />}
               loading={inventory.status === "loading"}

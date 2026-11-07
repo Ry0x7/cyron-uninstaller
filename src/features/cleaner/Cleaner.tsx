@@ -110,19 +110,18 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
   const [search, setSearch] = useState("");
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [driveFilter, setDriveFilter] = useState<string>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("cleanup");
 
   useEffect(() => {
-    if (initialTargetId && inventory) {
-      const match = inventory.targets.find((t) => t.id === initialTargetId);
-      if (match && isSelectable(match)) {
-        setSelected(new Set([initialTargetId]));
-        setTab("cleanup");
-      }
+    if (initialTargetId) {
+      setSelected(new Set([initialTargetId]));
+      setTab("cleanup");
+      setExpanded((prev) => new Set([...prev, initialTargetId]));
     }
-  }, [initialTargetId, inventory]);
+  }, [initialTargetId]);
 
   const [readOnly, setReadOnly] = useState<boolean | null>(null);
   const [modeBusy, setModeBusy] = useState(false);
@@ -260,15 +259,28 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
     return Array.from(present).sort((a, b) => a.localeCompare(b));
   }, [existing]);
 
+  const drivesPresent = useMemo(() => {
+    const drives = new Set<string>();
+    for (const t of existing) {
+      const match = t.path.match(/^([a-zA-Z]):/);
+      if (match) drives.add(match[1].toUpperCase());
+    }
+    return Array.from(drives).sort();
+  }, [existing]);
+
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
     return existing.filter((target) => {
       if (riskFilter !== "all" && target.risk !== riskFilter) return false;
       if (categoryFilter !== "all" && categoryOf(target) !== categoryFilter) return false;
+      if (driveFilter !== "all") {
+        const match = target.path.match(/^([a-zA-Z]):/);
+        if (!match || match[1].toUpperCase() !== driveFilter) return false;
+      }
       if (!query) return true;
       return `${target.tool} ${target.label} ${target.path}`.toLowerCase().includes(query);
     });
-  }, [existing, search, riskFilter, categoryFilter]);
+  }, [existing, search, riskFilter, categoryFilter, driveFilter]);
 
   const groups = useMemo(
     () => groupTargets(visible.filter((target) => target.risk !== "protected")),
@@ -283,12 +295,13 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
   const selectableVisible = useMemo(() => visible.filter(isSelectable), [visible]);
   const selection = useMemo(() => selectedTotals(existing, selected), [existing, selected]);
 
-  const appliedFilters = search.trim() !== "" || riskFilter !== "all" || categoryFilter !== "all";
+  const appliedFilters = search.trim() !== "" || riskFilter !== "all" || categoryFilter !== "all" || driveFilter !== "all";
 
   const clearFilters = () => {
     setSearch("");
     setRiskFilter("all");
     setCategoryFilter("all");
+    setDriveFilter("all");
   };
 
   const toggleExpanded = (id: string) => {
@@ -781,6 +794,20 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
                     })),
                   ]}
                 />
+                {drivesPresent.length > 1 && (
+                  <Select
+                    ariaLabel="Filter by drive"
+                    value={driveFilter}
+                    onChange={setDriveFilter}
+                    options={[
+                      { value: "all", label: "All drives" },
+                      ...drivesPresent.map((d) => ({
+                        value: d,
+                        label: `Drive ${d}:`,
+                      })),
+                    ]}
+                  />
+                )}
                 <span className="cl-toolbar__spacer" />
                 <Button
                   size="sm"

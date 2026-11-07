@@ -697,21 +697,31 @@ fn check_uninstall_key_candidate(
         _ => return,
     };
 
-    if let Ok((root, sub)) = parse_reg_path(&subkey_path) {
-        if root.open_subkey(&sub).is_ok() && !candidates.iter().any(|c| c.path == subkey_path) {
-            candidates.push(LeftoverCandidate {
-                id: format!("cand-{}", candidates.len()),
-                kind: "registry_key".into(),
-                path: subkey_path,
-                confidence: "high".into(),
-                risk: "safe".into(),
-                reason: "Windows Application Uninstall registration key.".into(),
-                size: 0,
-                file_count: 0,
-                selected: true,
-            });
-            *reg_count += 1;
-        }
+    if !is_safe_to_delete_reg_key(&subkey_path) {
+        return;
+    }
+
+    let key_exists = if let Ok((root, sub)) = parse_reg_path(&subkey_path) {
+        root.open_subkey_with_flags(&sub, winreg::enums::KEY_READ | winreg::enums::KEY_WOW64_64KEY).is_ok()
+            || root.open_subkey_with_flags(&sub, winreg::enums::KEY_READ | winreg::enums::KEY_WOW64_32KEY).is_ok()
+            || root.open_subkey(&sub).is_ok()
+    } else {
+        false
+    };
+
+    if key_exists && !candidates.iter().any(|c| c.path == subkey_path) {
+        candidates.push(LeftoverCandidate {
+            id: format!("cand-{}", candidates.len()),
+            kind: "registry_key".into(),
+            path: subkey_path,
+            confidence: "high".into(),
+            risk: "safe".into(),
+            reason: "Windows Application Uninstall registration key.".into(),
+            size: 0,
+            file_count: 0,
+            selected: true,
+        });
+        *reg_count += 1;
     }
 }
 
@@ -787,6 +797,11 @@ pub fn clean_leftovers(
 
     // Step 2: Quarantine filesystem directories
     let journal_path = batch.join(crate::cleanup::JOURNAL_FILE);
+    let mut journal_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&journal_path)
+        .ok();
     let mut manifest_items = Vec::new();
     let mut index = 0usize;
 
@@ -805,7 +820,7 @@ pub fn clean_leftovers(
             }
         }
 
-        let files = collect_files_bounded(&dir_path, 100_000);
+        let files = collect_files_bounded(&dir_path, 500_000);
         let canonical_root = fs::canonicalize(&dir_path).unwrap_or_else(|_| dir_path.clone());
 
         for file in files {
@@ -843,10 +858,16 @@ pub fn clean_leftovers(
             let line = serde_json::to_string(&item).unwrap_or_default();
             use std::io::Write;
             let journal_res: Result<(), std::io::Error> = (|| {
-                let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
-                writeln!(jf, "{line}")?;
-                jf.flush()?;
-                jf.sync_all()?;
+                if let Some(ref mut jf) = journal_file {
+                    writeln!(jf, "{line}")?;
+                    jf.flush()?;
+                    jf.sync_all()?;
+                } else {
+                    let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
+                    writeln!(jf, "{line}")?;
+                    jf.flush()?;
+                    jf.sync_all()?;
+                }
                 Ok(())
             })();
 
@@ -893,10 +914,16 @@ pub fn clean_leftovers(
         let line = serde_json::to_string(&item).unwrap_or_default();
         use std::io::Write;
         let journal_res: Result<(), std::io::Error> = (|| {
-            let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
-            writeln!(jf, "{line}")?;
-            jf.flush()?;
-            jf.sync_all()?;
+            if let Some(ref mut jf) = journal_file {
+                writeln!(jf, "{line}")?;
+                jf.flush()?;
+                jf.sync_all()?;
+            } else {
+                let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
+                writeln!(jf, "{line}")?;
+                jf.flush()?;
+                jf.sync_all()?;
+            }
             Ok(())
         })();
 
@@ -1505,28 +1532,28 @@ pub fn verify_live_broken_status(meta: &BrokenEntryMetadata) -> Result<(), Strin
         let trimmed = cmd.trim();
         if !trimmed.is_empty() {
             let parsed = crate::uninstall::parse_uninstall_command(trimmed);
-            let p = Path::new(&parsed.executable);
-            if p.is_absolute() && p.exists() {
-                uninstaller_exists = true;
+            // msiexec.exe is a system engine, not an application uninstaller.
+            // Only genuine application uninstaller binaries are checked on disk.
+            if !parsed.is_msi {
+                let p = Path::new(&parsed.executable);
+                if p.is_absolute() && p.exists() {
+                    uninstaller_exists = true;
+                }
             }
         }
     }
 
     if uninstaller_exists {
-        return Err("Application uninstaller executable exists on disk; this entry has a functional uninstaller and is not broken.".into());
-    }
-
-    // 2. Check install location
-    if let Some(ref loc) = meta.install_location {
-        let trimmed = loc.trim();
-        if !trimmed.is_empty() {
-            let p = Path::new(trimmed);
-            if p.is_absolute() && p.exists() {
-                return Err(format!(
-                    "Application install location still exists on disk at '{}'; this entry is not orphaned.",
-                    p.display()
-                ));
+        if let Some(ref loc) = meta.install_location {
+            let trimmed = loc.trim();
+            if !trimmed.is_empty() {
+                let p = Path::new(trimmed);
+                if p.is_absolute() && p.exists() {
+                    return Err("Application uninstaller executable exists on disk; this entry has a functional uninstaller and is not broken.".into());
+                }
             }
+        } else {
+            return Err("Application uninstaller executable exists on disk; this entry has a functional uninstaller and is not broken.".into());
         }
     }
 
