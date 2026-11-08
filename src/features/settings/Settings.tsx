@@ -133,12 +133,18 @@ export function Settings() {
   }, [savedExclusions]);
 
   const [explorerStatus, setExplorerStatus] = useState<ExplorerIntegrationStatus | null>(null);
+  const [standardExplorer, setStandardExplorer] = useState(false);
+  const [advancedExplorer, setAdvancedExplorer] = useState(false);
   const [explorerLoading, setExplorerLoading] = useState(false);
   const [explorerMsg, setExplorerMsg] = useState<{ tone: "safe" | "caution" | "danger"; text: string } | null>(null);
 
   const loadExplorerStatus = () => {
     api.getExplorerIntegrationStatus()
-      .then(setExplorerStatus)
+      .then((status) => {
+        setExplorerStatus(status);
+        setStandardExplorer(status.standardActionsRegistered ?? status.isRegistered);
+        setAdvancedExplorer(status.advancedActionsRegistered ?? false);
+      })
       .catch(() => {});
   };
 
@@ -146,16 +152,18 @@ export function Settings() {
     loadExplorerStatus();
   }, []);
 
-  const handleToggleExplorer = async (enable: boolean) => {
+  const handleApplyExplorer = async (standard: boolean, advanced: boolean) => {
     setExplorerLoading(true);
     setExplorerMsg(null);
     try {
-      await api.setExplorerIntegration(enable);
+      await api.setExplorerIntegration(standard, advanced);
+      setStandardExplorer(standard);
+      setAdvancedExplorer(advanced);
       setExplorerMsg({
         tone: "safe",
-        text: enable
-          ? "Windows Explorer right-click integration registered in HKCU."
-          : "Windows Explorer right-click integration cleanly unregistered.",
+        text: (standard || advanced)
+          ? "Windows Explorer context-menu verbs registered in HKCU."
+          : "Windows Explorer integration cleanly unregistered.",
       });
       loadExplorerStatus();
     } catch (err) {
@@ -545,42 +553,101 @@ export function Settings() {
           <div className="set-grid" style={{ gridTemplateColumns: "1fr" }}>
             <div className="set-col">
               <Panel title="Windows Explorer Integration">
-                <div className="set-status">
-                  {explorerStatus?.isRegistered && !explorerStatus?.needsRepair ? (
-                    <Badge tone="safe">Registered in user shell (HKCU)</Badge>
-                  ) : explorerStatus?.needsRepair ? (
-                    <Badge tone="caution">Needs repair / Path mismatch</Badge>
-                  ) : (
+                <div className="set-status" style={{ flexWrap: "wrap", gap: 6 }}>
+                  {explorerStatus?.standardActionsRegistered && (
+                    <Badge tone="safe">Standard verbs registered</Badge>
+                  )}
+                  {explorerStatus?.advancedActionsRegistered && (
+                    <Badge tone="accent">Advanced verbs registered</Badge>
+                  )}
+                  {!explorerStatus?.isRegistered && (
                     <Badge tone="neutral">Not registered</Badge>
+                  )}
+                  {explorerStatus?.needsRepair && (
+                    <Badge tone="caution">Needs repair / Path mismatch</Badge>
                   )}
                 </div>
 
                 <p className="set-note set-note--spaced">
                   Optional native Windows right-click menu integration for folders, drives, and executables.
                   Registered exclusively in <code>HKEY_CURRENT_USER\Software\Classes</code> without requiring
-                  administrator privileges.
+                  administrator privileges. Explorer commands always open a safe Cyron review dialog before
+                  anything is executed.
                 </p>
-
-                <ul className="set-guards">
-                  <li className="set-guard">
-                    <IconCheck size={14} />
-                    <span><strong>Folders &amp; Drives:</strong> Analyze, Find Duplicates, View Storage Breakdown</span>
-                  </li>
-                  <li className="set-guard">
-                    <IconCheck size={14} />
-                    <span><strong>Executables:</strong> Review Uninstallation, Find Related Files</span>
-                  </li>
-                  <li className="set-guard">
-                    <IconCheck size={14} />
-                    <span><strong>Safe execution:</strong> Never triggers destructive actions directly from Explorer</span>
-                  </li>
-                </ul>
 
                 {explorerMsg && (
                   <div style={{ marginTop: 12 }}>
                     <Banner tone={explorerMsg.tone}>{explorerMsg.text}</Banner>
                   </div>
                 )}
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16 }}>
+                  {/* Standard Actions Control */}
+                  <div className="exp-modal-card" style={{ background: "var(--surface)" }}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={standardExplorer}
+                        disabled={explorerLoading}
+                        onChange={(e) => handleApplyExplorer(e.target.checked, advancedExplorer)}
+                        style={{ marginTop: 3 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-strong)" }}>
+                          Standard Context Menu Actions
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                          Adds safe analysis and discovery verbs to folder and drive context menus.
+                        </div>
+                        <ul className="set-guards" style={{ marginTop: 8 }}>
+                          <li className="set-guard">
+                            <IconCheck size={14} />
+                            <span><strong>Folders &amp; Drives:</strong> Analyze with Cyron, Find Duplicates with Cyron, View Storage Breakdown with Cyron</span>
+                          </li>
+                          <li className="set-guard">
+                            <IconCheck size={14} />
+                            <span><strong>Executables:</strong> Uninstall with Cyron, Find Related Files with Cyron</span>
+                          </li>
+                        </ul>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* Advanced / Destructive Actions Control */}
+                  <div className="exp-modal-card" style={{ background: "var(--surface)", borderColor: advancedExplorer ? "var(--accent)" : "var(--line)" }}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={advancedExplorer}
+                        disabled={explorerLoading}
+                        onChange={(e) => handleApplyExplorer(standardExplorer, e.target.checked)}
+                        style={{ marginTop: 3 }}
+                      />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-strong)" }}>
+                          Advanced &amp; Destructive Context Menu Actions
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                          Adds verified force deletion, handle inspection, and process termination verbs to context menus.
+                        </div>
+                        <ul className="set-guards" style={{ marginTop: 8 }}>
+                          <li className="set-guard">
+                            <IconCheck size={14} />
+                            <span><strong>Files &amp; Folders:</strong> Force Delete with Cyron, Find Locking Processes with Cyron</span>
+                          </li>
+                          <li className="set-guard">
+                            <IconCheck size={14} />
+                            <span><strong>Executables:</strong> Kill Running Process with Cyron</span>
+                          </li>
+                          <li className="set-guard">
+                            <IconCheck size={14} />
+                            <span><strong>Review-first safety:</strong> Every destructive action opens Cyron&apos;s confirmation dialog; never deletes or kills silently from Explorer</span>
+                          </li>
+                        </ul>
+                      </div>
+                    </label>
+                  </div>
+                </div>
 
                 <div className="set-actions" style={{ marginTop: 16 }}>
                   {explorerStatus?.isRegistered ? (
@@ -589,9 +656,9 @@ export function Settings() {
                         variant="secondary"
                         size="sm"
                         loading={explorerLoading}
-                        onClick={() => handleToggleExplorer(false)}
+                        onClick={() => handleApplyExplorer(false, false)}
                       >
-                        Disable integration
+                        Disable all integration
                       </Button>
                       <Button
                         variant="ghost"
@@ -599,7 +666,7 @@ export function Settings() {
                         loading={explorerLoading}
                         onClick={handleRepairExplorer}
                       >
-                        Repair / Re-register
+                        Repair / Re-register verbs
                       </Button>
                     </div>
                   ) : (
@@ -607,9 +674,9 @@ export function Settings() {
                       variant="primary"
                       size="sm"
                       loading={explorerLoading}
-                      onClick={() => handleToggleExplorer(true)}
+                      onClick={() => handleApplyExplorer(true, true)}
                     >
-                      Enable Explorer integration
+                      Enable all Explorer integration
                     </Button>
                   )}
                 </div>

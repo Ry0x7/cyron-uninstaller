@@ -1,11 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { api } from "./lib/api";
-import { IconButton } from "./components/ui";
+import { IconButton, cx } from "./components/ui";
 import {
   IconActivity,
   IconAnalyzer,
   IconApps,
   IconCleaner,
+  IconCrosshair,
   IconMonitor,
   IconMoon,
   IconOverview,
@@ -19,6 +20,10 @@ import { Activity } from "./features/activity/Activity";
 import { Analyzer } from "./features/analyzer/Analyzer";
 import { Cleaner } from "./features/cleaner/Cleaner";
 import { HunterMode } from "./features/hunter/HunterMode";
+import { HunterConfirmationModal } from "./features/hunter/HunterConfirmationModal";
+import { ForceDeleteModal } from "./features/explorer/ForceDeleteModal";
+import { FindLocksModal } from "./features/explorer/FindLocksModal";
+import { KillProcessModal } from "./features/explorer/KillProcessModal";
 import { Overview } from "./features/overview/Overview";
 import { Settings } from "./features/settings/Settings";
 import { Uninstaller } from "./features/uninstaller/Uninstaller";
@@ -78,12 +83,18 @@ function BrandMark() {
 function Sidebar({
   view,
   collapsed,
+  isHunterActive,
   onNavigate,
+  onStartHunter,
+  onExitHunter,
   onToggleCollapsed,
 }: {
   view: ViewId;
   collapsed: boolean;
+  isHunterActive: boolean;
   onNavigate: (view: ViewId) => void;
+  onStartHunter: () => void;
+  onExitHunter: () => void;
   onToggleCollapsed: () => void;
 }) {
   const { settings, setTheme } = useSettings();
@@ -117,19 +128,52 @@ function Sidebar({
           const Icon = entry.icon;
           const active = view === entry.id;
           return (
-            <button
-              key={entry.id}
-              type="button"
-              className="nav__item"
-              aria-current={active ? "page" : undefined}
-              title={entry.label}
-              onClick={() => onNavigate(entry.id)}
-            >
-              <span className="nav__icon">
-                <Icon size={17} />
-              </span>
-              <span className="nav__label">{entry.label}</span>
-            </button>
+            <div key={entry.id} style={{ display: "contents" }}>
+              <button
+                type="button"
+                className="nav__item"
+                aria-current={active ? "page" : undefined}
+                title={entry.label}
+                onClick={() => onNavigate(entry.id)}
+              >
+                <span className="nav__icon">
+                  <Icon size={17} />
+                </span>
+                <span className="nav__label">{entry.label}</span>
+              </button>
+              {entry.id === "uninstaller" && (
+                <button
+                  type="button"
+                  className={cx("nav__item", isHunterActive && "nav__item--active-hunter")}
+                  aria-pressed={isHunterActive}
+                  title={isHunterActive ? "Exit Hunter Mode (Esc)" : "Hunter Mode (Window & Process Targeting)"}
+                  onClick={isHunterActive ? onExitHunter : onStartHunter}
+                >
+                  <span className="nav__icon">
+                    <IconCrosshair size={17} />
+                  </span>
+                  <span
+                    className="nav__label"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      width: "100%",
+                    }}
+                  >
+                    <span>{isHunterActive ? "Exit Hunter" : "Hunter Mode"}</span>
+                    {isHunterActive && (
+                      <span
+                        className="badge badge--accent"
+                        style={{ fontSize: 9.5, padding: "1px 5px", lineHeight: "12px" }}
+                      >
+                        Active
+                      </span>
+                    )}
+                  </span>
+                </button>
+              )}
+            </div>
           );
         })}
       </nav>
@@ -210,13 +254,21 @@ const ViewSlot = memo(function ViewSlot({ active, label, children }: ViewSlotPro
 });
 
 export default function App() {
-  const { settings } = useSettings();
   const [view, setView] = useState<ViewId>("overview");
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [visited, setVisited] = useState<ViewId[]>(["overview"]);
   const [startupRoute, setStartupRoute] = useState<StartupRoute | null>(null);
   const [cleanerTargetId, setCleanerTargetId] = useState<string | null>(null);
   const [apps, setApps] = useState<InstalledApp[]>([]);
+
+  // Hunter Mode centralized session state
+  const [isHunterActive, setIsHunterActive] = useState(false);
+  const [hunterConfirmOpen, setHunterConfirmOpen] = useState(false);
+
+  // Explorer destructive actions modals state
+  const [forceDeleteTarget, setForceDeleteTarget] = useState<string | null>(null);
+  const [findLocksTarget, setFindLocksTarget] = useState<string | null>(null);
+  const [killProcessTarget, setKillProcessTarget] = useState<string | null>(null);
 
   useEffect(() => {
     loadInstalledApps().then((inv) => {
@@ -246,7 +298,15 @@ export default function App() {
       .then((route) => {
         if (route) {
           setStartupRoute(route);
-          navigate(route.view);
+          if (route.action === "force-delete" && route.path) {
+            setForceDeleteTarget(route.path);
+          } else if (route.action === "find-locks" && route.path) {
+            setFindLocksTarget(route.path);
+          } else if (route.action === "kill-process" && route.path) {
+            setKillProcessTarget(route.path);
+          } else {
+            navigate(route.view as ViewId);
+          }
         }
       })
       .catch(() => {});
@@ -309,7 +369,10 @@ export default function App() {
       <Sidebar
         view={view}
         collapsed={collapsed}
+        isHunterActive={isHunterActive}
         onNavigate={navigate}
+        onStartHunter={() => setHunterConfirmOpen(true)}
+        onExitHunter={() => setIsHunterActive(false)}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
       />
       <main className="main" id="main-content" aria-label="Cyron content">
@@ -324,7 +387,42 @@ export default function App() {
           </ViewSlot>
         ))}
       </main>
-      <HunterMode installedApps={apps} showFloatingTrigger={settings.showHunterWidget} />
+
+      {/* Global Hunter Mode session overlay */}
+      <HunterMode
+        isActive={isHunterActive}
+        onExit={() => setIsHunterActive(false)}
+        installedApps={apps}
+      />
+
+      {/* Hunter Mode confirmation dialog */}
+      <HunterConfirmationModal
+        open={hunterConfirmOpen}
+        onConfirm={() => {
+          setHunterConfirmOpen(false);
+          setIsHunterActive(true);
+        }}
+        onCancel={() => setHunterConfirmOpen(false)}
+      />
+
+      {/* Explorer Destructive Action Review Dialogs */}
+      <ForceDeleteModal
+        open={Boolean(forceDeleteTarget)}
+        targetPath={forceDeleteTarget}
+        onClose={() => setForceDeleteTarget(null)}
+      />
+
+      <FindLocksModal
+        open={Boolean(findLocksTarget)}
+        targetPath={findLocksTarget}
+        onClose={() => setFindLocksTarget(null)}
+      />
+
+      <KillProcessModal
+        open={Boolean(killProcessTarget)}
+        exePath={killProcessTarget}
+        onClose={() => setKillProcessTarget(null)}
+      />
     </div>
   );
 }

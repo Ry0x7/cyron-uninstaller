@@ -44,10 +44,21 @@ risk labels, built for everyday users and developers alike.
 
 ### 4. Windows Explorer Context Menu Integration
 - **Per-User HKCU Integration**: Optional right-click shell verbs registered under `HKEY_CURRENT_USER\Software\Classes` without requiring administrator privileges:
-  - **Folders & Drives**: *Analyze with Cyron*, *Find Duplicates with Cyron*, *View Storage Breakdown with Cyron*.
-  - **Executables**: *Uninstall with Cyron*, *Find Related Files with Cyron*.
-- **Safe Routing**: Context menu actions launch Cyron into the intended view for interactive operator review; destructive operations are never executed directly from Explorer.
-- **Settings Management**: Enable, disable, or repair Explorer integration with a single click. Cleanly unregisters all verbs upon disable.
+  - **Standard Verbs**: *Analyze with Cyron*, *Find Duplicates with Cyron*, *View Storage Breakdown with Cyron*, *Uninstall with Cyron*, *Find Related Files with Cyron*.
+  - **Advanced & Destructive Verbs**:
+    - **Files & Folders**: *Force Delete with Cyron*, *Find Locking Processes with Cyron*.
+    - **Executables (`.exe`)**: *Kill Running Process with Cyron*.
+- **Review-First Deletion & Termination**: Shell actions never execute silently or delete directly from command-line arguments. Cyron launches directly into focused review modals backed by backend-held, single-use execution plans (`StoredForceDeletePlan`, `StoredKillProcessPlan`).
+- **Windows Restart Manager**: Detects active file/folder locking processes via `rstrtmgr.dll`, providing graceful process closure (`WM_CLOSE`) and verified force termination with PID creation-time checks.
+- **Recoverable Quarantine Default**: Force Delete routes objects through a 7-day recoverable quarantine batch with write-ahead recovery journals (`recovery_journal.jsonl`); permanent removal requires explicit, separate confirmation.
+- **System & Root Refusal**: Refuses Windows, boot, System32, Program Files, user roots, and critical system components.
+- **Settings Controls**: Independent toggles for Standard and Advanced/Destructive Explorer integration with 1-click status checking and repair.
+
+### 5. Hunter Mode & Desktop Window Targeting
+- **Main Sidebar Placement**: Positioned directly below Uninstaller in the primary sidebar navigation as a global session action.
+- **Activation Confirmation**: Clicking Hunter Mode opens a compact confirmation modal explaining external window targeting, available actions, and exit controls before any cursor tracking begins.
+- **Session Lifecycle**: Cursor tracking and targeting resolution only run during an active confirmed session; HUD banner and floating crosshair triggers are strictly hidden when inactive.
+- **Active Sidebar Indicator**: Persistent active indicator badge in the sidebar with an inline exit control; supports instant `Esc` cancellation without leaving stale targets or background polling.
 
 ---
 

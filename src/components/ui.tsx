@@ -576,6 +576,105 @@ export function Drawer({ open, title, subtitle, onClose, children, footer }: Dra
   );
 }
 
+/* ----------------------------------------------------------------- modal */
+
+interface ModalProps {
+  open: boolean;
+  title: ReactNode;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  maxWidth?: number | string;
+}
+
+export function Modal({ open, title, subtitle, onClose, children, footer, maxWidth }: ModalProps) {
+  useEscape(open, onClose);
+  const headingId = useId();
+  const subtitleId = useId();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const restoreTarget =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const unlockBodyScroll = lockBodyScroll();
+    closeRef.current?.focus();
+
+    const trapTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusable = focusableWithin(panel);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      const outside = !(active instanceof Node) || !panel.contains(active);
+      if (event.shiftKey && (outside || active === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (outside || active === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", trapTab);
+    return () => {
+      document.removeEventListener("keydown", trapTab);
+      unlockBodyScroll();
+      if (restoreTarget?.isConnected) {
+        restoreTarget.focus();
+      } else {
+        document.querySelector<HTMLElement>(".sidebar__brand")?.focus();
+      }
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="modal-layer">
+      <div className="modal__scrim" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={panelRef}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        aria-describedby={subtitle ? subtitleId : undefined}
+        tabIndex={-1}
+        style={maxWidth ? { maxWidth } : undefined}
+      >
+        <header className="modal__head">
+          <div>
+            <h2 id={headingId} className="modal__title">
+              {title}
+            </h2>
+            {subtitle && (
+              <p id={subtitleId} className="modal__subtitle">
+                {subtitle}
+              </p>
+            )}
+          </div>
+          <IconButton ref={closeRef} label="Close" onClick={onClose}>
+            <IconClose size={16} />
+          </IconButton>
+        </header>
+        <div className="modal__body">{children}</div>
+        {footer && <footer className="modal__foot">{footer}</footer>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /* ---------------------------------------------------------------- details */
 
 export function KeyValue({ items }: { items: { label: string; value: ReactNode }[] }) {

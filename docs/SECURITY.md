@@ -207,6 +207,15 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
    - Unregistered application forced removal creates a backend-verified app snapshot, protecting system roots and requiring operator confirmation.
    - Startup Manager toggling uses Windows standard `StartupApproved` registry keys, preserving the exact 12-byte binary payload, setting byte 0 (`0x02` enable, `0x03` disable) and updating FILETIME timestamps in bytes 4..12 matching Windows Task Manager. HKLM write permissions are checked (`is_hklm_startup_writable`), disabling toggles (`can_toggle: false`) when running without elevation instead of indicating false success. Original commands and Windows security components (Windows Defender, SecurityHealthSystray, SmartScreen) are strictly protected.
 
+10. **Explorer Destructive Actions & Restart Manager Locking Security (Milestone 7.4)**:
+    - Context-menu commands never perform direct deletion or termination from shell arguments; they always route to interactive modal dialogs backed by server-held, single-use, 10-minute expiring plans (`StoredForceDeletePlan`, `StoredKillProcessPlan`).
+    - Protected system targets are strictly refused by `is_protected_delete_target`: Windows directory, System32, SysWOW64, Program Files roots, User Profile roots, Volume roots (`C:\`), boot configuration files, pagefile/swapfile/hiberfil, and WindowsApps.
+    - File and directory deletion re-validates path existence, canonical roots, and metadata immediately prior to deletion.
+    - Deletion defaults to a recoverable 7-day quarantine batch with crash-consistent recovery journals (`recovery_journal.jsonl` with `sync_all`); permanent deletion requires explicit multi-step confirmation with item count verification.
+    - Active file/folder locking processes are detected using official Windows Restart Manager APIs (`rstrtmgr.dll`: `RmStartSession`, `RmRegisterResources`, `RmGetList`).
+    - Process termination requires matching exact executable paths (never filename alone), captures 64-bit creation times to block PID recycling, unconditionally protects critical Windows system processes, and reuses the single safe engine (`process::terminate_single_process`).
+    - Read-only attribute clearing uses safe standard `std::fs::set_permissions`; directory deletion removes children individually without unchecked recursive deletion.
+
 ---
 
 ## Code Signing & Release Security

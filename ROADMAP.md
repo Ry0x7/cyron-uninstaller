@@ -67,6 +67,17 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 - Git history privacy audit: verified clean commit tree with zero `.chryypt` files.
 - Release Candidate 1 (`v0.1.0`) tagged and published on GitHub.
 
+### Phase 7.4 — Hunter Navigation & Explorer Destructive Actions (`[x]`)
+- Moved Hunter Mode into main sidebar navigation below Uninstaller as a global session action.
+- Added compact Hunter activation confirmation dialog explaining window targeting, actions, and exit controls.
+- Active sidebar indicator with direct exit control and instant `Esc` cancellation without stale background polling.
+- Rendered HUD banner and floating crosshair triggers strictly during active Hunter sessions.
+- Added Explorer right-click shell verbs: *Force Delete with Cyron*, *Find Locking Processes with Cyron*, and *Kill Running Process with Cyron*.
+- Built review-first execution plans (`StoredForceDeletePlan`, `StoredKillProcessPlan`) preventing direct deletion or termination from shell arguments.
+- Integrated Windows Restart Manager (`rstrtmgr.dll`) for active file/folder locking process detection.
+- Enforced system root, boot, and Windows component protections (`is_protected_delete_target`).
+- Safe process termination reusing core engine (`process::terminate_single_process`) with graceful closure and verified force termination.
+
 ---
 
 ## Upcoming Milestones

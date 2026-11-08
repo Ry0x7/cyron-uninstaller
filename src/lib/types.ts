@@ -515,12 +515,65 @@ export interface StartupRoute {
 
 export interface ExplorerIntegrationStatus {
   isRegistered: boolean;
+  standardActionsRegistered: boolean;
+  advancedActionsRegistered: boolean;
   folderActionsRegistered: boolean;
   exeActionsRegistered: boolean;
   registeredExePath: string | null;
   currentExePath: string;
   needsRepair: boolean;
   details: string[];
+}
+
+export interface LockingProcessInfo {
+  pid: number;
+  name: string;
+  path?: string | null;
+  windowTitle?: string | null;
+  isCritical: boolean;
+  creationTime: number;
+}
+
+export interface FileTargetInspection {
+  path: string;
+  canonicalPath: string;
+  isDirectory: boolean;
+  exists: boolean;
+  sizeBytes: number;
+  fileCount: number;
+  dirCount: number;
+  isReadonly: boolean;
+  isHidden: boolean;
+  isSystem: boolean;
+  isReparsePoint: boolean;
+  owner?: string | null;
+  reasonsForFailure: string[];
+  sampleItems: string[];
+}
+
+export interface ForceDeletePlanPreview {
+  planId: string;
+  inspection: FileTargetInspection;
+  lockingProcesses: LockingProcessInfo[];
+  expiresAt: number;
+}
+
+export interface ForceDeleteResult {
+  success: boolean;
+  mode: "quarantine" | "permanent";
+  deletedFiles: number;
+  deletedDirs: number;
+  freedBytes: number;
+  quarantineBatchId?: string | null;
+  message: string;
+  warnings: string[];
+}
+
+export interface KillProcessPlanPreview {
+  planId: string;
+  exePath: string;
+  matchingProcesses: LockingProcessInfo[];
+  expiresAt: number;
 }
 
 export interface CleanableInspection {

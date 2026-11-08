@@ -1,5 +1,5 @@
 use crate::scan::{self, ScanProgress, ScanResult};
-use crate::{apps, caches, cleanup, duplicates, history, leftovers, mft, process, uninstall, volumes, AppState};
+use crate::{apps, caches, cleanup, duplicates, explorer, history, leftovers, mft, process, uninstall, volumes, AppState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -1500,17 +1500,276 @@ pub fn get_explorer_integration_status() -> Result<crate::explorer::ExplorerInte
 }
 
 #[tauri::command]
-pub fn set_explorer_integration(enabled: bool) -> Result<(), String> {
-    if enabled {
-        crate::explorer::register_explorer_integration()
-    } else {
-        crate::explorer::unregister_explorer_integration()
-    }
+pub fn set_explorer_integration(standard: bool, advanced: bool) -> Result<(), String> {
+    explorer::register_explorer_integration(standard, advanced)
 }
 
 #[tauri::command]
 pub fn repair_explorer_integration() -> Result<(), String> {
-    crate::explorer::register_explorer_integration()
+    let status = explorer::get_integration_status();
+    explorer::register_explorer_integration(
+        status.standard_actions_registered || !status.is_registered,
+        status.advanced_actions_registered,
+    )
+}
+
+
+#[tauri::command]
+pub async fn find_locking_processes(
+    target_path: String,
+) -> Result<Vec<explorer::LockingProcessInfo>, String> {
+    run_blocking("Find locking processes", move || {
+        let p = PathBuf::from(target_path.trim().trim_matches('"'));
+        explorer::find_locking_processes(&p)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn prepare_force_delete_plan(
+    state: State<'_, AppState>,
+    target_path: String,
+) -> Result<explorer::ForceDeletePlanPreview, String> {
+    let preview = run_blocking("Force delete preparation", move || {
+        explorer::prepare_force_delete_plan(&target_path)
+    })
+    .await??;
+
+    let mut plans = state
+        .force_delete_plans
+        .lock()
+        .map_err(|_| "Internal state lock failure".to_string())?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    plans.retain(|_, p| p.expires_at > now);
+
+    let stored = explorer::StoredForceDeletePlan {
+        plan_id: preview.plan_id.clone(),
+        target_path: PathBuf::from(&preview.inspection.path),
+        canonical_path: PathBuf::from(&preview.inspection.canonical_path),
+        is_directory: preview.inspection.is_directory,
+        expires_at: preview.expires_at,
+        inspection: preview.inspection.clone(),
+        locking_processes: preview.locking_processes.clone(),
+    };
+    plans.insert(preview.plan_id.clone(), stored);
+
+    Ok(preview)
+}
+
+#[tauri::command]
+pub async fn execute_force_delete_plan(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+    mode: String,
+) -> Result<explorer::ForceDeleteResult, String> {
+    let plan = {
+        let mut plans = state
+            .force_delete_plans
+            .lock()
+            .map_err(|_| "Internal state lock failure".to_string())?;
+        plans
+            .remove(&plan_id)
+            .ok_or_else(|| "The force delete execution plan has expired or was already executed. Please preview again.".to_string())?
+    };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now > plan.expires_at {
+        return Err("The force delete execution plan has expired. Please inspect again.".into());
+    }
+
+    let quarantine_root = cleanup_quarantine_root(&app)?;
+    let target_name = plan
+        .canonical_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let result = run_blocking("Force delete execution", move || {
+        explorer::execute_force_delete(&plan, &mode, &quarantine_root)
+    })
+    .await??;
+    let detail_text = if result.mode == "quarantine" {
+        format!(
+            "Quarantined {} ({}) · restorable for 7 days",
+            target_name,
+            human_bytes(result.freed_bytes)
+        )
+    } else {
+        format!(
+            "Permanently deleted {} ({} items, {})",
+            target_name,
+            result.deleted_files + result.deleted_dirs,
+            human_bytes(result.freed_bytes)
+        )
+    };
+
+    history::push_history(
+        &app,
+        history::HistoryEntry {
+            id: format!("hist-{}", now),
+            kind: "cleanup".into(),
+            title: format!(
+                "{}: {}",
+                if result.mode == "quarantine" {
+                    "Quarantined"
+                } else {
+                    "Force Delete"
+                },
+                target_name
+            ),
+            detail: detail_text,
+            at: now,
+            bytes: result.freed_bytes,
+            items: result.deleted_files + result.deleted_dirs,
+            status: "completed".into(),
+        },
+    );
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn terminate_force_delete_locking_process(
+    state: State<'_, AppState>,
+    plan_id: String,
+    pid: u32,
+    force: bool,
+) -> Result<process::ProcessTerminateResult, String> {
+    let target_proc = {
+        let plans = state
+            .force_delete_plans
+            .lock()
+            .map_err(|_| "State lock error")?;
+        let plan = plans.get(&plan_id).ok_or("Plan expired or not found")?;
+        plan.locking_processes
+            .iter()
+            .find(|p| p.pid == pid)
+            .cloned()
+            .ok_or("Process not found in locking plan")?
+    };
+
+    let res = run_blocking("Terminate locking process", move || {
+        process::terminate_single_process(pid, target_proc.creation_time, force)
+    })
+    .await?;
+
+    if res.success {
+        if let Ok(mut plans) = state.force_delete_plans.lock() {
+            if let Some(p) = plans.get_mut(&plan_id) {
+                p.locking_processes.retain(|lp| lp.pid != pid);
+            }
+        }
+    }
+
+    Ok(res)
+}
+
+#[tauri::command]
+pub async fn prepare_kill_process_plan(
+    state: State<'_, AppState>,
+    exe_path: String,
+) -> Result<explorer::KillProcessPlanPreview, String> {
+    let preview = run_blocking("Kill process preparation", move || {
+        explorer::prepare_kill_process_plan(&exe_path)
+    })
+    .await??;
+
+    let mut plans = state
+        .kill_process_plans
+        .lock()
+        .map_err(|_| "State lock error")?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    plans.retain(|_, p| p.expires_at > now);
+
+    let stored = explorer::StoredKillProcessPlan {
+        plan_id: preview.plan_id.clone(),
+        exe_path: PathBuf::from(&preview.exe_path),
+        canonical_exe_path: PathBuf::from(&preview.exe_path),
+        expires_at: preview.expires_at,
+        matching_processes: preview.matching_processes.clone(),
+    };
+    plans.insert(preview.plan_id.clone(), stored);
+
+    Ok(preview)
+}
+
+#[tauri::command]
+pub async fn execute_kill_process_plan(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+    pids: Vec<u32>,
+    force: bool,
+) -> Result<Vec<process::ProcessTerminateResult>, String> {
+    let plan = {
+        let mut plans = state
+            .kill_process_plans
+            .lock()
+            .map_err(|_| "State lock error")?;
+        plans
+            .remove(&plan_id)
+            .ok_or("The kill process plan has expired or was already executed.")?
+    };
+
+    let results = run_blocking("Kill process execution", move || {
+        let mut out = Vec::new();
+        for pid in pids {
+            let Some(expected) = plan.matching_processes.iter().find(|p| p.pid == pid) else {
+                out.push(process::ProcessTerminateResult {
+                    pid,
+                    name: format!("PID {pid}"),
+                    success: false,
+                    graceful: false,
+                    error: Some("PID was not present in the verified plan.".into()),
+                });
+                continue;
+            };
+
+            let res = process::terminate_single_process(pid, expected.creation_time, force);
+            out.push(res);
+        }
+        out
+    })
+    .await?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    for res in &results {
+        if res.success {
+            history::push_history(
+                &app,
+                history::HistoryEntry {
+                    id: format!("hist-kp-{}", now),
+                    kind: "app-scan".into(),
+                    title: format!("Terminated Process: {}", res.name),
+                    detail: format!(
+                        "Process {} (PID {}) terminated via Explorer action",
+                        res.name, res.pid
+                    ),
+                    at: now,
+                    bytes: 0,
+                    items: 1,
+                    status: "completed".into(),
+                },
+            );
+        }
+    }
+
+    Ok(results)
 }
 
 #[tauri::command]
