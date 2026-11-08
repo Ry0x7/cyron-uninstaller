@@ -174,6 +174,30 @@ fn guard_rejects_roots_and_ancestors_of_protected_data() {
             candidate.display()
         );
     }
+
+    for unapproved in [
+        r"C:\Windows",
+        r"C:\Program Files",
+        r"C:\Users",
+        r"D:\Games",
+    ] {
+        assert!(
+            cleanup::guard_path(Path::new(unapproved)).is_err(),
+            "guard must reject unapproved top-level {unapproved}"
+        );
+    }
+
+    for allowed_volume_cache in [
+        r"C:\$Recycle.Bin",
+        r"D:\$Recycle.Bin",
+        r"D:\Temp",
+        r"E:\npm-cache",
+    ] {
+        assert!(
+            cleanup::guard_path(Path::new(allowed_volume_cache)).is_ok(),
+            "guard must permit legitimate volume cache {allowed_volume_cache}"
+        );
+    }
 }
 
 #[test]
