@@ -13,14 +13,17 @@ import {
 import { UninstallWizard } from "../uninstaller/UninstallWizard";
 import "./hunter.css";
 
-export function HunterMode({
-  installedApps = [],
-  showFloatingTrigger = false,
-}: {
+interface HunterModeProps {
+  isActive: boolean;
+  onExit: () => void;
   installedApps?: InstalledApp[];
-  showFloatingTrigger?: boolean;
-}) {
-  const [isActive, setIsActive] = useState(false);
+}
+
+export function HunterMode({
+  isActive,
+  onExit,
+  installedApps = [],
+}: HunterModeProps) {
   const [isTargeting, setIsTargeting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [target, setTarget] = useState<HunterTargetInfo | null>(null);
@@ -31,16 +34,20 @@ export function HunterMode({
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Sync session active state
   useEffect(() => {
-    const onStartHunter = () => {
-      setIsActive(true);
+    if (isActive) {
       setIsTargeting(true);
       setConfirmKill(false);
-      setActionMessage("Move cursor over any desktop window or drag the crosshair icon to lock target (Space/Enter to lock, Esc to cancel)...");
-    };
-    window.addEventListener("cyron:start-hunter", onStartHunter);
-    return () => window.removeEventListener("cyron:start-hunter", onStartHunter);
-  }, []);
+      setActionMessage("Hover cursor over any desktop window or drag the crosshair icon to lock target (Space/Enter to lock, Esc to cancel)…");
+    } else {
+      setIsTargeting(false);
+      setTarget(null);
+      setTargetApp(null);
+      setConfirmKill(false);
+      setActionMessage(null);
+    }
+  }, [isActive]);
 
   useEffect(() => {
     const onDrawerChange = (e: Event) => {
@@ -57,7 +64,7 @@ export function HunterMode({
 
   // Poll cursor target while targeting is active without overlapping calls
   useEffect(() => {
-    if (!isTargeting) {
+    if (!isActive || !isTargeting) {
       if (pollIntervalRef.current) {
         window.clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
@@ -75,7 +82,6 @@ export function HunterMode({
 
         if (info && info.pid > 4 && info.processName.toLowerCase() !== "cyron.exe") {
           setTarget(info);
-          // Match installed app
           if (info.matchedAppId) {
             const matched = installedApps.find((a) => a.id === info.matchedAppId);
             setTargetApp(matched ?? null);
@@ -90,8 +96,8 @@ export function HunterMode({
       }
     };
 
-    // 250ms polling interval for minimal CPU overhead
-    pollIntervalRef.current = window.setInterval(poll, 250);
+    // 200ms polling interval for responsive desktop targeting
+    pollIntervalRef.current = window.setInterval(poll, 200);
     poll(); // Trigger immediate first check
 
     return () => {
@@ -100,37 +106,36 @@ export function HunterMode({
         pollIntervalRef.current = null;
       }
     };
-  }, [isTargeting, installedApps]);
+  }, [isActive, isTargeting, installedApps]);
 
-  // Keyboard navigation: Space/Enter locks target, Escape cancels
+  // Keyboard navigation: Escape cancels session cleanly, Space/Enter locks target
   useEffect(() => {
-    if (!isTargeting) return;
+    if (!isActive) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setIsTargeting(false);
-        setIsActive(false);
-        setTarget(null);
-        setActionMessage(null);
-      } else if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
-        handleLockTarget();
+        onExit();
+      } else if (isTargeting && (e.key === " " || e.key === "Enter")) {
+        e.preventDefault();
+        setIsTargeting(false);
+        setConfirmKill(false);
+        setActionMessage(null);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isTargeting]);
-
-  const handleStartTargeting = () => {
-    setIsActive(true);
-    setIsTargeting(true);
-    setConfirmKill(false);
-    setActionMessage("Move cursor over any desktop window or drag the crosshair icon to lock target (Space/Enter to lock, Esc to cancel)...");
-  };
+  }, [isActive, isTargeting, onExit]);
 
   const handleLockTarget = () => {
     setIsTargeting(false);
     setConfirmKill(false);
     setActionMessage(null);
+  };
+
+  const handleResumeTargeting = () => {
+    setIsTargeting(true);
+    setConfirmKill(false);
+    setActionMessage("Move cursor over any desktop window (Space/Enter to lock, Esc to cancel)…");
   };
 
   const handleTerminateProcess = async () => {
@@ -162,7 +167,6 @@ export function HunterMode({
   const handleForcedRemovalOfTarget = async () => {
     if (!target) return;
     try {
-      // Resolve backend-registered identity snapshot
       const app = await api.snapshotAppIdentity(target.hunterTargetId);
       setTargetApp(app);
       setWizardOpen(true);
@@ -186,15 +190,16 @@ export function HunterMode({
     setActionMessage("Path copied to clipboard.");
   };
 
-  if (!showFloatingTrigger && !isActive && !isTargeting) {
+  // NEVER display floating widget unless an active Hunter session is running
+  if (!isActive) {
     return null;
   }
 
   return (
     <>
-      <div className={`hunter-floating-widget ${drawerOpen && !isActive ? "hunter-floating-widget--hidden" : ""}`}>
+      <div className={`hunter-floating-widget ${drawerOpen ? "hunter-floating-widget--hidden" : ""}`}>
         {/* Hunter HUD Panel when target is acquired */}
-        {isActive && target && (
+        {target && (
           <div className="hunter-hud">
             <div className="hunter-hud__head">
               <span className="hunter-hud__title">
@@ -206,10 +211,9 @@ export function HunterMode({
                 className="btn btn--sm btn--ghost"
                 onClick={() => {
                   setTarget(null);
-                  setIsTargeting(false);
-                  setConfirmKill(false);
+                  handleResumeTargeting();
                 }}
-                title="Dismiss"
+                title="Clear current target and resume scanning"
               >
                 <IconClose size={13} />
               </button>
@@ -333,46 +337,56 @@ export function HunterMode({
           </div>
         )}
 
-        {/* Floating Crosshair Button supporting Click or Drag-and-Drop Targeting */}
-        <button
-          type="button"
-          className={`hunter-trigger-btn ${isTargeting ? "hunter-trigger-btn--active" : ""} ${isDragging ? "hunter-trigger-btn--dragging" : ""}`}
-          onPointerDown={(e) => {
-            try {
-              e.currentTarget.setPointerCapture(e.pointerId);
-              setIsDragging(true);
-              setIsActive(true);
-              setIsTargeting(true);
-              setActionMessage("Drag cursor over any desktop window, then release to lock target…");
-            } catch {
-              // Ignore pointer capture errors
-            }
-          }}
-          onPointerUp={(e) => {
-            if (isDragging) {
+        {/* Floating crosshair control during session */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            className={`hunter-trigger-btn ${isTargeting ? "hunter-trigger-btn--active" : ""} ${isDragging ? "hunter-trigger-btn--dragging" : ""}`}
+            onPointerDown={(e) => {
               try {
-                e.currentTarget.releasePointerCapture(e.pointerId);
+                e.currentTarget.setPointerCapture(e.pointerId);
+                setIsDragging(true);
+                setIsTargeting(true);
+                setActionMessage("Drag cursor over any desktop window, then release to lock target…");
               } catch {
-                // Ignore
+                // Ignore pointer capture errors
               }
-              setIsDragging(false);
-              handleLockTarget();
-            }
-          }}
-          onClick={() => {
-            if (!isDragging) {
-              if (isTargeting) {
+            }}
+            onPointerUp={(e) => {
+              if (isDragging) {
+                try {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                } catch {
+                  // Ignore
+                }
+                setIsDragging(false);
                 handleLockTarget();
-              } else {
-                handleStartTargeting();
               }
-            }
-          }}
-          title={isTargeting ? "Click to lock target window (or press Space/Enter)" : "Click or drag crosshair over any desktop window"}
-        >
-          <IconCrosshair size={16} />
-          <span>{isTargeting ? "Lock Target" : "Hunter Mode"}</span>
-        </button>
+            }}
+            onClick={() => {
+              if (!isDragging) {
+                if (isTargeting) {
+                  handleLockTarget();
+                } else {
+                  handleResumeTargeting();
+                }
+              }
+            }}
+            title={isTargeting ? "Click to lock target window (or press Space/Enter)" : "Click to resume window targeting"}
+          >
+            <IconCrosshair size={16} />
+            <span>{isTargeting ? "Lock Target" : "Resume Target"}</span>
+          </button>
+
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onExit}
+            title="Exit Hunter Mode (Esc)"
+          >
+            Exit (Esc)
+          </Button>
+        </div>
       </div>
 
       {/* Guided Uninstall Wizard if target app is selected for uninstall/forced removal */}
@@ -384,7 +398,7 @@ export function HunterMode({
           onComplete={() => {
             setWizardOpen(false);
             setTarget(null);
-            setIsActive(false);
+            onExit();
           }}
         />
       )}

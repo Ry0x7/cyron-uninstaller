@@ -102,14 +102,27 @@ The Activity view maintains an audit log of past scans and quarantine batches:
 - **Read-Only Mode**: Enabled by default upon initial installation. When active, cache cleanup (`start_cleanup`) and uninstaller leftover quarantine (`clean_app_leftovers`) are completely blocked by the backend until deliberately toggled off. Process management and uninstaller execution are independently governed by single-use server confirmation plans, process snapshot verification, and critical Windows process allowlists.
 - **Windows Explorer Integration**:
   - Optional native right-click integration registered cleanly under `HKCU\Software\Classes` without needing administrator rights.
-  - **Folders & Drives**: "Analyze with Cyron", "Find Duplicates with Cyron", and "View Storage Breakdown".
-  - **Executables (`.exe`)**: "Uninstall with Cyron" (opens registered uninstaller review) and "Find Related Files" (opens residual file review).
-  - Single-click **Enable**, **Disable**, and **Repair** controls in Settings. Clean uninstallation completely removes all registered shell verbs.
+  - **Standard Verbs**: "Analyze with Cyron", "Find Duplicates with Cyron", "View Storage Breakdown", "Uninstall with Cyron", and "Find Related Files".
+  - **Advanced & Destructive Verbs**:
+    - **Files & Folders**: "Force Delete with Cyron" and "Find Locking Processes with Cyron".
+    - **Executables (`.exe`)**: "Kill Running Process with Cyron".
+  - **Review Dialogs**: All actions open a dedicated Cyron review modal; operations are never executed directly from shell arguments.
+  - **Force Delete**: Analyzes target attributes, validates canonical path safety against Windows/boot/system roots, queries active file locks via Windows Restart Manager (`rstrtmgr.dll`), and routes deleted items through a 7-day recoverable quarantine batch by default. Permanent deletion requires explicit multi-step confirmation.
+  - **Find Locking Processes**: Queries Restart Manager for all processes currently holding open handles on the selected file or directory. Offers graceful window closure (`WM_CLOSE`) and verified force termination with PID creation-time checks.
+  - **Kill Running Process**: Matches running processes against the clicked executable's canonical path, displaying PID, creation time, and window title. Never terminates by filename alone, and unconditionally protects critical Windows system processes.
+  - **Independent Settings Toggles**: Separate controls for Standard and Advanced verbs with live HKCU status indicators and one-click Repair actions.
+
 ---
 
 ## 8. Hunter Mode & Window Targeting
 
 Hunter Mode allows you to identify, inspect, terminate, or uninstall any visible application running on your desktop:
+- **Global Sidebar Access**: Hunter Mode is positioned in the primary sidebar navigation directly below Uninstaller as a global session action, without routing away from your current workspace.
+- **Activation Confirmation**: Clicking Hunter Mode opens a compact confirmation dialog explaining window targeting, available actions, and exit controls. Cursor tracking and target polling only begin after confirmation.
+- **Session Lifecycle & Active Indicators**:
+  - The sidebar displays an animated active status badge with an inline exit button.
+  - A top-center targeting HUD and crosshair trigger are visible strictly during an active Hunter session and disappear immediately upon exit.
+  - Press `Esc` or click "Exit Hunter Mode" at any time to immediately cancel the session without leaving lingering timers or stale background targets.
 - **Targeting**:
   - Drag the targeting crosshair onto any application window on your desktop using pointer capture.
   - Alternatively, use the keyboard (`Space` or `Enter` to lock target under cursor, `Esc` to cancel).

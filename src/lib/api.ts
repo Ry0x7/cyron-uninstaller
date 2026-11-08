@@ -39,6 +39,10 @@ import type {
   HunterTargetInfo,
   SystemSpecs,
   StartupItem,
+  ForceDeletePlanPreview,
+  ForceDeleteResult,
+  KillProcessPlanPreview,
+  LockingProcessInfo,
 } from "./types";
 
 export function isDesktop(): boolean {
@@ -136,9 +140,21 @@ export const api = {
   getStartupRoute: () => call<StartupRoute | null>("get_startup_route"),
   getExplorerIntegrationStatus: () =>
     call<ExplorerIntegrationStatus>("get_explorer_integration_status"),
-  setExplorerIntegration: (enabled: boolean) =>
-    call<void>("set_explorer_integration", { enabled }),
+  setExplorerIntegration: (standard: boolean, advanced: boolean) =>
+    call<void>("set_explorer_integration", { standard, advanced }),
   repairExplorerIntegration: () => call<void>("repair_explorer_integration"),
+  findLockingProcesses: (targetPath: string) =>
+    call<LockingProcessInfo[]>("find_locking_processes", { targetPath }),
+  prepareForceDeletePlan: (targetPath: string) =>
+    call<ForceDeletePlanPreview>("prepare_force_delete_plan", { targetPath }),
+  executeForceDeletePlan: (planId: string, mode: "quarantine" | "permanent") =>
+    call<ForceDeleteResult>("execute_force_delete_plan", { planId, mode }),
+  terminateForceDeleteLockingProcess: (planId: string, pid: number, force: boolean) =>
+    call<ProcessTerminateResult>("terminate_force_delete_locking_process", { planId, pid, force }),
+  prepareKillProcessPlan: (exePath: string) =>
+    call<KillProcessPlanPreview>("prepare_kill_process_plan", { exePath }),
+  executeKillProcessPlan: (planId: string, pids: number[], force: boolean) =>
+    call<ProcessTerminateResult[]>("execute_kill_process_plan", { planId, pids, force }),
   listCleanupProviders: () => call<CleanupProviderDef[]>("list_cleanup_providers"),
   inspectCleanableDirectory: (path: string) =>
     call<CleanableInspection>("inspect_cleanable_directory", { path }),

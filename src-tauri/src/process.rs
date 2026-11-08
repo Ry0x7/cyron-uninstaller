@@ -623,6 +623,76 @@ fn force_terminate_process(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Safely terminates a single process with graceful WM_CLOSE first and optional force termination,
+/// verifying critical process protection and PID creation time consistency.
+pub fn terminate_single_process(
+    pid: u32,
+    expected_creation_time: u64,
+    force: bool,
+) -> ProcessTerminateResult {
+    let (name, path) = query_process_info(pid);
+    if is_critical_process(pid, &name, path.as_deref()) {
+        return ProcessTerminateResult {
+            pid,
+            name,
+            success: false,
+            graceful: false,
+            error: Some("Refusing to terminate a Windows critical system process.".into()),
+        };
+    }
+
+    if expected_creation_time > 0 {
+        let current_time = get_process_creation_time(pid).unwrap_or(0);
+        if current_time == 0 || current_time != expected_creation_time {
+            return ProcessTerminateResult {
+                pid,
+                name,
+                success: false,
+                graceful: false,
+                error: Some("Process creation time mismatch (process identity recycled). Aborted.".into()),
+            };
+        }
+    }
+
+    let graceful_success = attempt_graceful_close(pid);
+    if graceful_success {
+        return ProcessTerminateResult {
+            pid,
+            name,
+            success: true,
+            graceful: true,
+            error: None,
+        };
+    }
+
+    if !force {
+        return ProcessTerminateResult {
+            pid,
+            name,
+            success: false,
+            graceful: false,
+            error: Some("Process did not exit after graceful close attempt. Force termination required.".into()),
+        };
+    }
+
+    match force_terminate_process(pid) {
+        Ok(()) => ProcessTerminateResult {
+            pid,
+            name,
+            success: true,
+            graceful: false,
+            error: None,
+        },
+        Err(err) => ProcessTerminateResult {
+            pid,
+            name,
+            success: false,
+            graceful: false,
+            error: Some(err),
+        },
+    }
+}
+
 fn is_process_running(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
@@ -690,7 +760,7 @@ pub fn query_process_info(pid: u32) -> (String, Option<String>) {
     }
 }
 
-fn find_window_title(pid: u32) -> Option<String> {
+pub fn find_window_title(pid: u32) -> Option<String> {
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,

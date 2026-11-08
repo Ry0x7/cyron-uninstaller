@@ -99,14 +99,14 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. |
 | `providers.rs` | Declarative versioned (`schema_version: 1`) cleanup provider system. Enforces approved environment roots, validates path templates and patterns, rejects path traversals, wildcards in roots, and attempts to mark protected data safe. |
 | `cleanup.rs` | The primary cache cleanup engine. Resolves catalog ids to specs, enforces `guard_path`, plans and measures a preview, executes a server-held plan by moving files into a quarantine batch, and implements list/restore/purge plus the capped cleanup log. |
-| `explorer.rs` | Registers and unregisters native per-user Windows shell context menu verbs under `HKEY_CURRENT_USER\Software\Classes` without administrator elevation. Parses startup CLI arguments (`--analyze`, `--duplicates`, `--storage`, `--uninstall-target`, `--find-related`) and sanitizes paths. |
+| `explorer.rs` | Registers and unregisters native per-user Windows shell context menu verbs under `HKEY_CURRENT_USER\Software\Classes` without administrator elevation. Implements standard and advanced destructive verbs (Force Delete, Locking Processes, Kill Process), path validation and system root guards (`is_protected_delete_target`), Windows Restart Manager lock detection (`rstrtmgr.dll`), and server-held single-use execution plans (`StoredForceDeletePlan`, `StoredKillProcessPlan`). |
 | `process.rs` | Discovers processes executing from an application root, snapshots process state with 64-bit creation times (`GetProcessTimes`) to defeat PID recycling, denies Windows critical processes, and executes graceful `WM_CLOSE` preceding `TerminateProcess`. |
 | `uninstall.rs` | Resolves vendor commands server-side from live registry keys, creates expiring single-use plans (`UninstallPlan`, `BatchUninstallPlan`), tokenizes commands safely, normalizes MSI invocations, and tracks exit codes (including code 3010 reboot requests). |
 | `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 45 validated IPC commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 45 Tauri commands. `read_only` starts `true`. |
+| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 51 validated IPC commands. |
+| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 51 Tauri commands. `read_only` starts `true`. |
 
 ## IPC surface
 
@@ -155,8 +155,14 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `get_scan_index_summary` | `jobId` | `ScanIndexSummary` | High-level summary of disk-indexed scan. |
 | `close_scan_index` | `jobId` | — | Cleans up and releases disk-backed SQLite scan index. |
 | `resolve_cursor_target` | `x`, `y` | `HunterTargetInfo` | Fast Hunter targeting (<1µs) against cached application inventory; creates verified process snapshot. |
-| `get_shell_integration_status` | — | `ShellIntegrationStatus` | Checks per-user Windows Explorer context menu verbs under HKCU. |
-| `set_shell_integration_enabled` | `enabled` | `ShellIntegrationStatus` | Registers/unregisters per-user Explorer context menu verbs without elevation. |
+| `get_shell_integration_status` | — | `ShellIntegrationStatus` | Checks per-user Windows Explorer context menu verbs under HKCU (standard and advanced). |
+| `set_shell_integration_enabled` | `enabled`, `isAdvanced` | `ShellIntegrationStatus` | Registers/unregisters per-user standard or advanced Explorer context menu verbs without elevation. |
+| `inspect_delete_target` | `path` | `TargetInspectReport` | Inspects target path, validates system root safety, queries attributes, and identifies locking processes via Restart Manager. |
+| `find_locking_processes` | `path` | `LockingProcessInfo[]` | Queries active file/folder locking processes using Windows Restart Manager (`rstrtmgr.dll`). |
+| `prepare_force_delete_plan` | `path`, `mode` | `ForceDeletePlan` | Prepares single-use 10-minute expiring plan (`quarantine` or `permanent`) for verified file/folder removal. |
+| `execute_force_delete` | `planId` | `ForceDeleteReport` | Revalidates path and identity immediately before deletion; routes to 7-day quarantine or performs verified permanent delete. |
+| `prepare_kill_process_plan` | `exePath` | `KillProcessPlan` | Matches running processes strictly by exact executable image path; creates single-use 10-minute plan. |
+| `terminate_matching_process` | `planId`, `pid`, `force` | `ProcessTerminateResult` | Graceful `WM_CLOSE` or verified `TerminateProcess` with PID creation-time verification and system process refusal. |
 | `get_app_log` | — | `AppLogEntry[]` | Retrieves buffered in-memory application activity log. |
 | `clear_app_log` | — | — | Clears the application log buffer. |
 | `open_url` | `url` | — | Opens validated safe HTTP/HTTPS URL in default system browser. |

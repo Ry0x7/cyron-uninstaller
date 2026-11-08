@@ -419,7 +419,7 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         "WriteFile(",
         "ShellExecute",
     ];
-    let allowed_destructive = ["cleanup.rs", "history.rs", "leftovers.rs"];
+    let allowed_destructive = ["cleanup.rs", "history.rs", "leftovers.rs", "explorer.rs"];
     let mut command_invocations = Vec::new();
 
     for file in &files {

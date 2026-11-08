@@ -82,6 +82,15 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | Startup Manager Toggling, Elevation & Payload Preservation | Done | `system.rs`: enumerates HKCU/HKLM Run/RunOnce, WOW6432Node, and Startup folders; checks write permissions (`is_hklm_startup_writable`), disabling machine toggles without elevation; preserves exact 12-byte raw binary structure, setting byte 0 (`0x02` enabled, `0x03` disabled) and updating FILETIME in bytes 4..12 matching Windows Task Manager; reversible per-user toggling; protects Windows Defender, SecurityHealthSystray, and SmartScreen. Tested in `rc1_e2e_fixture.rs` [E2E 6/8] and unit tests. |
 | Hardware Diagnostics Improvements | Done | `system.rs`: native Windows architecture detection via `GetNativeSystemInfo`; discrete GPU preference and virtual adapter filtering; 5-second TTL specs cache. |
 
+### 6. Explorer Destructive Actions & Hunter Navigation (Milestone 7.4)
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Hunter Mode Sidebar Navigation & Activation Dialog | Done | Moved to primary sidebar below Uninstaller as a global action; clicking triggers a compact confirmation dialog explaining window targeting, actions, and exit; cursor tracking only begins upon confirmation. Active sidebar indicator and `Esc` cancellation ensure no lingering intervals or stale targets. |
+| Session-Bound Hunter HUD & Floating Triggers | Done | `HunterMode.tsx`: targeting HUD banner and crosshair trigger render strictly during active sessions (`isActive === true`); uninstaller header button eliminated. Tested across window resize and collapsed sidebar. |
+| Windows Explorer Force Delete & Locking Processes | Done | `explorer.rs`: registers `Cyron.ForceDelete` and `Cyron.LockingProcesses` in HKCU; validates paths, blocks system/boot roots (`is_protected_delete_target`), prepares 10-minute expiring single-use execution plan (`StoredForceDeletePlan`); detects active file locks via Windows Restart Manager (`rstrtmgr.dll`); defaults to 7-day recoverable quarantine; verified permanent deletion with warning checks. Tested in unit tests and security suite. |
+| Windows Explorer Kill Process | Done | `explorer.rs` & `process.rs`: registers `Cyron.KillProcess` for `.exe` files; matches running processes strictly by executable path; captures PID, window title, and creation time; terminates via core engine (`process::terminate_single_process`) with graceful closure and verified force termination. |
+| Standard vs Advanced Explorer Settings | Done | `Settings.tsx`: provides independent toggles for standard and advanced/destructive context-menu verbs; displays HKCU registration status badges and repair actions. |
+
 ---
 
 ## Known Limitations & Design Boundaries

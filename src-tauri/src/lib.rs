@@ -37,6 +37,8 @@ pub struct AppState {
     pub broken_entry_plans: Arc<Mutex<HashMap<String, leftovers::StoredBrokenEntryPlan>>>,
     pub app_snapshots: Arc<Mutex<HashMap<String, apps::InstalledApp>>>,
     pub hunter_app_snapshots: Arc<Mutex<HashMap<String, apps::InstalledApp>>>,
+    pub force_delete_plans: Arc<Mutex<HashMap<String, explorer::StoredForceDeletePlan>>>,
+    pub kill_process_plans: Arc<Mutex<HashMap<String, explorer::StoredKillProcessPlan>>>,
     pub cached_apps: Arc<Mutex<Option<(std::time::Instant, apps::AppInventory)>>>,
     pub startup_route: Arc<Mutex<Option<explorer::StartupRoute>>>,
     pub index_manager: Arc<index::IndexManager>,
@@ -59,6 +61,8 @@ impl Default for AppState {
             broken_entry_plans: Arc::default(),
             app_snapshots: Arc::default(),
             hunter_app_snapshots: Arc::default(),
+            force_delete_plans: Arc::default(),
+            kill_process_plans: Arc::default(),
             cached_apps: Arc::default(),
             startup_route: Arc::default(),
             index_manager: Arc::default(),
@@ -122,6 +126,12 @@ pub fn run() {
             commands::get_system_specs,
             commands::list_startup_items,
             commands::set_startup_item_enabled,
+            commands::prepare_force_delete_plan,
+            commands::execute_force_delete_plan,
+            commands::terminate_force_delete_locking_process,
+            commands::prepare_kill_process_plan,
+            commands::execute_kill_process_plan,
+            commands::find_locking_processes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");
