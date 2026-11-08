@@ -1479,11 +1479,21 @@ pub fn guard_path(path: &Path) -> Result<(), String> {
     }
     let key = normalize_key(path);
     let parts: Vec<&str> = key.split('\\').filter(|part| !part.is_empty()).collect();
-    if parts.len() < 3 {
+    if parts.len() < 2 {
         return Err(format!(
             "Refusing to clean a top-level location: {}",
             path.display()
         ));
+    }
+    if parts.len() == 2 {
+        let folder = parts[1];
+        let is_allowed_volume_cache = matches!(folder, "$recycle.bin" | "temp" | "npm-cache");
+        if !is_allowed_volume_cache {
+            return Err(format!(
+                "Refusing to clean a top-level location: {}",
+                path.display()
+            ));
+        }
     }
     for blocked in blocked_roots() {
         if key == blocked {
@@ -1891,6 +1901,32 @@ mod tests {
                     "{variable} must be refused"
                 );
             }
+        }
+        for unapproved in [
+            r"C:\Windows",
+            r"C:\Program Files",
+            r"C:\Program Files (x86)",
+            r"C:\Users",
+            r"C:\Recovery",
+            r"D:\Games",
+            r"E:\Projects",
+        ] {
+            assert!(
+                guard_path(Path::new(unapproved)).is_err(),
+                "{unapproved} must be refused as top-level"
+            );
+        }
+        for allowed in [
+            r"C:\$Recycle.Bin",
+            r"D:\$Recycle.Bin",
+            r"D:\Temp",
+            r"C:\Temp",
+            r"E:\npm-cache",
+        ] {
+            assert!(
+                guard_path(Path::new(allowed)).is_ok(),
+                "{allowed} must be allowed as volume cache"
+            );
         }
     }
 
