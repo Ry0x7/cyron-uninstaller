@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnalyzerAction,
+  AnalyzerActionPreview,
+  AnalyzerActionReport,
   AppInventory,
   AppProcess,
   BatchUninstallPlan,
@@ -86,8 +89,14 @@ export function errorMessage(error: unknown): string {
 
 export const api = {
   listInstalledApps: () => call<AppInventory>("list_installed_apps"),
+  listRemovedApps: () => call<InstalledApp[]>("list_removed_apps"),
   listVolumes: () => call<VolumeInfo[]>("list_volumes"),
-  listCaches: () => call<CacheInventory>("list_caches"),
+  listCaches: (driveLetters?: string[]) => call<CacheInventory>("list_caches", driveLetters ? { driveLetters } : undefined),
+  prepareAnalyzerAction: (paths: string[], operation: AnalyzerAction) =>
+    call<AnalyzerActionPreview>("prepare_analyzer_action", { paths, operation }),
+  executeAnalyzerAction: (planId: string) =>
+    call<AnalyzerActionReport>("execute_analyzer_action", { planId }),
+  cancelAnalyzerAction: (planId: string) => call<void>("cancel_analyzer_action", { planId }),
   startScan: (jobId: string, path: string, options: ScanOptions) =>
     call<ScanResult>("start_scan", { jobId, path, options }),
   cancelScan: (jobId: string) => call<void>("cancel_scan", { jobId }),
@@ -101,6 +110,8 @@ export const api = {
   /** Exclusions are absolute folder paths; the backend refuses anything else. */
   previewCleanup: (targetIds: string[], exclusions: string[] = []) =>
     call<CleanupPreview>("preview_cleanup", { targetIds, exclusions }),
+  previewRemnantCleanup: (appId: string, planId: string, candidateIds: string[], exclusions: string[], driveLetters: string[]) =>
+    call<CleanupPreview>("preview_remnant_cleanup", { appId, planId, candidateIds, exclusions, driveLetters }),
   startCleanup: (planId: string, targetIds: string[]) =>
     call<CleanupReport>("start_cleanup", { planId, targetIds }),
   /** true means the backend is in read-only mode and refuses to execute. */
@@ -131,12 +142,19 @@ export const api = {
     call<BrokenEntryPlan>("prepare_broken_inventory_cleanup", { appId }),
   executeBrokenInventoryCleanup: (planId: string, confirmedKeyPath: string) =>
     call<LeftoverCleanReport>("execute_broken_inventory_cleanup", { planId, confirmedKeyPath }),
+  prepareForcedRemovalCleanup: (appId: string) =>
+    call<BrokenEntryPlan>("prepare_forced_removal_cleanup", { appId }),
+  executeForcedRemovalCleanup: (planId: string, confirmedKeyPath: string) =>
+    call<LeftoverCleanReport>("execute_forced_removal_cleanup", { planId, confirmedKeyPath }),
+  uninstallStoreApp: (appId: string) =>
+    call<UninstallExecutionResult>("uninstall_store_app", { appId }),
   restoreRegistryBackup: (runId: string, overwriteConflict = false) =>
     call<RegistryRestoreReport>("restore_registry_backup", { runId, overwriteConflict }),
   prepareBatchUninstall: (appIds: string[], quiet = false) =>
     call<BatchUninstallPlan>("prepare_batch_uninstall", { appIds, quiet }),
   executeBatchUninstall: (planId: string) =>
     call<BatchUninstallReport>("execute_batch_uninstall", { planId }),
+  cancelBatchUninstall: (planId: string) => call<void>("cancel_batch_uninstall", { planId }),
   getStartupRoute: () => call<StartupRoute | null>("get_startup_route"),
   getExplorerIntegrationStatus: () =>
     call<ExplorerIntegrationStatus>("get_explorer_integration_status"),

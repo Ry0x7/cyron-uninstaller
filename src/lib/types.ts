@@ -283,6 +283,7 @@ export interface CleanupTarget {
 }
 
 export interface CleanupPreviewFile {
+  lastModified: number | null;
   path: string;
   size: number;
   targetId: string;
@@ -431,7 +432,7 @@ export interface UninstallPlan {
 export interface UninstallExecutionResult {
   appId: string;
   exitCode: number | null;
-  status: "completed" | "restart_required" | "failed" | "cancelled";
+  status: "completed" | "remaining" | "restart_required" | "failed" | "cancelled";
   restartRequired: boolean;
   message: string;
   elapsedMs: number;
@@ -500,6 +501,8 @@ export interface BatchUninstallReport {
   total: number;
   completed: number;
   failed: number;
+  cancelled: number;
+  remaining: number;
   restartRequired: number;
   results: BatchUninstallItemResult[];
 }
@@ -704,4 +707,37 @@ export interface StartupItem {
   canToggle: boolean;
 }
 
+
+export type AnalyzerAction = "recycle" | "permanent";
+export interface AnalyzerActionTarget {
+  path: string;
+  files: number;
+  dirs: number;
+  bytes: number;
+}
+export interface AnalyzerActionPreview {
+  planId: string;
+  operation: AnalyzerAction;
+  targets: AnalyzerActionTarget[];
+  totalFiles: number;
+  totalDirs: number;
+  totalBytes: number;
+  expiresAt: number;
+  warnings: string[];
+}
+export interface AnalyzerActionProgress {
+  planId: string;
+  completed: number;
+  total: number;
+  currentPath: string;
+}
+export interface AnalyzerActionReport {
+  planId: string;
+  operation: AnalyzerAction;
+  items: {path: string; status: "completed" | "failed" | "cancelled"; bytes: number; error?: string | null}[];
+  completedFiles: number;
+  completedDirs: number;
+  completedBytes: number;
+  cancelled: boolean;
+}
 

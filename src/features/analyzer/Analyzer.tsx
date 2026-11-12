@@ -45,6 +45,7 @@ import { useAsync } from "../../lib/hooks";
 import { useSettings } from "../../lib/settings";
 import { SCAN_EVENT, type CleanableInspection, type ScanNode, type ScanProgress, type ScanResult } from "../../lib/types";
 import { Treemap } from "./Treemap";
+import { AnalyzerActions } from "./AnalyzerActions";
 import { TreeView } from "./TreeView";
 import { DetailedListing } from "./DetailedListing";
 import { ItemPropertiesDialog } from "./ItemPropertiesDialog";
@@ -197,6 +198,11 @@ export function Analyzer({
   const [treeOpen, setTreeOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  useEffect(() => {
+    setSelected(null);
+    setPropertiesItem(null);
+    if (activeRootKey === "all") setMode("map");
+  }, [activeRootKey]);
   // Frozen at scan start so the result describes the scan that actually ran.
   const [appliedOptions, setAppliedOptions] = useState({
     includeHidden: settings.includeHidden,
@@ -295,19 +301,19 @@ export function Analyzer({
       totalAllocated,
       fileCount,
       dirCount,
-      dedupedFiles: 0,
-      skippedReparse: 0,
+      dedupedFiles: rootList.reduce((sum, scan) => sum + scan.dedupedFiles, 0),
+      skippedReparse: rootList.reduce((sum, scan) => sum + scan.skippedReparse, 0),
       errors: rootList.flatMap((r) => r.errors),
-      extensionStats: rootList[0].extensionStats,
+      extensionStats: [],
       largestFiles: rootList.flatMap((r) => r.largestFiles).sort((a, b) => b.size - a.size).slice(0, 100),
-      elapsedMs: 0,
-      cancelled: false,
-      truncated: false,
+      elapsedMs: rootList.reduce((sum, scan) => sum + scan.elapsedMs, 0),
+      cancelled: rootList.some((scan) => scan.cancelled),
+      truncated: rootList.some((scan) => scan.truncated),
       method: "workspace",
       methodNote: null,
-      categories: rootList[0].categories,
-      ageBuckets: rootList[0].ageBuckets,
-      insights: rootList[0].insights,
+      categories: [],
+      ageBuckets: [],
+      insights: [],
     };
   }, [scannedRoots]);
 
@@ -571,7 +577,7 @@ export function Analyzer({
     <>
       <ViewHeader
         title="Disk Analyzer"
-        description="See where the space actually went. Cyron reads file metadata only — nothing is moved, renamed or deleted."
+        description="Map disk usage with a read-only scan. Review selected items separately before recycling or permanent deletion."
         actions={headerActions}
       />
       <div className="view-body">
@@ -720,6 +726,16 @@ export function Analyzer({
           </div>
         )}
 
+        <AnalyzerActions scope={activeRootKey} selected={selected} disabled={phase !== "result"}
+          onChanged={() => {
+            const root = result?.root.path ? result.rootPath : lastPath;
+            setSelected(null);
+            setPropertiesItem(null);
+            setScannedRoots({});
+            setStack([]);
+            if (root) void runScan(root);
+          }} />
+
         {phase === "result" && result && current && (
           <>
             {result.cancelled && (
@@ -815,7 +831,7 @@ export function Analyzer({
             <div className="az-modes">
               <Segmented
                 size="sm"
-                options={MODES}
+                options={activeRootKey === "all" ? MODES.filter((item) => item.value === "map" || item.value === "details") : MODES}
                 value={mode}
                 onChange={(value) => setMode(value as AnalyzerMode)}
                 ariaLabel="Analyzer mode"

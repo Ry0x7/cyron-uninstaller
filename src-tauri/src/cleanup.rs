@@ -60,6 +60,8 @@ pub struct CleanupSpec {
 #[derive(Debug, Clone)]
 pub struct CleanupPlan {
     pub plan_id: String,
+    /// Present when a plan contains files derived from verified uninstall leftovers.
+    pub source_app_id: Option<String>,
     pub specs: Vec<CleanupSpec>,
     pub expires_at: u64,
     pub read_only: bool,
@@ -68,8 +70,16 @@ pub struct CleanupPlan {
     pub exclusions: Vec<PathBuf>,
     pub expected_files: u64,
     pub expected_bytes: u64,
-    /// Approved preview snapshot paths and their expected sizes.
-    pub snapshot_paths: std::collections::HashMap<String, u64>,
+    /// Approved preview paths and file metadata. Execution leaves changed files alone.
+    pub snapshot_paths: std::collections::HashMap<String, CleanupSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CleanupSnapshot {
+    pub size: u64,
+    pub last_modified: Option<u64>,
+    /// Windows 100 ns write time, retained at full precision for TOCTOU checks.
+    pub last_write_time: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -95,6 +105,7 @@ pub struct CleanupTarget {
 pub struct CleanupPreviewFile {
     pub path: String,
     pub size: u64,
+    pub last_modified: Option<u64>,
     pub target_id: String,
 }
 
@@ -244,50 +255,27 @@ pub struct BatchManifest {
     pub backup_size_bytes: Option<u64>,
 }
 
-pub fn encode_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-pub fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
-    if s.len() % 2 != 0 {
-        return Err("Invalid hex string length".into());
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
-        .collect()
-}
-
-fn resolve_drive_or_custom_target(id: &str) -> Option<Result<CleanupSpec, String>> {
+fn resolve_drive_target(id: &str) -> Option<Result<CleanupSpec, String>> {
     if let Some(rest) = id.strip_prefix("drive-") {
         let parts: Vec<&str> = rest.splitn(2, '-').collect();
-        if parts.len() == 2 && parts[0].len() == 1 {
+        if parts.len() == 2 && parts[0].len() == 1 && parts[0].chars().all(|c| c.is_ascii_alphabetic()) {
             let letter = parts[0].to_ascii_uppercase();
             let kind = parts[1];
+            let mounted_local = crate::volumes::list_volumes().iter().any(|volume| {
+                volume.mount.starts_with(&letter)
+                    && matches!(volume.kind.as_str(), "fixed" | "removable")
+            });
+            if !mounted_local {
+                return Some(Err(format!("Drive {letter}: is not a mounted local drive.")));
+            }
             let (rel_path, tool, label, risk, category, impact) = match kind {
-                "recycle-bin" => (
-                    "$Recycle.Bin",
-                    "Windows",
-                    format!("Recycle Bin ({letter}:)"),
-                    "safe",
-                    "windows",
-                    format!("Files in volume {letter}: Recycle Bin will be moved to quarantine."),
-                ),
-                "temp" => (
-                    "Temp",
-                    "Temporary Files",
-                    format!("Volume Temp ({letter}:)"),
-                    "safe",
-                    "windows",
-                    format!("Temporary files in {letter}:\\Temp will be moved to quarantine."),
-                ),
                 "steam-downloading" => (
                     r"SteamLibrary\steamapps\downloading",
                     "Steam",
                     format!("Steam Downloads ({letter}:)"),
-                    "safe",
+                    "caution",
                     "packages",
-                    format!("Incomplete game downloads in {letter}: Steam Library will be moved to quarantine."),
+                    format!("Steam's pending downloads may reset; pause active downloads and expect incomplete content to download again."),
                 ),
                 "steam-shadercache" => (
                     r"SteamLibrary\steamapps\shadercache",
@@ -308,6 +296,14 @@ fn resolve_drive_or_custom_target(id: &str) -> Option<Result<CleanupSpec, String
                 _ => return None,
             };
             let path = PathBuf::from(format!("{letter}:\\{rel_path}"));
+            if kind == "npm-cache" && !caches::has_npm_cache_marker(&path) {
+                return Some(Err("The selected path does not contain npm's cache layout.".into()));
+            }
+            if kind.starts_with("steam-")
+                && !caches::has_steam_library_marker(path.parent().unwrap_or(&path))
+            {
+                return Some(Err("The selected path is not inside a verified Steam library.".into()));
+            }
             return Some(Ok(CleanupSpec {
                 id: id.to_string(),
                 tool: tool.to_string(),
@@ -319,25 +315,6 @@ fn resolve_drive_or_custom_target(id: &str) -> Option<Result<CleanupSpec, String
                 path,
             }));
         }
-    } else if let Some(hex_part) = id.strip_prefix("custom-dir-") {
-        let res = (|| {
-            let bytes = decode_hex(hex_part)?;
-            let path_str = String::from_utf8(bytes).map_err(|e| e.to_string())?;
-            let path = PathBuf::from(&path_str);
-            guard_path(&path)?;
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-            Ok(CleanupSpec {
-                id: id.to_string(),
-                tool: "Custom Directory".into(),
-                label: file_name,
-                risk: "safe".into(),
-                category: "packages".into(),
-                note: format!("Cleanable directory identified at {}", path.display()),
-                impact: "Files will be moved to durable 7-day quarantine before deletion.".into(),
-                path,
-            })
-        })();
-        return Some(res);
     }
     None
 }
@@ -367,7 +344,7 @@ pub fn catalog_specs(ids: &[String]) -> Result<Vec<CleanupSpec>, String> {
             continue;
         }
 
-        if let Some(resolved) = resolve_drive_or_custom_target(id) {
+        if let Some(resolved) = resolve_drive_target(id) {
             specs.push(resolved?);
             continue;
         }
@@ -520,12 +497,20 @@ pub fn plan_specs_with_exclusions(
                 format!("{}: preview was interrupted and is partial.", spec.label),
             );
         }
-        for (path, size) in &walk.files {
-            snapshot_paths.insert(normalize_key(path), *size);
+        for (path, size, last_modified, last_write_time) in &walk.files {
+            snapshot_paths.insert(
+                normalize_key(path),
+                CleanupSnapshot {
+                    size: *size,
+                    last_modified: *last_modified,
+                    last_write_time: *last_write_time,
+                },
+            );
             if files.len() < MAX_PREVIEW_FILES {
                 files.push(CleanupPreviewFile {
                     path: path.to_string_lossy().to_string(),
                     size: *size,
+                    last_modified: *last_modified,
                     target_id: spec.id.clone(),
                 });
             }
@@ -570,6 +555,7 @@ pub fn plan_specs_with_exclusions(
     }
     let plan = CleanupPlan {
         plan_id: plan_id.clone(),
+        source_app_id: None,
         specs,
         expires_at: now + PLAN_TTL_SECS,
         read_only,
@@ -670,16 +656,15 @@ fn read_journal(journal_path: &Path) -> Option<Vec<ManifestItem>> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(rec) = serde_json::from_str::<JournalRecord>(line) {
-            if rec.action.as_deref() == Some("registry_backup") {
-                continue;
-            }
-            items.push(ManifestItem {
-                original_path: rec.original_path,
-                stored_path: rec.stored_path,
-                size: rec.size,
-            });
+        let rec = serde_json::from_str::<JournalRecord>(line).ok()?;
+        if rec.action.as_deref() == Some("registry_backup") {
+            continue;
         }
+        items.push(ManifestItem {
+            original_path: rec.original_path,
+            stored_path: rec.stored_path,
+            size: rec.size,
+        });
     }
     Some(items)
 }
@@ -796,8 +781,15 @@ pub fn execute_plan(
             );
         }
 
-        let target_root = fs::canonicalize(&spec.path).unwrap_or_else(|_| spec.path.clone());
-        for (path, _size) in walk.files {
+        let target_root = match fs::symlink_metadata(&spec.path) {
+            Ok(meta) if meta.is_file() => spec
+                .path
+                .parent()
+                .and_then(|parent| fs::canonicalize(parent).ok())
+                .unwrap_or_else(|| spec.path.clone()),
+            _ => fs::canonicalize(&spec.path).unwrap_or_else(|_| spec.path.clone()),
+        };
+        for (path, size, last_modified, last_write_time) in walk.files {
             if cancel.load(Ordering::Relaxed) {
                 cancelled = true;
                 break;
@@ -807,7 +799,10 @@ pub fn execute_plan(
 
             // Bind execution strictly to the approved preview snapshot
             let path_key = normalize_key(&path);
-            if !plan.snapshot_paths.is_empty() && !plan.snapshot_paths.contains_key(&path_key) {
+            let unchanged = plan.snapshot_paths.get(&path_key).is_some_and(|snapshot| {
+                snapshot.size == size && snapshot.last_write_time == last_write_time
+            });
+            if !unchanged {
                 skipped += 1;
                 if items.len() < MAX_ITEMS {
                     items.push(CleanupItemResult {
@@ -815,14 +810,23 @@ pub fn execute_plan(
                         path: path.to_string_lossy().to_string(),
                         bytes: 0,
                         status: "skipped".into(),
-                        reason: Some("Created after preview was approved — left alone.".into()),
+                        reason: Some("Created or changed after preview was approved — left alone.".into()),
                         quarantine_path: None,
                     });
                 }
                 continue;
             }
 
-            match quarantine_file(&path, &target_root, &batch, index, &mut journal_file) {
+            match quarantine_file(
+                &path,
+                &target_root,
+                &batch,
+                index,
+                size,
+                last_modified,
+                last_write_time,
+                &mut journal_file,
+            ) {
                 Ok((stored, size)) => {
                     quarantined += 1;
                     moved_bytes += size;
@@ -896,10 +900,34 @@ pub fn execute_plan(
     }
 
     drop(journal_file);
-    if quarantined > 0 {
+    let batch_canonical = fs::canonicalize(&batch).unwrap_or_else(|_| batch.clone());
+    let mut known: std::collections::HashSet<String> = manifest
+        .items
+        .iter()
+        .map(|item| item.stored_path.clone())
+        .collect();
+    let residual: Vec<ManifestItem> = read_journal(&journal_path)
+        .ok_or_else(|| format!("Recovery journal at {} is unreadable; it was preserved for recovery.", journal_path.display()))?
+        .into_iter()
+        .filter_map(|mut item| {
+            let stored = Path::new(&item.stored_path);
+            let metadata = fs::symlink_metadata(stored).ok()?;
+            if !metadata.is_file() || has_reparse_attribute(metadata.file_attributes()) {
+                return None;
+            }
+            let parent = fs::canonicalize(stored.parent()?).ok()?;
+            if !is_within(&parent, &batch_canonical) || !known.insert(item.stored_path.clone()) {
+                return None;
+            }
+            item.size = metadata.len();
+            Some(item)
+        })
+        .collect();
+    manifest.items.extend(residual);
+    if !manifest.items.is_empty() {
         write_manifest(&batch, &manifest)?;
     } else {
-        // Nothing was moved, so there is nothing to restore or purge.
+        // Nothing was moved or left in quarantine, so there is nothing to recover.
         let _ = fs::remove_file(journal_path);
         let _ = fs::remove_dir(&batch);
     }
@@ -933,7 +961,7 @@ pub fn execute_plan(
         errors,
         elapsed_ms: started.elapsed().as_millis() as u64,
         cancelled,
-        quarantine_dir: if quarantined > 0 {
+        quarantine_dir: if !manifest.items.is_empty() {
             Some(batch.to_string_lossy().to_string())
         } else {
             None
@@ -947,6 +975,9 @@ fn quarantine_file(
     target_root: &Path,
     batch: &Path,
     index: usize,
+    expected_size: u64,
+    expected_last_modified: Option<u64>,
+    expected_last_write_time: u64,
     journal_file: &mut fs::File,
 ) -> Result<(PathBuf, u64), MoveError> {
     let meta = fs::symlink_metadata(file)
@@ -956,6 +987,12 @@ fn quarantine_file(
     }
     if has_reparse_attribute(meta.file_attributes()) {
         return Err(MoveError::Skipped("link or junction".into()));
+    }
+    if meta.len() != expected_size
+        || modified_at(&meta) != expected_last_modified
+        || meta.last_write_time() != expected_last_write_time
+    {
+        return Err(MoveError::Skipped("changed after preview — left alone".into()));
     }
 
     // The parent is canonicalized right before the move so a reparse point or
@@ -986,8 +1023,38 @@ fn quarantine_file(
     append_journal_entry_file(journal_file, &item)
         .map_err(|error| MoveError::Failed(error))?;
 
-    fs::rename(file, &destination).map_err(|error| MoveError::Failed(describe(file, &error)))?;
+    move_to_quarantine(file, &destination)
+        .map_err(|error| MoveError::Failed(describe(file, &error)))?;
     Ok((destination, size))
+}
+
+fn move_to_quarantine(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let mut source_wide: Vec<u16> = source.as_os_str().encode_wide().collect();
+    source_wide.push(0);
+    let mut destination_wide: Vec<u16> = destination.as_os_str().encode_wide().collect();
+    destination_wide.push(0);
+    // COPY_ALLOWED handles user cache folders on a different volume; omitting
+    // REPLACE_EXISTING keeps every quarantine destination no-overwrite.
+    const MOVEFILE_COPY_ALLOWED: u32 = 0x2;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    let moved = unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+            source_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(std::io::Error::last_os_error())
+    } else if source.exists() {
+        Err(std::io::Error::other(
+            "Windows copied the file but could not remove the source; both copies were retained.",
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn remove_empty_dirs(dirs: &[PathBuf], root: &Path, removed: &mut u64) {
@@ -1310,15 +1377,12 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
     let mut original_wide: Vec<u16> = original.as_os_str().encode_wide().collect();
     original_wide.push(0);
 
-    // Win32 MoveFileExW with MOVEFILE_COPY_ALLOWED (0x2) and WITHOUT MOVEFILE_REPLACE_EXISTING (0x1).
-    // On the same volume, this provides an atomic rename without overwriting; across volumes, it safely
-    // copies and removes without overwriting an existing destination.
-    const MOVEFILE_COPY_ALLOWED: u32 = 0x2;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
     let res = unsafe {
         windows_sys::Win32::Storage::FileSystem::MoveFileExW(
             stored_wide.as_ptr(),
             original_wide.as_ptr(),
-            MOVEFILE_COPY_ALLOWED,
+            MOVEFILE_WRITE_THROUGH,
         )
     };
     if res != 0 {
@@ -1332,10 +1396,81 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
             original.display()
         ));
     }
+    if os_error.raw_os_error() == Some(17) {
+        return restore_cross_volume(stored, original);
+    }
     Err(format!(
         "Could not restore {}: {os_error}",
         original.display()
     ))
+}
+
+fn restore_cross_volume(stored: &Path, original: &Path) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::windows::ffi::OsStrExt;
+
+    let parent = original
+        .parent()
+        .ok_or_else(|| "Restore destination has no parent folder.".to_string())?;
+    let temp = parent.join(format!(".cyron-{}.restore", next_id("restore", seconds_now())));
+    let stored_modified = fs::metadata(stored)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+    let mut source = fs::File::open(stored)
+        .map_err(|error| format!("Could not read quarantined file {}: {error}", stored.display()))?;
+    let mut destination = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|error| format!("Could not create restore staging file {}: {error}", temp.display()))?;
+
+    let copy_result = (|| {
+        std::io::copy(&mut source, &mut destination)?;
+        if let Some(modified) = stored_modified {
+            let times = fs::FileTimes::new().set_modified(modified);
+            destination.set_times(times)?;
+        }
+        destination.flush()?;
+        destination.sync_all()
+    })();
+    drop(destination);
+    if let Err(error) = copy_result {
+        let _ = fs::remove_file(&temp);
+        return Err(format!("Could not stage restored file {}: {error}", original.display()));
+    }
+
+    let mut temp_wide: Vec<u16> = temp.as_os_str().encode_wide().collect();
+    temp_wide.push(0);
+    let mut original_wide: Vec<u16> = original.as_os_str().encode_wide().collect();
+    original_wide.push(0);
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+    let published = unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileExW(
+            temp_wide.as_ptr(),
+            original_wide.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if published == 0 {
+        let error = std::io::Error::last_os_error();
+        let _ = fs::remove_file(&temp);
+        if error.raw_os_error() == Some(80) || error.raw_os_error() == Some(183) {
+            return Err(format!(
+                "{} already exists, so the quarantined copy was kept.",
+                original.display()
+            ));
+        }
+        return Err(format!("Could not publish restored file {}: {error}", original.display()));
+    }
+
+    // The original becomes visible atomically before the manifest-scoped
+    // quarantine copy is removed. A crash can leave two complete copies.
+    fs::remove_file(stored).map_err(|error| {
+        format!(
+            "Restored {} but kept its quarantine copy because it could not be removed: {error}",
+            original.display()
+        )
+    })
 }
 
 pub fn read_manifest(dir: &Path) -> Option<BatchManifest> {
@@ -1526,6 +1661,20 @@ fn has_reparse_attribute(attributes: u32) -> bool {
     attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
+fn file_link_count(path: &Path) -> Option<u32> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+
+    let file = fs::File::open(path).ok()?;
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let read = unsafe {
+        GetFileInformationByHandle(file.as_raw_handle() as _, &mut info)
+    };
+    (read != 0).then_some(info.nNumberOfLinks)
+}
+
 fn blocked_roots() -> Vec<String> {
     let mut roots = Vec::new();
     for variable in [
@@ -1602,7 +1751,7 @@ struct WalkOutcome {
     bytes: u64,
     dir_count: u64,
     /// Retained file paths with their sizes, capped by the caller.
-    files: Vec<(PathBuf, u64)>,
+    files: Vec<(PathBuf, u64, Option<u64>, u64)>,
     dirs: Vec<PathBuf>,
     skipped: Vec<(PathBuf, String)>,
     errors: Vec<String>,
@@ -1655,6 +1804,30 @@ fn walk_target(
             root.to_path_buf(),
             "the target itself is a link or junction".into(),
         ));
+        return outcome;
+    }
+    if meta.is_file() {
+        if excluded(root) {
+            outcome
+                .skipped
+                .push((root.to_path_buf(), "excluded in Settings".into()));
+        } else if file_link_count(root) != Some(1) {
+            outcome.skipped.push((
+                root.to_path_buf(),
+                "hard-linked or unverifiable file; left in place".into(),
+            ));
+        } else {
+            outcome.file_count = 1;
+            outcome.bytes = meta.len();
+            if retain > 0 {
+                outcome.files.push((
+                    root.to_path_buf(),
+                    meta.len(),
+                    modified_at(&meta),
+                    meta.last_write_time(),
+                ));
+            }
+        }
         return outcome;
     }
     if !meta.is_dir() {
@@ -1733,7 +1906,12 @@ fn walk_target(
                 outcome.file_count += 1;
                 outcome.bytes += entry_meta.len();
                 if outcome.files.len() < retain {
-                    outcome.files.push((path, entry_meta.len()));
+                    outcome.files.push((
+                        path,
+                        entry_meta.len(),
+                        modified_at(&entry_meta),
+                        entry_meta.last_write_time(),
+                    ));
                 }
                 if outcome.file_count >= file_cap as u64 {
                     outcome.truncated = true;
@@ -1761,6 +1939,15 @@ fn describe(path: &Path, error: &std::io::Error) -> String {
         }
         _ => format!("{}: {error}", path.display()),
     }
+}
+
+fn modified_at(metadata: &fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
 }
 
 fn push_warning(warnings: &mut Vec<String>, message: String) {
@@ -1871,7 +2058,13 @@ mod tests {
 
     #[test]
     fn unknown_and_traversal_ids_are_refused() {
-        for id in ["not-a-target", "..\\Windows", "C:\\Windows\\System32", ""] {
+        for id in [
+            "not-a-target",
+            "..\\Windows",
+            "C:\\Windows\\System32",
+            "custom-dir-433a5c55736572735c416c6963655c446f63756d656e7473",
+            "",
+        ] {
             let error = catalog_specs(&[id.to_string()]).expect_err("must refuse");
             assert!(
                 error.contains("Unknown") || error.contains("empty"),
@@ -1887,6 +2080,66 @@ mod tests {
         assert_eq!(specs.len(), 1);
         let too_many: Vec<String> = (0..=MAX_IDS).map(|_| "npm-cache".to_string()).collect();
         assert!(catalog_specs(&too_many).is_err());
+    }
+
+    #[test]
+    fn fixture_preview_reports_file_age_without_moving_source_files() {
+        let fixture = Fixture::new("preview-age");
+        let original = fixture.cache().join("a.txt");
+        let original_contents = fs::read(&original).expect("fixture source");
+        let (_, preview) = plan_specs(vec![fixture.spec()], false).expect("fixture preview");
+        let file = preview
+            .files
+            .iter()
+            .find(|file| file.path == original.to_string_lossy())
+            .expect("listed fixture file");
+        assert!(file.last_modified.is_some(), "file modification time should be measured");
+        assert_eq!(fs::read(&original).expect("source remains"), original_contents);
+    }
+
+    #[test]
+    fn cross_volume_quarantine_and_restore_round_trip_when_available() {
+        let fixture = Fixture::new("cross-volume");
+        let source_drive = fixture
+            .cache()
+            .to_string_lossy()
+            .chars()
+            .next()
+            .expect("fixture drive")
+            .to_ascii_uppercase();
+        let Some(volume) = crate::volumes::list_volumes().into_iter().find(|volume| {
+            volume.kind == "fixed"
+                && volume.mount.chars().next().is_some_and(|letter| {
+                    letter.to_ascii_uppercase() != source_drive
+                })
+        }) else {
+            return;
+        };
+        let root = PathBuf::from(format!(
+            "{}Temp\\cyron-cleanup-cross-volume-{}-{}",
+            volume.mount,
+            std::process::id(),
+            seconds_now()
+        ));
+        let quarantine_root = root.join("quarantine");
+        let (plan, _) = plan_specs(vec![fixture.spec()], false).expect("fixture plan");
+        let report = execute_plan(&plan, &quarantine_root, &AtomicBool::new(false), &|_| {})
+            .expect("cross-volume quarantine");
+        assert_eq!(report.quarantined, 2);
+        let restored = restore_batch(&quarantine_root, &report.run_id).expect("cross-volume restore");
+        assert_eq!(restored.restored, 2);
+        assert_eq!(fs::read(fixture.cache().join("a.txt")).unwrap(), b"hello");
+        assert_eq!(fs::read(fixture.nested().join("b.bin")).unwrap(), b"0123456789");
+
+        fs::create_dir_all(&quarantine_root).expect("conflict quarantine fixture");
+        let stored = quarantine_root.join("conflict.bin");
+        let original = fixture.root.join("outside").join("conflict.bin");
+        fs::write(&stored, b"quarantined bytes").expect("stored conflict source");
+        fs::write(&original, b"keep original").expect("existing restore target");
+        assert!(restore_cross_volume(&stored, &original).is_err());
+        assert_eq!(fs::read(&stored).unwrap(), b"quarantined bytes");
+        assert_eq!(fs::read(&original).unwrap(), b"keep original");
+        fs::remove_dir_all(root).expect("remove quarantine fixture");
     }
 
     #[test]
@@ -2250,6 +2503,94 @@ mod tests {
         // The unapproved intruder file must remain intact
         assert!(intruder.exists(), "files created after preview must never be moved");
         assert_eq!(fs::read(&intruder).expect("read intruder"), b"i appeared after preview");
+    }
+
+    #[test]
+    fn same_size_rewrite_after_preview_is_left_in_place() {
+        let fixture = Fixture::new("snapshot-rewrite");
+        let original = fixture.cache().join("a.txt");
+        let (plan, _) = plan_specs(vec![fixture.spec()], false).expect("plan");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&original, b"world").expect("rewrite same-size file");
+
+        let report = run(&fixture, &plan);
+        assert!(original.exists(), "changed source must not move");
+        assert_eq!(fs::read(&original).expect("source remains"), b"world");
+        assert_eq!(report.quarantined, 1);
+        assert_eq!(report.skipped, 1);
+    }
+
+    #[test]
+    fn file_created_after_empty_preview_is_left_in_place() {
+        let fixture = Fixture::new("empty-snapshot");
+        let empty = fixture.root.join("empty-cache");
+        fs::create_dir(&empty).expect("empty fixture cache");
+        let mut spec = fixture.spec();
+        spec.id = "empty-fixture-cache".into();
+        spec.path = empty.clone();
+        let (plan, preview) = plan_specs(vec![spec], false).expect("empty preview");
+        assert_eq!(preview.file_count, 0);
+
+        let late_file = empty.join("created-after-preview.tmp");
+        fs::write(&late_file, b"leave me").expect("late file");
+        let report = run(&fixture, &plan);
+        assert_eq!(report.quarantined, 0);
+        assert_eq!(report.skipped, 1);
+        assert_eq!(fs::read(late_file).expect("late file remains"), b"leave me");
+    }
+
+    #[test]
+    fn single_file_target_round_trips_without_touching_sibling() {
+        let fixture = Fixture::new("single-file");
+        let target = fixture.root.join("candidate.log");
+        let sibling = fixture.root.join("unrelated.txt");
+        fs::write(&target, b"candidate bytes").expect("candidate file");
+        fs::write(&sibling, b"keep sibling").expect("unrelated sibling");
+        let mut spec = fixture.spec();
+        spec.id = "fixture-leftover-file".into();
+        spec.label = "Fixture leftover file".into();
+        spec.path = target.clone();
+        let (plan, preview) = plan_specs(vec![spec], false).expect("single-file preview");
+        assert_eq!(preview.file_count, 1);
+        assert_eq!(preview.files[0].path, target.to_string_lossy());
+
+        let report = run(&fixture, &plan);
+        assert_eq!(report.quarantined, 1);
+        assert!(!target.exists());
+        assert_eq!(fs::read(&sibling).expect("sibling untouched"), b"keep sibling");
+        assert_eq!(restore_batch(&fixture.quarantine(), &report.run_id).unwrap().restored, 1);
+        assert_eq!(fs::read(&target).expect("single file restored"), b"candidate bytes");
+        assert_eq!(fs::read(&sibling).expect("sibling still untouched"), b"keep sibling");
+    }
+
+    #[test]
+    fn single_file_exclusions_and_hardlinks_are_left_alone() {
+        let fixture = Fixture::new("single-file-guard");
+        let excluded = fixture.root.join("excluded.log");
+        fs::write(&excluded, b"excluded").expect("excluded file");
+        let spec = CleanupSpec { path: excluded.clone(), ..fixture.spec() };
+        let (plan, preview) = plan_specs_with_exclusions(
+            vec![spec],
+            false,
+            vec![excluded.clone()],
+        )
+        .expect("excluded file preview");
+        assert_eq!(preview.file_count, 0);
+        assert_eq!(preview.skipped[0].reason, "excluded in Settings");
+        assert_eq!(run(&fixture, &plan).quarantined, 0);
+        assert!(excluded.exists());
+
+        let linked = fixture.root.join("linked.log");
+        let alias = fixture.root.join("linked-copy.log");
+        fs::write(&linked, b"shared bytes").expect("hardlink source");
+        if fs::hard_link(&linked, &alias).is_err() {
+            return;
+        }
+        let spec = CleanupSpec { path: linked.clone(), ..fixture.spec() };
+        let (_, preview) = plan_specs(vec![spec], false).expect("hardlink preview");
+        assert_eq!(preview.file_count, 0);
+        assert!(preview.skipped[0].reason.contains("hard-linked"));
+        assert_eq!(fs::read(&alias).expect("hardlink alias preserved"), b"shared bytes");
     }
 
     #[test]

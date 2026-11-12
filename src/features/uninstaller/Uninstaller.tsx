@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, invalidateInstalledApps, loadInstalledApps } from "../../lib/api";
 import { formatBytes, formatCount, formatDate, formatDateTime, truncateMiddle } from "../../lib/format";
 import { useAsync, useDebouncedValue } from "../../lib/hooks";
@@ -28,7 +29,7 @@ import {
   IconTrash,
 } from "../../components/Icons";
 import { AppDrawer } from "./AppDrawer";
-import { UninstallWizard } from "./UninstallWizard";
+import { UninstallWizard, type UninstallMode } from "./UninstallWizard";
 import "./uninstaller.css";
 
 type ScopeFilter = "all" | "machine" | "user";
@@ -97,6 +98,12 @@ export function Uninstaller({
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [selected, setSelected] = useState<InstalledApp | null>(null);
   const [wizardApp, setWizardApp] = useState<InstalledApp | null>(null);
+  const [wizardInitialMode, setWizardInitialMode] = useState<UninstallMode | undefined>(undefined);
+
+  const openWizard = (app: InstalledApp, initialMode?: UninstallMode) => {
+    setWizardApp(app);
+    setWizardInitialMode(initialMode);
+  };
 
   // Batch selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -104,6 +111,8 @@ export function Uninstaller({
   const [batchQuiet, setBatchQuiet] = useState(true);
   const [batchConfirm, setBatchConfirm] = useState(false);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [batchCanceling, setBatchCanceling] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ completed: number; total: number; currentApp: string } | null>(null);
   const [batchPlan, setBatchPlan] = useState<BatchUninstallPlan | null>(null);
   const [batchPreparing, setBatchPreparing] = useState(false);
   const [batchReport, setBatchReport] = useState<BatchUninstallReport | null>(null);
@@ -210,7 +219,7 @@ export function Uninstaller({
   };
 
   const toggleSelectAll = () => {
-    const selectable = visible.filter((a) => !a.isProtected);
+    const selectable = visible.filter((a) => !a.isProtected && a.source !== "store");
     if (selectedIds.size === selectable.length) {
       setSelectedIds(new Set());
     } else {
@@ -231,9 +240,13 @@ export function Uninstaller({
   }, [apps, selectedIds]);
 
   useEffect(() => {
-    if (!batchOpen || selectedApps.length === 0) {
+    if (!batchOpen) {
       setBatchPlan(null);
       setBatchConfirm(false);
+      return;
+    }
+    if (selectedApps.length === 0) {
+      if (!batchReport) setBatchPlan(null);
       return;
     }
     let cancelled = false;
@@ -256,24 +269,58 @@ export function Uninstaller({
     return () => {
       cancelled = true;
     };
-  }, [batchOpen, selectedIds, batchQuiet]);
+  }, [batchOpen, selectedIds, batchQuiet, batchReport]);
 
   const runBatchUninstall = async () => {
     if (!batchPlan || !batchConfirm || batchRunning) return;
     setBatchRunning(true);
     setBatchError(null);
     setBatchReport(null);
+    setBatchProgress(null);
     try {
       const report = await api.executeBatchUninstall(batchPlan.planId);
       setBatchReport(report);
       invalidateInstalledApps();
       inventory.reload();
+      setSelectedIds(new Set());
     } catch (err) {
       setBatchError(errorMessage(err));
     } finally {
       setBatchRunning(false);
     }
   };
+
+  const stopBatchAfterCurrent = async () => {
+    if (!batchPlan || batchCanceling) return;
+    setBatchCanceling(true);
+    setBatchError(null);
+    try {
+      await api.cancelBatchUninstall(batchPlan.planId);
+    } catch (err) {
+      setBatchError(errorMessage(err));
+    } finally {
+      setBatchCanceling(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!batchRunning || !batchPlan) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    listen<{ planId: string; completed: number; total: number; currentApp: string }>(
+      "cyron-batch-uninstall-progress",
+      ({ payload }) => {
+        if (payload.planId === batchPlan.planId) setBatchProgress(payload);
+      },
+    ).then((stop) => {
+      if (active) unlisten = stop;
+      else stop();
+    }).catch((err) => setBatchError(errorMessage(err)));
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [batchRunning, batchPlan?.planId]);
 
   return (
     <>
@@ -555,8 +602,9 @@ export function Uninstaller({
                       <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
-                          disabled={app.isProtected}
+                          disabled={app.isProtected || app.source === "store"}
                           checked={selectedIds.has(app.id)}
+                          title={app.source === "store" ? "Store apps must be removed through Windows Settings or winget" : undefined}
                           onChange={() => {}}
                           onClick={(e) => toggleSelectRow(app.id, e)}
                         />
@@ -594,8 +642,12 @@ export function Uninstaller({
                           <Badge tone={app.source === "store" ? "accent" : app.source === "steam" ? "accent" : app.source === "portable" ? "caution" : "neutral"}>
                             {app.source === "store" ? "Store" : app.source === "steam" ? "Steam" : app.source === "portable" ? "Portable" : (app.scope === "machine" ? "Machine" : "User")}
                           </Badge>
-                          {app.uninstallSupport === "missing" && (
+                          {app.source === "store" ? (
+                            <Badge tone="accent">AppX</Badge>
+                          ) : app.uninstallSupport === "missing" ? (
                             <Badge tone="danger">Broken</Badge>
+                          ) : (
+                            <Badge tone="safe">Safe</Badge>
                           )}
                           <span className="un-arch">{app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : ""}</span>
                         </div>
@@ -603,15 +655,23 @@ export function Uninstaller({
                       <td style={{ textAlign: "right", paddingRight: 10 }}>
                         <Button
                           size="sm"
-                          variant={app.uninstallSupport === "missing" ? "secondary" : "danger"}
+                          variant={app.source === "store" || app.uninstallSupport === "missing" ? "secondary" : "danger"}
                           icon={<IconTrash size={12} />}
                           disabled={app.isProtected}
+                          title={
+                            app.source === "store"
+                              ? "View Windows Settings removal guidance"
+                              : app.uninstallSupport === "missing"
+                              ? "Clean Broken Registration Entry"
+                              : "Safe Vendor Uninstall with Residual Scan"
+                          }
                           onClick={(e) => {
                             e.stopPropagation();
-                            setWizardApp(app);
+                            if (app.source === "store") setSelected(app);
+                            else openWizard(app, app.uninstallSupport === "missing" ? "forced" : "standard");
                           }}
                         >
-                          {app.uninstallSupport === "missing" ? "Clean" : "Uninstall"}
+                          {app.source === "store" ? "Guide" : app.uninstallSupport === "missing" ? "Clean" : "Uninstall"}
                         </Button>
                       </td>
                     </tr>
@@ -627,17 +687,52 @@ export function Uninstaller({
               style={{ top: contextMenu.y, left: contextMenu.x }}
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                type="button"
-                className="un-context-item un-context-item--danger"
-                onClick={() => {
-                  setWizardApp(contextMenu.app);
-                  setContextMenu(null);
-                }}
-              >
-                <IconTrash size={14} />
-                {contextMenu.app.uninstallSupport === "missing" ? "Force Remove Application" : "Uninstall Application"}
-              </button>
+              {contextMenu.app.source === "store" ? (
+                <button
+                  type="button"
+                  className="un-context-item"
+                  onClick={() => {
+                    setSelected(contextMenu.app);
+                    setContextMenu(null);
+                  }}
+                >
+                  Store removal guidance
+                </button>
+              ) : contextMenu.app.uninstallSupport === "missing" ? (
+                <button
+                  type="button"
+                  className="un-context-item un-context-item--danger"
+                  onClick={() => {
+                    openWizard(contextMenu.app, "forced");
+                    setContextMenu(null);
+                  }}
+                >
+                  <IconTrash size={14} /> Clean Broken Entry
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="un-context-item un-context-item--danger"
+                    onClick={() => {
+                      openWizard(contextMenu.app, "standard");
+                      setContextMenu(null);
+                    }}
+                  >
+                    <IconTrash size={14} /> Safe Uninstall
+                  </button>
+                  <button
+                    type="button"
+                    className="un-context-item"
+                    onClick={() => {
+                      openWizard(contextMenu.app, "forced");
+                      setContextMenu(null);
+                    }}
+                  >
+                    <IconTrash size={14} /> Forced Removal
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 className="un-context-item"
@@ -702,7 +797,10 @@ export function Uninstaller({
                 size="sm"
                 variant="primary"
                 icon={<IconTrash size={14} />}
-                onClick={() => setBatchOpen(true)}
+                onClick={() => {
+                  setBatchReport(null);
+                  setBatchOpen(true);
+                }}
               >
                 Batch Uninstall…
               </Button>
@@ -730,11 +828,17 @@ export function Uninstaller({
 
       {/* Guided Uninstall Wizard */}
       <UninstallWizard
+        key={wizardApp?.id ?? "closed"}
         app={wizardApp}
         isOpen={Boolean(wizardApp)}
-        onClose={() => setWizardApp(null)}
+        initialMode={wizardInitialMode}
+        onClose={() => {
+          setWizardApp(null);
+          setWizardInitialMode(undefined);
+        }}
         onComplete={() => {
           setWizardApp(null);
+          setWizardInitialMode(undefined);
           invalidateInstalledApps();
           inventory.reload();
         }}
@@ -746,9 +850,19 @@ export function Uninstaller({
           open
           title="Batch Uninstall"
           subtitle={`Sequential execution for ${selectedApps.length} applications`}
-          onClose={() => setBatchOpen(false)}
+          onClose={() => { if (!batchRunning) setBatchOpen(false); }}
           footer={
             <>
+              {batchRunning && (
+                <Button
+                  variant="secondary"
+                  loading={batchCanceling}
+                  disabled={batchCanceling}
+                  onClick={stopBatchAfterCurrent}
+                >
+                  Stop after current app
+                </Button>
+              )}
               <Button
                 variant="danger"
                 icon={<IconPlay size={14} />}
@@ -766,9 +880,15 @@ export function Uninstaller({
         >
           <div className="stack" style={{ gap: 12 }}>
             <Banner tone="info">
-              Applications are uninstalled sequentially. Uninstaller exit codes and failures are
-              isolated so one failure does not halt the queue.
+              Applications are uninstalled sequentially. A failure does not halt the queue; stopping
+              takes effect after the current application finishes.
             </Banner>
+
+            {batchRunning && batchProgress && (
+              <Banner tone="accent">
+                {batchProgress.completed} of {batchProgress.total} finished · Now running {batchProgress.currentApp}
+              </Banner>
+            )}
 
             {batchPreparing ? (
               <div className="stack" style={{ gap: 8, padding: "12px 0" }}>
@@ -800,7 +920,7 @@ export function Uninstaller({
                                 tone={
                                   itemRes.status === "completed"
                                     ? "safe"
-                                    : itemRes.status === "restart_required"
+                                    : itemRes.status === "restart_required" || itemRes.status === "remaining" || itemRes.status === "cancelled"
                                     ? "caution"
                                     : "danger"
                                 }
@@ -871,15 +991,16 @@ export function Uninstaller({
             {batchReport && (
               <Banner
                 tone={
-                  batchReport.failed === 0
+                  batchReport.failed === 0 && batchReport.remaining === 0 && batchReport.cancelled === 0 && batchReport.restartRequired === 0
                     ? "safe"
-                    : batchReport.completed > 0
+                    : batchReport.completed > 0 || batchReport.remaining > 0 || batchReport.cancelled > 0
                     ? "caution"
                     : "danger"
                 }
               >
-                <strong>Batch complete:</strong> {batchReport.completed} completed,{" "}
-                {batchReport.restartRequired} restart required, {batchReport.failed} failed.
+                <strong>Batch finished:</strong> {batchReport.completed} confirmed removed, {" "}
+                {batchReport.remaining} still registered, {batchReport.restartRequired} restart required, {" "}
+                {batchReport.cancelled} cancelled or not run, {batchReport.failed} failed.
               </Banner>
             )}
 

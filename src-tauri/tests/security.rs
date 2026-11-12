@@ -175,12 +175,7 @@ fn guard_rejects_roots_and_ancestors_of_protected_data() {
         );
     }
 
-    for unapproved in [
-        r"C:\Windows",
-        r"C:\Program Files",
-        r"C:\Users",
-        r"D:\Games",
-    ] {
+    for unapproved in [r"C:\Windows", r"C:\Program Files", r"C:\Users", r"D:\Games"] {
         assert!(
             cleanup::guard_path(Path::new(unapproved)).is_err(),
             "guard must reject unapproved top-level {unapproved}"
@@ -208,7 +203,10 @@ fn every_cleanup_location_passes_the_guard() {
         .filter(|entry| cleanup::catalog_specs(&[entry.id.to_string()]).is_ok())
         .map(|entry| entry.id.to_string())
         .collect();
-    assert!(existing.len() >= 20, "catalog should resolve most locations");
+    assert!(
+        existing.len() >= 20,
+        "catalog should resolve most locations"
+    );
 
     let specs = cleanup::catalog_specs(&existing).expect("cleanup ids resolve");
     let mut guarded = 0;
@@ -222,7 +220,10 @@ fn every_cleanup_location_passes_the_guard() {
         });
         guarded += 1;
     }
-    assert!(guarded >= 3, "guard should accept the real catalog, got {guarded}");
+    assert!(
+        guarded >= 3,
+        "guard should accept the real catalog, got {guarded}"
+    );
 }
 
 #[test]
@@ -270,7 +271,10 @@ fn read_only_mode_blocks_execution() {
         error.to_lowercase().contains("read-only"),
         "unexpected error: {error}"
     );
-    assert!(target.join("a.bin").exists(), "the file must still be there");
+    assert!(
+        target.join("a.bin").exists(),
+        "the file must still be there"
+    );
 }
 
 #[test]
@@ -295,9 +299,13 @@ fn fixture_cleanup_quarantines_restores_and_purges() {
     assert!(!preview.read_only);
 
     let cancel = Arc::new(AtomicBool::new(false));
-    let report = cleanup::execute_plan(&plan, &quarantine, &cancel, &|_| {})
-        .expect("execute succeeds");
-    assert!(report.failed == 0, "unexpected failures: {:?}", report.errors);
+    let report =
+        cleanup::execute_plan(&plan, &quarantine, &cancel, &|_| {}).expect("execute succeeds");
+    assert!(
+        report.failed == 0,
+        "unexpected failures: {:?}",
+        report.errors
+    );
     assert_eq!(report.quarantined, 3);
     assert_eq!(report.files, 3);
     assert_eq!(report.bytes, 512 + 1_024 + 7);
@@ -320,8 +328,14 @@ fn fixture_cleanup_quarantines_restores_and_purges() {
     let restore = cleanup::restore_batch(&quarantine, &batch.run_id).expect("restore succeeds");
     assert_eq!(restore.restored, 3);
     assert_eq!(restore.failed, 0);
-    assert_eq!(fs::read(nested.join("one.bin")).expect("restored"), vec![0x5a; 512]);
-    assert_eq!(fs::read(target.join("three.tmp")).expect("restored"), vec![0x5a; 7]);
+    assert_eq!(
+        fs::read(nested.join("one.bin")).expect("restored"),
+        vec![0x5a; 512]
+    );
+    assert_eq!(
+        fs::read(target.join("three.tmp")).expect("restored"),
+        vec![0x5a; 7]
+    );
 
     // Restore removes the batch, so purge now has nothing to report but must
     // not error on a missing batch.
@@ -412,10 +426,7 @@ fn cleanup_never_moves_links_or_directories() {
         cleanup::plan_specs(vec![fixture_spec(&target)], false).expect("plan builds");
     assert_eq!(preview.file_count, 2);
     assert!(
-        preview
-            .files
-            .iter()
-            .all(|file| file.path.ends_with(".bin")),
+        preview.files.iter().all(|file| file.path.ends_with(".bin")),
         "only files are planned, never directories"
     );
 
@@ -438,12 +449,17 @@ fn destructive_calls_stay_inside_reviewed_modules() {
     let forbidden_everywhere = [
         "remove_dir_all(",
         "taskkill",
-        "powershell",
         "SetFileAttributes",
         "WriteFile(",
         "ShellExecute",
     ];
-    let allowed_destructive = ["cleanup.rs", "history.rs", "leftovers.rs", "explorer.rs"];
+    let allowed_destructive = [
+        "cleanup.rs",
+        "history.rs",
+        "leftovers.rs",
+        "explorer.rs",
+        "analyzer_actions.rs",
+    ];
     let mut command_invocations = Vec::new();
 
     for file in &files {
@@ -469,10 +485,21 @@ fn destructive_calls_stay_inside_reviewed_modules() {
                 );
             }
 
+            // The command parser names forbidden shell wrappers; none are launched.
+            if lower.contains("powershell") {
+                assert_eq!(
+                    name, "uninstall.rs",
+                    "powershell references belong only to uninstaller command validation, found in {}:{}",
+                    file.display(),
+                    line_number + 1
+                );
+            }
+
             // TerminateProcess is restricted strictly to process.rs
             if lower.contains("terminateprocess(") {
                 assert_eq!(
-                    name, "process.rs",
+                    name,
+                    "process.rs",
                     "TerminateProcess is only permitted in process.rs, found in {}:{}",
                     file.display(),
                     line_number + 1
@@ -480,7 +507,10 @@ fn destructive_calls_stay_inside_reviewed_modules() {
             }
 
             // Registry deletion is restricted strictly to leftovers.rs (with backup) and explorer.rs (app shell verbs)
-            if lower.contains(".delete_subkey") || lower.contains("regkey::delete_") || lower.contains("regdelete") {
+            if lower.contains(".delete_subkey")
+                || lower.contains("regkey::delete_")
+                || lower.contains("regdelete")
+            {
                 assert!(
                     name == "leftovers.rs" || name == "explorer.rs",
                     "Registry deletion is only permitted in leftovers.rs (with prior backup) or explorer.rs (unregistration), found in {}:{}",
@@ -490,8 +520,15 @@ fn destructive_calls_stay_inside_reviewed_modules() {
             }
 
             // Shell command invocations
-            if code.contains("cmd.exe") && !name.ends_with("uninstall.rs") && !name.ends_with("security.rs") {
-                panic!("cmd.exe reference in {}:{}", file.display(), line_number + 1);
+            if code.contains("cmd.exe")
+                && !name.ends_with("uninstall.rs")
+                && !name.ends_with("security.rs")
+            {
+                panic!(
+                    "cmd.exe reference in {}:{}",
+                    file.display(),
+                    line_number + 1
+                );
             }
 
             if code.contains("Command::new(") {
@@ -508,10 +545,25 @@ fn destructive_calls_stay_inside_reviewed_modules() {
                     );
                 }
             }
+            if [
+                "MoveFileExW(",
+                "SetFileInformationByHandle(",
+                "DeleteFileW(",
+            ]
+            .iter()
+            .any(|operation| code.contains(operation))
+            {
+                assert!(
+                    allowed_destructive.contains(&name.as_str()),
+                    "Win32 mutation must stay in a reviewed mutation module: {}:{}",
+                    file.display(),
+                    line_number + 1
+                );
+            }
         }
     }
 
-    // Only 2 reviewed process execution paths:
+    // Only two reviewed process execution paths:
     // 1. Explorer in commands.rs (to reveal folders).
     // 2. Validated uninstaller binary in uninstall.rs.
     assert_eq!(
@@ -520,11 +572,15 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         "only Explorer and validated uninstaller binaries may be launched: {command_invocations:?}"
     );
     assert!(
-        command_invocations.iter().any(|(f, _, cmd)| f == "commands.rs" && cmd.contains("explorer.exe")),
+        command_invocations
+            .iter()
+            .any(|(f, _, cmd)| f == "commands.rs" && cmd.contains("explorer.exe")),
         "commands.rs must launch explorer.exe"
     );
     assert!(
-        command_invocations.iter().any(|(f, _, cmd)| f == "uninstall.rs" && cmd.contains("&cmd.executable")),
+        command_invocations
+            .iter()
+            .any(|(f, _, cmd)| f == "uninstall.rs" && cmd.contains("&cmd.executable")),
         "uninstall.rs must launch validated uninstaller"
     );
 }
@@ -603,8 +659,14 @@ fn scanner_does_not_follow_a_junction() {
 
     let result = scan_path(root.path());
     let _ = fs::remove_dir(&junction);
-    assert_eq!(result.total_size, 73, "bytes beyond the junction are excluded");
-    assert!(result.skipped_reparse >= 1, "the junction is reported as skipped");
+    assert_eq!(
+        result.total_size, 73,
+        "bytes beyond the junction are excluded"
+    );
+    assert!(
+        result.skipped_reparse >= 1,
+        "the junction is reported as skipped"
+    );
 }
 
 #[test]
@@ -621,7 +683,11 @@ fn hard_links_are_counted_once_for_allocated_bytes() {
     let result = scan_path(root.path());
     assert_eq!(result.file_count, 2);
     assert_eq!(result.deduped_files, 1);
-    assert_eq!(result.total_size, 1024 * 1024, "logical size counts both names");
+    assert_eq!(
+        result.total_size,
+        1024 * 1024,
+        "logical size counts both names"
+    );
     assert!(result.total_allocated < result.total_size);
 }
 
@@ -677,7 +743,10 @@ fn a_junction_swapped_in_after_the_preview_moves_nothing() {
     let report = cleanup::execute_plan(&plan, &quarantine, &cancel, &|_| {}).expect("execute");
     let _ = fs::remove_dir(&nested);
 
-    assert_eq!(report.quarantined, 0, "nothing behind the junction may move");
+    assert_eq!(
+        report.quarantined, 0,
+        "nothing behind the junction may move"
+    );
     assert_eq!(
         fs::read(&secret).expect("outside file survives"),
         secret_bytes,
@@ -754,7 +823,10 @@ fn critical_system_processes_cannot_be_terminated() {
         Some("C:\\Windows\\System32\\custom.exe")
     ));
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let snapshot = process::StoredProcessSnapshot {
         app_id: "test-app".into(),
         install_location: "C:\\Program Files\\TestApp".into(),
@@ -792,7 +864,10 @@ fn critical_system_processes_cannot_be_terminated() {
 fn process_termination_rejects_unlisted_pids_and_mismatched_apps() {
     use cyron_lib::process;
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let snapshot = process::StoredProcessSnapshot {
         app_id: "app-target".into(),
         install_location: "C:\\Program Files\\TargetApp".into(),
@@ -809,16 +884,26 @@ fn process_termination_rejects_unlisted_pids_and_mismatched_apps() {
     };
 
     // 1. Mismatched app id
-    let res_mismatch = process::terminate_processes_verified("different-app", &snapshot, &[12345], false);
+    let res_mismatch =
+        process::terminate_processes_verified("different-app", &snapshot, &[12345], false);
     assert_eq!(res_mismatch.len(), 1);
     assert!(!res_mismatch[0].success);
-    assert!(res_mismatch[0].error.as_ref().unwrap().contains("does not belong to this application"));
+    assert!(res_mismatch[0]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("does not belong to this application"));
 
     // 2. Unlisted arbitrary PID injection attempt
-    let res_unlisted = process::terminate_processes_verified("app-target", &snapshot, &[99999], false);
+    let res_unlisted =
+        process::terminate_processes_verified("app-target", &snapshot, &[99999], false);
     assert_eq!(res_unlisted.len(), 1);
     assert!(!res_unlisted[0].success);
-    assert!(res_unlisted[0].error.as_ref().unwrap().contains("was not found in the verified process snapshot"));
+    assert!(res_unlisted[0]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("was not found in the verified process snapshot"));
 }
 
 #[test]
@@ -829,13 +914,15 @@ fn uninstaller_runner_rejects_arbitrary_shell_commands() {
     assert!(!shell_cmd.is_valid);
     assert!(shell_cmd.rejection_reason.unwrap().contains("refused"));
 
-    let ps_cmd = uninstall::parse_uninstall_command("powershell.exe -NoProfile -Command Remove-Item C:\\");
+    let ps_cmd =
+        uninstall::parse_uninstall_command("powershell.exe -NoProfile -Command Remove-Item C:\\");
     assert!(!ps_cmd.is_valid);
 
     let empty_cmd = uninstall::parse_uninstall_command("   ");
     assert!(!empty_cmd.is_valid);
 
-    let msi_cmd = uninstall::parse_uninstall_command("msiexec.exe /I{11111111-2222-3333-4444-555555555555}");
+    let msi_cmd =
+        uninstall::parse_uninstall_command("msiexec.exe /I{11111111-2222-3333-4444-555555555555}");
     assert!(msi_cmd.is_valid);
     assert!(msi_cmd.is_msi);
     assert!(msi_cmd.arguments.iter().any(|arg| arg.starts_with("/x")));
@@ -857,9 +944,15 @@ fn leftover_scanner_guards_system_roots_and_user_profiles() {
     }
 
     // Shared vendor protection
-    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software\\Microsoft"));
-    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software\\Google"));
-    assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software\\Apple"));
+    assert!(!leftovers::is_safe_to_delete_reg_key(
+        "HKCU\\Software\\Microsoft"
+    ));
+    assert!(!leftovers::is_safe_to_delete_reg_key(
+        "HKCU\\Software\\Google"
+    ));
+    assert!(!leftovers::is_safe_to_delete_reg_key(
+        "HKCU\\Software\\Apple"
+    ));
     assert!(!leftovers::is_safe_to_delete_reg_key("HKCU\\Software"));
 }
 
@@ -889,13 +982,20 @@ fn leftover_cleanup_creates_registry_backup_before_deletion() {
         app_id: "test-app".into(),
         app_name: "Test App".into(),
         candidates,
-        expires_at: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + 600,
+        expires_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 600,
     };
 
     // Attempting cleanup on nonexistent key creates backup file or handles safely
     let res = leftovers::clean_leftovers(&plan, &["reg-1".to_string()], &quarantine);
     // Since nonexistent key open fails in winreg, it aborts to protect registry
-    assert!(res.is_err(), "Nonexistent key backup aborts residual cleanup cleanly");
+    assert!(
+        res.is_err(),
+        "Nonexistent key backup aborts residual cleanup cleanly"
+    );
 }
 
 #[test]
@@ -907,27 +1007,29 @@ fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
     assert!(uninstall::create_batch_uninstall_plan(&[], false).is_err());
 
     // 2. Over 32 apps is rejected
-    let many_apps: Vec<InstalledApp> = (0..35).map(|i| InstalledApp {
-        id: format!("app-{i}"),
-        name: format!("App {i}"),
-        version: None,
-        publisher: None,
-        install_date: None,
-        estimated_size: None,
-        install_location: None,
-        uninstall_string: Some("C:\\App\\uninst.exe".into()),
-        quiet_uninstall_string: None,
-        display_icon: None,
-        hive: "user-64".into(),
-        scope: "user".into(),
-        architecture: "x64".into(),
-        is_protected: false,
-        source: "win32".into(),
-        uninstall_support: "standard".into(),
-        confidence: "confirmed".into(),
-        detection_reason: None,
-        registry_key_name: None,
-    }).collect();
+    let many_apps: Vec<InstalledApp> = (0..35)
+        .map(|i| InstalledApp {
+            id: format!("app-{i}"),
+            name: format!("App {i}"),
+            version: None,
+            publisher: None,
+            install_date: None,
+            estimated_size: None,
+            install_location: None,
+            uninstall_string: Some("C:\\App\\uninst.exe".into()),
+            quiet_uninstall_string: None,
+            display_icon: None,
+            hive: "user-64".into(),
+            scope: "user".into(),
+            architecture: "x64".into(),
+            is_protected: false,
+            source: "win32".into(),
+            uninstall_support: "standard".into(),
+            confidence: "confirmed".into(),
+            detection_reason: None,
+            registry_key_name: None,
+        })
+        .collect();
     assert!(uninstall::create_batch_uninstall_plan(&many_apps, false).is_err());
 
     // 3. Selection with shell wrappers only is rejected
@@ -959,7 +1061,10 @@ fn batch_uninstall_plan_requires_valid_commands_and_bounds_count() {
 fn process_creation_time_fails_closed_when_unverified() {
     use cyron_lib::process;
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     // Snapshot with creation_time = 0 (unverified)
     let snapshot = process::StoredProcessSnapshot {
         app_id: "test-app".into(),
@@ -976,11 +1081,15 @@ fn process_creation_time_fails_closed_when_unverified() {
         }],
     };
 
-    let results = process::terminate_processes_verified("test-app", &snapshot, &[std::process::id()], false);
+    let results =
+        process::terminate_processes_verified("test-app", &snapshot, &[std::process::id()], false);
     assert_eq!(results.len(), 1);
     assert!(!results[0].success);
     // Must be rejected because creation time 0 is invalid/unverified
-    assert!(results[0].error.as_ref().unwrap().contains("recycled") || results[0].error.as_ref().unwrap().contains("creation time"));
+    assert!(
+        results[0].error.as_ref().unwrap().contains("recycled")
+            || results[0].error.as_ref().unwrap().contains("creation time")
+    );
 }
 
 #[test]
@@ -1006,7 +1115,11 @@ fn registry_backup_verification_detects_malformed_and_empty_files() {
 
     // Malformed hex bytes
     let bad_hex_reg = fixture.path().join("bad_hex.reg");
-    fs::write(&bad_hex_reg, "Windows Registry Editor Version 5.00\r\n\r\n[HKCU\\Software\\Foo]\r\n\"v\"=hex:zz,yy\r\n").expect("write bad hex");
+    fs::write(
+        &bad_hex_reg,
+        "Windows Registry Editor Version 5.00\r\n\r\n[HKCU\\Software\\Foo]\r\n\"v\"=hex:zz,yy\r\n",
+    )
+    .expect("write bad hex");
     assert!(leftovers::verify_registry_backup(&bad_hex_reg).is_err());
 }
 
@@ -1015,11 +1128,16 @@ fn concurrent_hunter_and_uninstaller_snapshots_stay_isolated() {
     use cyron_lib::hunter;
     use cyron_lib::process;
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
 
     // 1. Establish an Uninstaller snapshot in application process snapshots
-    let mut uninstaller_proc_snapshots: std::collections::HashMap<String, process::StoredProcessSnapshot> =
-        std::collections::HashMap::new();
+    let mut uninstaller_proc_snapshots: std::collections::HashMap<
+        String,
+        process::StoredProcessSnapshot,
+    > = std::collections::HashMap::new();
     let uninstaller_app_id = "machine-64|Google Chrome".to_string();
     let original_uninstaller_snap = process::StoredProcessSnapshot {
         app_id: uninstaller_app_id.clone(),
@@ -1035,7 +1153,10 @@ fn concurrent_hunter_and_uninstaller_snapshots_stay_isolated() {
             creation_time: 987654321,
         }],
     };
-    uninstaller_proc_snapshots.insert(uninstaller_app_id.clone(), original_uninstaller_snap.clone());
+    uninstaller_proc_snapshots.insert(
+        uninstaller_app_id.clone(),
+        original_uninstaller_snap.clone(),
+    );
 
     // 2. Hunter targets a window for the same app or different app during polling
     let hunter_target_token = "hunter-target-token-999-1-54321".to_string();
@@ -1055,10 +1176,16 @@ fn concurrent_hunter_and_uninstaller_snapshots_stay_isolated() {
 
     let mut hunter_proc_snapshots = std::collections::HashMap::new();
     let mut hunter_app_snapshots = std::collections::HashMap::new();
-    hunter::register_target_in_state(&hunter_target, &mut hunter_proc_snapshots, &mut hunter_app_snapshots);
+    hunter::register_target_in_state(
+        &hunter_target,
+        &mut hunter_proc_snapshots,
+        &mut hunter_app_snapshots,
+    );
 
     // 3. Verify that the Uninstaller snapshot was NEVER overwritten or modified!
-    let retained_snap = uninstaller_proc_snapshots.get(&uninstaller_app_id).expect("uninstaller snapshot must still exist");
+    let retained_snap = uninstaller_proc_snapshots
+        .get(&uninstaller_app_id)
+        .expect("uninstaller snapshot must still exist");
     assert_eq!(retained_snap.processes.len(), 1);
     assert_eq!(retained_snap.processes[0].pid, 12345);
     assert_eq!(retained_snap.processes[0].creation_time, 987654321);
@@ -1066,7 +1193,9 @@ fn concurrent_hunter_and_uninstaller_snapshots_stay_isolated() {
 
     // 4. Verify that Hunter stored its snapshot in the isolated hunter map under its unique token
     assert!(hunter_proc_snapshots.contains_key(&hunter_target_token));
-    let hunter_snap = hunter_proc_snapshots.get(&hunter_target_token).expect("hunter snapshot must exist");
+    let hunter_snap = hunter_proc_snapshots
+        .get(&hunter_target_token)
+        .expect("hunter snapshot must exist");
     assert_eq!(hunter_snap.processes[0].pid, 54321);
     assert_eq!(hunter_snap.processes[0].creation_time, 123456789);
 }

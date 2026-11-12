@@ -1,4 +1,5 @@
 pub mod apps;
+pub mod analyzer_actions;
 pub mod caches;
 pub mod cleanup;
 pub mod commands;
@@ -25,12 +26,14 @@ use std::sync::{Arc, Mutex};
 /// Tracks in-flight scans so the UI can cancel them, plus the single-use
 /// cleanup and uninstallation plans a preview hands back and the backend read-only switch.
 pub struct AppState {
+    pub analyzer_actions: Arc<analyzer_actions::AnalyzerActionState>,
     pub scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub duplicate_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub plans: Arc<Mutex<HashMap<String, cleanup::CleanupPlan>>>,
     pub cleanup_jobs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredUninstallPlan>>>,
     pub batch_uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredBatchUninstallPlan>>>,
+    pub batch_uninstall_jobs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub hunter_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
@@ -49,12 +52,14 @@ pub struct AppState {
 impl Default for AppState {
     fn default() -> Self {
         Self {
+            analyzer_actions: Arc::default(),
             scans: Arc::default(),
             duplicate_scans: Arc::default(),
             plans: Arc::default(),
             cleanup_jobs: Arc::default(),
             uninstall_plans: Arc::default(),
             batch_uninstall_plans: Arc::default(),
+            batch_uninstall_jobs: Arc::default(),
             process_snapshots: Arc::default(),
             hunter_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
@@ -82,8 +87,12 @@ pub fn run() {
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::list_installed_apps,
+            commands::list_removed_apps,
             commands::list_volumes,
             commands::list_caches,
+            commands::prepare_analyzer_action,
+            commands::execute_analyzer_action,
+            commands::cancel_analyzer_action,
             commands::start_scan,
             commands::cancel_scan,
             commands::start_duplicate_scan,
@@ -95,6 +104,7 @@ pub fn run() {
             commands::get_cleanup_mode,
             commands::set_cleanup_mode,
             commands::preview_cleanup,
+            commands::preview_remnant_cleanup,
             commands::start_cleanup,
             commands::list_quarantine,
             commands::restore_quarantine,
@@ -106,9 +116,11 @@ pub fn run() {
             commands::terminate_app_processes,
             commands::parse_uninstall_command,
             commands::execute_uninstall,
+            commands::uninstall_store_app,
             commands::scan_app_leftovers,
             commands::clean_app_leftovers,
             commands::execute_batch_uninstall,
+            commands::cancel_batch_uninstall,
             commands::get_startup_route,
             commands::get_explorer_integration_status,
             commands::set_explorer_integration,
@@ -121,6 +133,8 @@ pub fn run() {
             commands::snapshot_app_identity,
             commands::prepare_broken_inventory_cleanup,
             commands::execute_broken_inventory_cleanup,
+            commands::prepare_forced_removal_cleanup,
+            commands::execute_forced_removal_cleanup,
             commands::restore_registry_backup,
             commands::resolve_cursor_target,
             commands::get_system_specs,

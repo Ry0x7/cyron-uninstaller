@@ -9,6 +9,7 @@ src-tauri/target/
 
 # Internal agent runtime data (sessions, checkpoints) never belongs in the repo.
 .chryypt/
+.unlazy/
 
 # Local scratch
 *.log
