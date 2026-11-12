@@ -26,7 +26,7 @@ import {
   IconLock,
   IconRefresh,
 } from "../../components/Icons";
-import { api, errorMessage, invalidateCaches, loadCaches } from "../../lib/api";
+import { api, errorMessage, invalidateCaches } from "../../lib/api";
 import {
   CLEANUP_GROUPS,
   canConfirmCleanup,
@@ -57,7 +57,9 @@ import {
   type CleanupReport,
   type QuarantineBatch,
   type Risk,
+  type VolumeInfo,
 } from "../../lib/types";
+import { CleanerRemnants } from "./CleanerRemnants";
 import "./cleaner.css";
 
 type RiskFilter = "all" | Risk;
@@ -103,6 +105,8 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
   const { settings } = useSettings();
   const exclusions = settings.exclusions;
   const [inventory, setInventory] = useState<CacheInventory | null>(null);
+  const [volumes, setVolumes] = useState<VolumeInfo[]>([]);
+  const [scanDrives, setScanDrives] = useState<string[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,6 +153,7 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
 
   const mounted = useRef(true);
   const request = useRef(0);
+  const scanDrivesRef = useRef<string[]>([]);
   const previewRequest = useRef(0);
   const runningRef = useRef(false);
   const activeRun = useRef<string | null>(null);
@@ -164,12 +169,12 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
     };
   }, []);
 
-  const load = useCallback(async (force: boolean) => {
+  const load = useCallback(async (force: boolean, driveLetters = scanDrivesRef.current) => {
     const id = ++request.current;
     if (force) setRefreshing(true);
     else setStatus("loading");
     try {
-      const data = await loadCaches(force);
+      const data = await api.listCaches(driveLetters);
       if (!mounted.current || request.current !== id) return;
       setInventory(data);
       setError(null);
@@ -220,11 +225,41 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
   }, []);
 
   useEffect(() => {
-    void load(false);
+    void api.listVolumes().then((found) => {
+      if (!mounted.current) return;
+      const local = found.filter((volume) => volume.kind === "fixed" || volume.kind === "removable");
+      const letters = local.map((volume) => volume.mount.slice(0, 1).toUpperCase());
+      setVolumes(local);
+      setScanDrives(letters);
+      scanDrivesRef.current = letters;
+      void load(false, letters);
+    }).catch((caught: unknown) => {
+      if (mounted.current) {
+        setError(errorMessage(caught));
+        setStatus("error");
+      }
+    });
     void loadMode();
     void loadQuarantine();
     void loadLog();
   }, [load, loadMode, loadQuarantine, loadLog]);
+
+  const toggleScanDrive = (letter: string) => {
+    const next = scanDrives.includes(letter)
+      ? scanDrives.filter((item) => item !== letter)
+      : [...scanDrives, letter].sort();
+    scanDrivesRef.current = next;
+    setScanDrives(next);
+    request.current += 1;
+    setRefreshing(false);
+    setInventory(null);
+    setStatus("loading");
+    setDriveFilter("all");
+    setSelected(new Set());
+    setPreview(null);
+    setPreviewOpen(false);
+    setConfirmed(false);
+  };
 
   const existing = useMemo(
     () => (inventory?.targets ?? []).filter((target) => target.exists && target.path),
@@ -370,6 +405,18 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
     }
   };
 
+  const openRemnantPreview = (data: CleanupPreview) => {
+    previewRequest.current += 1;
+    setPreview(data);
+    setPreviewError(null);
+    setReport(null);
+    setRunError(null);
+    setProgress(null);
+    setConfirmed(false);
+    setPreviewLoading(false);
+    setPreviewOpen(true);
+  };
+
   const closePreview = () => {
     if (running) return;
     previewRequest.current += 1;
@@ -493,9 +540,10 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
               size="sm"
               icon={<IconRefresh size={14} />}
               loading={refreshing}
+              disabled={scanDrives.length === 0}
               onClick={() => void load(true)}
             >
-              Refresh
+              Scan selected drives
             </Button>
           </>
         }
@@ -552,6 +600,35 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
               ))}
             </ul>
           </Banner>
+        )}
+
+        {tab === "cleanup" && (
+          <div className="cl-drive-scope" role="group" aria-label="Local drives to scan">
+            <span>Scan scope</span>
+            {volumes.map((volume) => {
+              const letter = volume.mount.slice(0, 1).toUpperCase();
+              return (
+                <label key={letter}>
+                  <input
+                    type="checkbox"
+                    checked={scanDrives.includes(letter)}
+                    disabled={running}
+                    onChange={() => toggleScanDrive(letter)}
+                  />
+                  {letter}: {volume.label || volume.kind}
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        {tab === "cleanup" && (
+          <CleanerRemnants
+            readOnly={readOnly}
+            driveLetters={scanDrives}
+            exclusions={exclusions}
+            onPreview={openRemnantPreview}
+          />
         )}
 
         <div className="cl-tabs">
@@ -825,6 +902,8 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
                   Clear
                 </Button>
               </div>
+
+
 
               {appliedFilters && counts.protected > protectedItems.length && counts.protected > 0 && (
                 <div className="cl-filter-note" role="status">
@@ -1149,6 +1228,7 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
                         <span className="cl-pathlist__size">{formatBytes(file.size)}</span>
                         <span className="cl-pathlist__path" title={file.path}>
                           {file.path}
+                          <small>Modified {relativeTime(file.lastModified)}</small>
                         </span>
                       </li>
                     ))}

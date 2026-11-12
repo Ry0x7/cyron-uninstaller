@@ -5,7 +5,7 @@
 Cyron (Phases 1–4) is a local Windows desktop scanner, cache cleaner and application uninstaller.
 It reads installed-application metadata, enumerates filesystem metadata with either an NTFS MFT reader
 or a directory walk, verifies duplicate file content by hashing, classifies storage, measures a fixed
-catalog of 48 cache locations, moves caches and leftovers into a per-user recoverable quarantine with
+catalog of 51 cache locations, moves caches and leftovers into a per-user recoverable quarantine with
 atomic restore, safely executes standard application uninstallers, and controls associated application
 processes with strict critical-process safeguards.
 
@@ -71,7 +71,7 @@ Child processes are strictly controlled:
 - **Catalog-only.** There is no command that deletes a caller-supplied path. Eligibility comes from
   the fixed catalog and a guard that refuses protected locations and their ancestors.
 - **Moves, not deletes.** Execution renames each eligible file into the run's quarantine batch and
-  writes a manifest during the run. The only permanent removal is `purge_quarantine`, which deletes
+  writes a manifest during the run. For Cleaner, the only permanent removal is `purge_quarantine`, which deletes
   the files of one manifest that are still inside that batch folder. There is no recursive delete;
   empty directories are removed one at a time with `remove_dir`.
 - **Off by default.** `AppState::read_only` starts `true`. Previewing still works there because it
@@ -163,7 +163,7 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
    - Roundtrip backup and restoration is verified using isolated test fixtures.
 
 5. **Recovery Correctness**:
-   - Recovery journals are appended and physically synchronized (`sync_all`) before any destructive `fs::rename`. If journal write or synchronization fails, the move is skipped (fail closed) to ensure recoverability.
+   - Recovery journals are appended and physically synchronized (`sync_all`) before each quarantine move. If journal write or synchronization fails, the move is skipped (fail closed) to ensure recoverability.
    - Restoring files verifies that destination parent directories exist and are not symlinks/junctions.
    - Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` prevents destination overwrites; on the same volume this provides atomic rename, and across volumes it safely copies and removes without overwriting.
 
@@ -238,3 +238,13 @@ Phase 4.1 adds critical defense-in-depth hardening across all destructive operat
 - **Enforcement**:
   The `.gitignore` strictly rejects any `.chryypt/` directory or file from ever being tracked in future commits.
   Pending authorization, access controls and branch protection remain in place.
+
+## Explicit Analyzer mutation boundary
+
+The quarantine guarantee applies to Cleaner and leftover cleanup. Analyzer has an explicit exception for separate user-reviewed Recycle Bin and permanent-delete plans. It does not grant the scanner write access. Plans retain operation, paths, file identities and the descendant set; missing, expired, reused, overlapping, protected or reparse selections are refused. Permanent deletion has no Cyron restore. Recycle errors never trigger a permanent-file retry. Recycle processes files without recursive folder expansion; empty directory removal is separately disclosed.
+
+Permanent operations bind to Windows file handles and pin ancestors against rename. Recycling uses the Windows shell namespace and has a narrow same-name race after the last identity check; Cyron does not claim atomic shell identity binding against a malicious process already controlling the same user session. Follow the existing local-session threat boundary above. Locked or changing files may remain; partial outcomes are shown and scans are discarded after execution.
+
+Cleaner accepts catalog/evidence-backed target identifiers. Caller-encoded arbitrary directory paths are rejected; arbitrary age or a cache-like name is insufficient classification. Removed-application candidates require retained server identity plus absence from a complete fresh inventory, remain unchecked, and require their own leftover plan. Windows Installer servicing stores and unknown installer files are not offered for cleaning. Quarantine bytes are storage moved, not disk space reclaimed; only purge frees that storage.
+
+Cross-volume Cleaner moves use Windows MoveFileEx with COPY_ALLOWED and WRITE_THROUGH after the durable journal entry, without replacing an existing destination. The Windows copy-and-delete path is flushed before returning; a retained source or failed/partial destination is reported and remains recoverable. Logical quarantined bytes are not claimed as physical disk space freed. Restores preserve no-overwrite behavior and keep a full quarantined copy until a destination copy is durably published.

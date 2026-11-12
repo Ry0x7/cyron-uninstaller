@@ -131,6 +131,127 @@
   max-width: 340px;
 }
 
+.cl-drive-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.cl-drive-scope label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+
+.cl-remnants {
+  display: grid;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.cl-remnants__apps,
+.cl-remnants__candidates {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 7px);
+  background: var(--surface-2);
+}
+
+.cl-remnants__apps > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cl-remnants__apps > li:last-child,
+.cl-remnants__candidates > li:last-child {
+  border-bottom: 0;
+}
+
+.cl-remnants__apps > li > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cl-remnants__apps span,
+.cl-remnants__apps small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.cl-remnants__review {
+  display: grid;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.cl-remnants__summary,
+.cl-remnants__badges,
+.cl-remnants__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cl-remnants__summary > span,
+.cl-remnants__badges > span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.cl-remnants__candidates > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.cl-remnants__candidate {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.cl-remnants__candidate code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.cl-remnants__candidate p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.cl-remnants__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.cl-remnants__actions {
+  justify-content: flex-end;
+}
+
 /* ------------------------------------------------------------------- groups */
 
 .cl-group {
@@ -784,6 +905,14 @@
   color: var(--text);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.cl-pathlist__path small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 10px;
 }
 
 .cl-skiplist li {

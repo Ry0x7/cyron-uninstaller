@@ -8,8 +8,10 @@ import type {
   LeftoverCleanReport,
   LeftoverScanReport,
   UninstallExecutionResult,
+  UninstallPlan,
 } from "../../lib/types";
 import { Badge, Banner, Button, Drawer, KeyValue, Spinner, type BadgeTone } from "../../components/ui";
+import { getUninstallOutcome } from "./uninstallerFlow";
 import {
   IconFile,
   IconFolder,
@@ -26,6 +28,7 @@ export type UninstallMode = "standard" | "forced" | "clean_entry";
 interface UninstallWizardProps {
   app: InstalledApp | null;
   isOpen: boolean;
+  initialMode?: UninstallMode;
   onClose: () => void;
   onComplete?: () => void;
 }
@@ -33,6 +36,7 @@ interface UninstallWizardProps {
 export function UninstallWizard({
   app,
   isOpen,
+  initialMode,
   onClose,
   onComplete,
 }: UninstallWizardProps) {
@@ -51,6 +55,8 @@ export function UninstallWizard({
   const [uninstalling, setUninstalling] = useState(false);
   const [uninstallResult, setUninstallResult] = useState<UninstallExecutionResult | null>(null);
   const [uninstallError, setUninstallError] = useState<string | null>(null);
+  const [uninstallPlan, setUninstallPlan] = useState<UninstallPlan | null>(null);
+  const [preparingUninstall, setPreparingUninstall] = useState(false);
   const [elapsedSecs, setElapsedSecs] = useState(0);
 
   // Leftovers state
@@ -68,7 +74,27 @@ export function UninstallWizard({
   const [registryConflict, setRegistryConflict] = useState(false);
 
   const activeAppId = useRef<string | null>(null);
-  activeAppId.current = app?.id ?? null;
+  const planRequest = useRef(0);
+  activeAppId.current = isOpen ? app?.id ?? null : null;
+
+  useEffect(() => {
+    planRequest.current += 1;
+    setBrokenPlan(null);
+  }, [isOpen, app?.id, mode]);
+
+  useEffect(() => {
+    setUninstallPlan(null);
+    if (!isOpen || !app || mode !== "standard" || app.isProtected || app.source === "store") return;
+    let active = true;
+    setPreparingUninstall(true);
+    setUninstallError(null);
+    api.prepareUninstall(app.id, isQuiet).then((plan) => {
+      if (active) setUninstallPlan(plan);
+    }).catch((error) => {
+      if (active) setUninstallError(errorMessage(error));
+    }).finally(() => { if (active) setPreparingUninstall(false); });
+    return () => { active = false; };
+  }, [isOpen, app?.id, mode, isQuiet]);
 
   // Initialize state when app changes or opens
   useEffect(() => {
@@ -82,12 +108,15 @@ export function UninstallWizard({
     setUninstallResult(null);
     setLeftoverReport(null);
     setCleanReport(null);
+    setBrokenPlan(null);
     setRegistryRestoreResult(null);
     setSelectedCandidateIds(new Set());
     setElapsedSecs(0);
 
     // Initial default mode
-    if (app.uninstallSupport === "missing") {
+    if (initialMode) {
+      setMode(initialMode);
+    } else if (app.uninstallSupport === "missing") {
       setMode("forced");
     } else {
       setMode("standard");
@@ -98,7 +127,7 @@ export function UninstallWizard({
 
     // Discover processes immediately so count is available
     loadProcesses(app.id);
-  }, [isOpen, app?.id]);
+  }, [isOpen, app?.id, initialMode]);
 
   // Elapsed timer during uninstallation
   useEffect(() => {
@@ -151,11 +180,13 @@ export function UninstallWizard({
   };
 
   const handleExecuteStandard = async () => {
+    if (!uninstallPlan || uninstallPlan.appId !== app.id || uninstalling) return;
+    const plan = uninstallPlan;
+    setUninstallPlan(null);
     setUninstalling(true);
     setUninstallError(null);
     setElapsedSecs(0);
     try {
-      const plan = await api.prepareUninstall(app.id, isQuiet);
       const result = await api.executeUninstall(app.id, plan.planId);
       setUninstallResult(result);
       // Invalidate inventory cache
@@ -205,7 +236,6 @@ export function UninstallWizard({
       setCleanReport(report);
       invalidateInstalledApps();
       setStep("complete");
-      onComplete?.();
     } catch (err) {
       setCleanError(errorMessage(err));
     } finally {
@@ -214,11 +244,15 @@ export function UninstallWizard({
   };
 
   const handlePrepareCleanEntry = async () => {
+    const request = ++planRequest.current;
+    setBrokenPlan(null);
     setPreparingBrokenPlan(true);
     setCleanError(null);
     try {
-      const plan = await api.prepareBrokenInventoryCleanup(app.id);
-      setBrokenPlan(plan);
+      const plan = mode === "forced"
+        ? await api.prepareForcedRemovalCleanup(app.id)
+        : await api.prepareBrokenInventoryCleanup(app.id);
+      if (request === planRequest.current && activeAppId.current === app.id) setBrokenPlan(plan);
     } catch (err) {
       setCleanError(errorMessage(err));
     } finally {
@@ -227,18 +261,18 @@ export function UninstallWizard({
   };
 
   const handleExecuteCleanEntry = async () => {
-    if (!brokenPlan) return;
+    if (!brokenPlan || brokenPlan.appId !== app.id) return;
+    const plan = brokenPlan;
+    setBrokenPlan(null);
     setCleaning(true);
     setCleanError(null);
     try {
-      const report = await api.executeBrokenInventoryCleanup(
-        brokenPlan.planId,
-        brokenPlan.registryKeyPath,
-      );
+      const report = mode === "forced"
+        ? await api.executeForcedRemovalCleanup(plan.planId, plan.registryKeyPath)
+        : await api.executeBrokenInventoryCleanup(plan.planId, plan.registryKeyPath);
       setCleanReport(report);
       invalidateInstalledApps();
       setStep("complete");
-      onComplete?.();
     } catch (err) {
       setCleanError(errorMessage(err));
     } finally {
@@ -319,7 +353,7 @@ export function UninstallWizard({
         [app.version ? `v${app.version}` : null, app.publisher].filter(Boolean).join(" · ") ||
         "Guided uninstallation wizard"
       }
-      onClose={onClose}
+      onClose={() => { if (!uninstalling && !cleaning && !terminating) onClose(); }}
     >
       {/* Wizard Steps Header */}
       <div className="un-wizard-steps" aria-label="Uninstallation steps">
@@ -408,7 +442,9 @@ export function UninstallWizard({
             </h4>
 
             {/* Standard Mode Card */}
-            {(app.uninstallSupport !== "missing" || (app.uninstallString && app.uninstallString.trim().length > 0)) && !app.isProtected && (
+            {app.source !== "store" &&
+              (app.uninstallSupport !== "missing" || (app.uninstallString && app.uninstallString.trim().length > 0)) &&
+              !app.isProtected && (
               <label
                 className={`un-mode-card ${mode === "standard" ? "un-mode-card--selected" : ""}`}
                 onClick={() => setMode("standard")}
@@ -422,11 +458,12 @@ export function UninstallWizard({
                 <div className="un-mode-card-content">
                   <div className="un-mode-card-title">
                     <span>Standard Uninstall (Recommended)</span>
+                    <Badge tone="safe">Safe Uninstall</Badge>
                     <Badge tone="accent">Vendor Built-in</Badge>
                   </div>
                   <div className="un-mode-card-desc">
-                    Runs the official registered uninstaller, monitors completion, then performs an
-                    expanded scan for remaining files, folders, and registry keys.
+                    Runs the official registered uninstaller with live process monitoring and exit code
+                    validation. Afterward, choose whether to review remaining files, folders and registry keys.
                   </div>
                   {mode === "standard" && app.quietUninstallString && (
                     <div style={{ marginTop: 8 }}>
@@ -436,7 +473,7 @@ export function UninstallWizard({
                           checked={isQuiet}
                           onChange={(e) => setIsQuiet(e.target.checked)}
                         />
-                        <span>Quiet Mode (Run silent uninstaller without wizard GUI)</span>
+                        <span>Quiet Mode (Run silent uninstaller without vendor GUI)</span>
                       </label>
                     </div>
                   )}
@@ -458,12 +495,13 @@ export function UninstallWizard({
               <div className="un-mode-card-content">
                 <div className="un-mode-card-title">
                   <span>Forced Removal</span>
-                  {app.uninstallSupport === "missing" && <Badge tone="caution">Recommended</Badge>}
+                  <Badge tone="caution">Deep Residual Clean</Badge>
+                  {app.uninstallSupport === "missing" && <Badge tone="safe">Recommended</Badge>}
                 </div>
                 <div className="un-mode-card-desc">
                   Bypasses missing, corrupted, or unresponsive vendor uninstallers. Performs deep
-                  evidence-based discovery across folders, shortcuts, and registry keys, moving files
-                  to quarantine with automatic verified .reg registry backups.
+                  discovery across folders, AppData, shortcuts, and registry keys, moving files
+                  to 7-day recoverable quarantine with automatic verified .reg registry backups and registration purge.
                 </div>
               </div>
             </label>
@@ -522,6 +560,17 @@ export function UninstallWizard({
             )}
           </div>
 
+          {mode === "standard" && (
+            <div className="stack">
+              {preparingUninstall ? <p>Preparing the registered uninstaller for review…</p> : uninstallPlan && <>
+                <strong>Registered command to launch</strong>
+                <code style={{ overflowWrap: "anywhere" }}>{uninstallPlan.executable} {uninstallPlan.arguments.join(" ")}</code>
+                <p className="small muted">The vendor controls its own removal prompts. Cyron verifies the live inventory afterward; files may remain.</p>
+              </>}
+              {uninstallError && <Banner tone="danger">{uninstallError}</Banner>}
+            </div>
+          )}
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Button variant="ghost" onClick={onClose}>
               Cancel
@@ -547,10 +596,15 @@ export function UninstallWizard({
             ) : (
               <Button
                 variant="primary"
-                disabled={app.isProtected}
-                onClick={() => setStep("processes")}
+                disabled={app.isProtected || loadingProcesses || (mode === "standard" && !uninstallPlan)}
+                onClick={() => {
+                  if (mode === "standard" && processes.length === 0 && !processError) {
+                    setStep("execute");
+                    void handleExecuteStandard();
+                  } else setStep("processes");
+                }}
               >
-                Continue →
+                {mode === "standard" && processes.length === 0 && !processError ? "Launch reviewed uninstaller" : "Review running processes →"}
               </Button>
             )}
           </div>
@@ -650,6 +704,7 @@ export function UninstallWizard({
           )}
 
           {processError && <Banner tone="danger">{processError}</Banner>}
+          {leftoverError && <Banner tone="danger">{leftoverError}</Banner>}
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
             <Button variant="ghost" onClick={() => setStep("mode")}>
@@ -657,6 +712,8 @@ export function UninstallWizard({
             </Button>
             <Button
               variant="primary"
+              loading={scanningLeftovers || uninstalling}
+              disabled={mode === "standard" && !uninstallPlan}
               onClick={() => {
                 if (mode === "standard") {
                   setStep("execute");
@@ -667,13 +724,13 @@ export function UninstallWizard({
                 }
               }}
             >
-              {mode === "standard" ? "Launch Uninstaller →" : "Scan Residuals →"}
+              {mode === "standard" ? "Launch Safe Uninstaller →" : "Scan & Force Remove →"}
             </Button>
           </div>
         </div>
       )}
 
-      {/* STEP 3: Execute Standard Uninstaller */}
+      {/* STEP 3: Execute Uninstaller */}
       {step === "execute" && (
         <div className="stack" style={{ gap: 16 }}>
           <div>
@@ -681,8 +738,7 @@ export function UninstallWizard({
               Running Vendor Uninstaller
             </h4>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Monitoring uninstaller process execution. Standard uninstaller exit codes and child
-              processes are tracked server-side.
+              Monitoring the vendor process, then checking the live installed-app inventory. Any separate vendor windows may need time to finish.
             </p>
           </div>
 
@@ -709,9 +765,9 @@ export function UninstallWizard({
             </div>
           ) : uninstallResult ? (
             <div className="stack" style={{ gap: 12 }}>
-              <Banner tone={uninstallResult.status === "completed" ? "safe" : "caution"}>
+              <Banner tone={getUninstallOutcome(uninstallResult.status).tone}>
                 <div>
-                  <strong>{uninstallResult.message}</strong>
+                  <strong>{getUninstallOutcome(uninstallResult.status).title}: {uninstallResult.message}</strong>
                   <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
                     Exit code: {uninstallResult.exitCode ?? "N/A"} · Duration:{" "}
                     {(uninstallResult.elapsedMs / 1000).toFixed(1)}s
@@ -723,6 +779,23 @@ export function UninstallWizard({
                   A Windows restart is required by this uninstaller to finalize removal of locked
                   in-use files.
                 </Banner>
+              )}
+              {uninstallResult.status === "cancelled" && (
+                <Banner tone="caution">The uninstaller was cancelled. The application may still be installed.</Banner>
+              )}
+              {uninstallResult.status === "remaining" && (
+                <Banner tone="caution">The uninstaller exited, but the application is still registered. Cyron has not marked it as removed.</Banner>
+              )}
+              {uninstallResult.status !== "completed" && uninstallResult.status !== "restart_required" && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setMode("forced");
+                    handleScanLeftovers();
+                  }}
+                >
+                  Review Forced Removal →
+                </Button>
               )}
             </div>
           ) : null}
@@ -748,7 +821,9 @@ export function UninstallWizard({
             </div>
           )}
 
-          {uninstallResult && (
+          {leftoverError && <Banner tone="danger">Leftover scan failed: {leftoverError}</Banner>}
+
+          {uninstallResult?.status === "completed" && (
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
               <Button
                 variant="primary"
@@ -785,10 +860,10 @@ export function UninstallWizard({
           ) : leftoverReport ? (
             leftoverReport.candidates.length === 0 ? (
               <div className="stack" style={{ gap: 12 }}>
-                <Banner tone="safe">
+                <Banner tone="info">
                   <span>
-                    No residual files or registry keys were found. The application was completely
-                    removed!
+                    No leftover candidates were found. This scan does not confirm whether the
+                    application itself is still installed.
                   </span>
                 </Banner>
                 {mode === "forced" && (
@@ -933,6 +1008,13 @@ export function UninstallWizard({
             )
           ) : null}
 
+          {mode === "forced" && brokenPlan && (
+            <Banner tone="caution">
+              <strong>Review registry entry removal</strong>
+              <p className="mono" style={{ overflowWrap: "anywhere" }}>{brokenPlan.registryKeyPath}</p>
+              <p>Cyron will create a verified .reg backup before deleting this registration. This does not uninstall the application or prove its files were removed.</p>
+            </Banner>
+          )}
           {cleanError && <Banner tone="danger">{cleanError}</Banner>}
           {leftoverError && <Banner tone="danger">{leftoverError}</Banner>}
 
@@ -941,29 +1023,25 @@ export function UninstallWizard({
               {leftoverReport && leftoverReport.candidates.length === 0 ? "Finish & Close" : "Skip Leftovers & Close"}
             </Button>
             {leftoverReport && leftoverReport.candidates.length === 0 ? (
-              <Button
-                variant="danger"
-                icon={<IconTrash size={14} />}
-                loading={cleaning || preparingBrokenPlan}
-                onClick={async () => {
-                  try {
-                    setCleaning(true);
-                    setCleanError(null);
-                    const plan = await api.prepareBrokenInventoryCleanup(app.id);
-                    const rep = await api.executeBrokenInventoryCleanup(plan.planId, plan.registryKeyPath);
-                    setCleanReport(rep);
-                    invalidateInstalledApps();
+              mode !== "forced" ? (
+                <Button
+                  variant="primary"
+                  onClick={() => {
                     setStep("complete");
-                    onComplete?.();
-                  } catch (err) {
-                    setCleanError(errorMessage(err));
-                  } finally {
-                    setCleaning(false);
-                  }
-                }}
-              >
-                Purge Registration Entry
-              </Button>
+                  }}
+                >
+                  Finish
+                </Button>
+              ) : (
+                <Button
+                  variant="danger"
+                  icon={<IconTrash size={14} />}
+                  loading={cleaning || preparingBrokenPlan}
+                  onClick={brokenPlan ? handleExecuteCleanEntry : handlePrepareCleanEntry}
+                >
+                  {brokenPlan ? "Confirm registry entry removal" : "Review registry entry…"}
+                </Button>
+              )
             ) : (
               <Button
                 variant="danger"
@@ -982,11 +1060,21 @@ export function UninstallWizard({
       {/* STEP 5: Complete */}
       {step === "complete" && (
         <div className="stack" style={{ gap: 16 }}>
-          <Banner tone="safe">
+          <Banner tone={
+            cleanReport
+              ? cleanReport.errors.length ? "caution" : "safe"
+              : getUninstallOutcome(uninstallResult?.status ?? "failed").tone
+          }>
             <div>
-              <strong style={{ fontSize: 14 }}>Uninstallation & Cleanup Completed</strong>
+              <strong style={{ fontSize: 14 }}>
+                {cleanReport ? "Residual cleanup finished" : getUninstallOutcome(uninstallResult?.status ?? "failed").title}
+              </strong>
               <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                {app.name} has been removed and verified.
+                {cleanReport
+                  ? `Cleanup results for ${app.name} are listed below.`
+                  : getUninstallOutcome(uninstallResult?.status ?? "failed").verifiedRemoved
+                    ? `${app.name} was confirmed removed from the live application inventory.`
+                    : `${app.name} has not been confirmed removed.`}
               </p>
             </div>
           </Banner>
@@ -1008,6 +1096,15 @@ export function UninstallWizard({
                   : []),
               ]}
             />
+          )}
+
+          {cleanReport?.errors && cleanReport.errors.length > 0 && (
+            <Banner tone="caution">
+              <strong>Some residual items were skipped or reported errors:</strong>
+              <div style={{ fontSize: 11, marginTop: 4 }}>
+                {cleanReport.errors.join(" · ")}
+              </div>
+            </Banner>
           )}
 
           {registryRestoreResult && (
@@ -1055,7 +1152,7 @@ export function UninstallWizard({
                 </Button>
               )
             )}
-            <Button variant="primary" onClick={onClose}>
+            <Button variant="primary" onClick={() => (onComplete ? onComplete() : onClose())}>
               Done
             </Button>
           </div>

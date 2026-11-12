@@ -9,7 +9,7 @@ catalog cache files into a recoverable quarantine after a preview and an explici
 Phase 4 adds standard application uninstallation, critical-process-guarded process management,
 leftover detection, automated registry backups, and sequential batch uninstallation.
 
-The product target is a Revo Uninstaller + BleachBit + WinDirStat replacement with better risk
+The product target is a tool combining ideas from Revo Uninstaller, BleachBit and WinDirStat with better risk
 communication for non-technical users.
 
 ## Runtime stack
@@ -74,7 +74,7 @@ src-tauri/
   src/providers.rs            declarative cleanup provider system, schema validator, safety enforcement
   src/volumes.rs              local volume capacity
   src/history.rs              app-data history persistence
-  src/commands.rs             validated Tauri command layer (42 commands)
+  src/commands.rs             validated Tauri command layer
   src/lib.rs                  state, dialog plugin, command registration
   tests/real_system.rs        live registry/cache/scan integration test
   tests/security.rs           permission boundaries, protected paths, links, fixtures
@@ -96,7 +96,7 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `scan.rs` | Chooses the scan method, then runs the streaming directory walk: depth/error/stat-output/tree caps, exclusions, hidden/system filtering, reparse skipping, totals, extension stats, largest files, hard-link tracking, throttled progress and cancellation. Builds `StorageReport` alongside the tree. `measure_path` reuses the walker without a tree or cancellation. |
 | `duplicates.rs` | Walks a root for files at or above `minSize`, groups by size, confirms groups with 4 KiB head/tail SHA-256, then full streaming SHA-256. Tracks hard links by file id, polls cancellation, emits `cyron-duplicate-progress`, caps candidates/groups/files and reports truncation. |
 | `storage.rs` | Classifies bytes into ten categories by known root and extension, marks known vs inferred confidence, buckets files by age, and derives up to six explained insights (large, old, developer-heavy). |
-| `caches.rs` | Fixed catalog of 48 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. |
+| `caches.rs` | Fixed catalog of 51 developer, AI, container and Windows cache locations. Expands `%VAR%` segments, resolves paths, measures each existing folder with `scan::measure_path`, deduplicates paths and computes totals per risk level. |
 | `providers.rs` | Declarative versioned (`schema_version: 1`) cleanup provider system. Enforces approved environment roots, validates path templates and patterns, rejects path traversals, wildcards in roots, and attempts to mark protected data safe. |
 | `cleanup.rs` | The primary cache cleanup engine. Resolves catalog ids to specs, enforces `guard_path`, plans and measures a preview, executes a server-held plan by moving files into a quarantine batch, and implements list/restore/purge plus the capped cleanup log. |
 | `explorer.rs` | Registers and unregisters native per-user Windows shell context menu verbs under `HKEY_CURRENT_USER\Software\Classes` without administrator elevation. Implements standard and advanced destructive verbs (Force Delete, Locking Processes, Kill Process), path validation and system root guards (`is_protected_delete_target`), Windows Restart Manager lock detection (`rstrtmgr.dll`), and server-held single-use execution plans (`StoredForceDeletePlan`, `StoredKillProcessPlan`). |
@@ -105,8 +105,8 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 51 validated IPC commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 51 Tauri commands. `read_only` starts `true`. |
+| `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, event emission, history and log recording, Explorer reveal, and 60 validated IPC commands. |
+| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all 60 Tauri commands. `read_only` starts `true`. |
 
 ## IPC surface
 
@@ -116,8 +116,13 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | Command | Arguments | Returns | Notes |
 | --- | --- | --- | --- |
 | `list_installed_apps` | — | `AppInventory { apps, warnings }` | Runs on a blocking thread; cached in AppState for rapid lookups. |
+| `list_removed_apps` | — | `InstalledApp[]` | Retained session identities absent from a complete fresh inventory; review-required evidence only. |
 | `list_volumes` | — | `VolumeInfo[]` | Cheap synchronous Win32 queries. |
-| `list_caches` | — | `CacheInventory` | Blocking thread. Not written to history. |
+| `list_caches` | `driveLetters[]?` | `CacheInventory` | Validated mounted local drive scope; blocking thread. Not written to history. |
+| `prepare_analyzer_action` | `paths[]`, `operation` | `AnalyzerActionPreview` | Separate recycle/permanent selection review; server holds exact snapshot and operation. |
+| `execute_analyzer_action` | `planId` | `AnalyzerActionReport` | Consumes the expiring plan; progress and per-item results; no client replacement targets. |
+| `cancel_analyzer_action` | `planId` | — | Requests stopping between safe item operations. |
+| `cancel_batch_uninstall` | `planId` | — | Stops after the running vendor uninstaller; remaining apps are not launched. |
 | `start_scan` | `jobId`, `path`, `options` | `ScanResult` | Blocking thread; emits `cyron-scan-progress`. `options.method` is `auto`, `mft` or `directory`. |
 | `cancel_scan` | `jobId` | — | Sets the registered flag; unknown ids are ignored. |
 | `start_duplicate_scan` | `jobId`, `path`, `options` | `DuplicateReport` | Blocking thread; emits `cyron-duplicate-progress`. Options: `minSize`, `includeHidden`, `exclusions[]`. |
@@ -129,6 +134,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `get_cleanup_mode` | — | `bool` | `true` means read-only. |
 | `set_cleanup_mode` | `readOnly` | `bool` | Flips the backend switch; the UI persists the same value in settings. |
 | `preview_cleanup` | `targetIds[]`, `exclusions[]?` | `CleanupPreview` | Blocking thread. Ids only; protected/unknown ids are refused; exclusions are validated as absolute non-root paths and stored in the plan. |
+| `preview_remnant_cleanup` | `appId`, `planId`, `candidateIds[]`, `exclusions[]`, `driveLetters[]` | `CleanupPreview` | Consumes the residual scan review, verifies application absence and local-drive scope, and creates a normal Cleaner plan with snapshots, limits and recovery. Application absence is rechecked before execution. |
 | `start_cleanup` | `planId`, `targetIds[]` | `CleanupReport` | Consumes the plan once, re-checks the selection, the 10-minute TTL and read-only mode; emits `cyron-cleanup-progress`; logs the run and appends an Activity entry. |
 | `list_quarantine` | — | `QuarantineBatch[]` | Batches that still hold restorable files, newest first. |
 | `restore_quarantine` | `runId` | `RestoreReport` | Byte-exact restore, never overwrites; retires the batch when everything is back; logged. |
@@ -139,14 +145,14 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `set_startup_item_enabled` | `id`, `enabled` | `bool` | Toggles startup entry via standard Windows `StartupApproved` binary values (0x02 enable, 0x03 disable). Reversible. |
 | `snapshot_app_processes` | `appId` | `ProcessSnapshot` | Captures running processes belonging strictly to the app directory; validates critical process safety. |
 | `terminate_app_processes` | `snapshotId`, `pids[]` | `TerminationReport` | Terminates verified processes; revalidates PID, creation time, and install path immediately before kill. |
-| `prepare_uninstallation` | `appId` | `UninstallPlan` | Resolves uninstaller binary, flags, and creates single-use 10-minute expiring plan. |
-| `launch_uninstaller` | `planId` | `LaunchReport` | Spawns uninstaller executable without shell wrappers; tracks exit code. |
+| `prepare_uninstall` | `appId` | `UninstallPlan` | Resolves uninstaller binary, flags, and creates single-use 10-minute expiring plan. |
+| `execute_uninstall` | `planId` | `LaunchReport` | Spawns uninstaller executable without shell wrappers; tracks exit code. |
 | `scan_app_leftovers` | `appId` | `LeftoverPreview` | Deep filesystem and multi-type registry leftover scan for uninstalled application. |
 | `clean_app_leftovers` | `planId`, `itemIds[]` | `LeftoverCleanReport` | Moves leftovers to quarantine with write-ahead journal and multi-type `.reg` registry backups. |
 | `prepare_broken_inventory_cleanup` | `appId` | `BrokenEntryPlan` | Prepares single-use 5-minute plan for removing broken/orphaned uninstall registry keys. |
 | `execute_broken_inventory_cleanup` | `planId` | `LeftoverCleanReport` | Revalidates broken status, creates verified `.reg` backup in quarantine, deletes orphaned subkey. |
 | `restore_registry_backup` | `runId`, `overwriteConflict?` | `RegistryRestoreReport` | Restores quarantined `.reg` backup using native `winreg` restoration with manifest binding, SHA-256 integrity verification, scope checking, and conflict protection. |
-| `prepare_batch_uninstallation` | `appIds[]` | `BatchUninstallPlan` | Validates multiple apps and prepares an ordered execution queue. |
+| `prepare_batch_uninstall` | `appIds[]` | `BatchUninstallPlan` | Validates multiple apps and prepares an ordered execution queue. |
 | `inspect_cleanable_directory` | `path` | `CleanableDirectoryInfo` | Inspects arbitrary directory against safety guards and size estimators. |
 | `open_in_terminal` | `path` | — | Launches Windows Terminal or PowerShell at the target folder without shell wrappers. |
 | `copy_to_clipboard` | `text` | — | Copies text to the Windows system clipboard safely. |
@@ -176,6 +182,8 @@ Progress event payloads:
 ```text
 cyron-scan-progress       { jobId, files, dirs, bytes, currentDir }
 cyron-duplicate-progress   { jobId, phase(index|partial|full), files, bytesHashed, currentPath }
+cyron-analyzer-action-progress { planId, completed, total, currentPath }
+cyron-batch-uninstall-progress { planId, completed, total, currentApp }
 ```
 
 Scan progress is emitted at most every 120 ms and once more when the scan ends; duplicate progress
@@ -417,7 +425,7 @@ Windows Store/MSIX applications are enumerated from `AppModel\Repository\Package
 
 ## Cache catalog
 
-`caches.rs` contains 48 `TargetDef` entries. Each has a stable id, tool, label, env-templated path,
+`caches.rs` contains 51 `TargetDef` entries. Each has a stable id, tool, label, env-templated path,
 risk, category and a consequence note. Paths use `%USERPROFILE%`, `%LOCALAPPDATA%`, `%APPDATA%`,
 `%TEMP%`, `%WINDIR%`. An unset variable skips the entry with a warning (max 12); a resolved but
 missing directory is returned with `exists: false` and zero sizes so coverage is visible.
@@ -527,7 +535,7 @@ measurements and are not logged.
 
 ## Security and safety constraints
 
-- **File modifications** are strictly confined to `cleanup.rs` and `leftovers.rs` through review-first plans, quarantine batches, write-ahead recovery journals, and atomic no-overwrite restoration.
+- **Cleaner and leftover modifications** use `cleanup.rs` and `leftovers.rs` with review-first plans, quarantine batches, recovery journals and no-overwrite restoration. Separate Analyzer actions live in `analyzer_actions.rs` under the explicit exception documented below.
 - **Process management** in `process.rs` verifies executable ownership, creation time (`GetProcessTimes`), and PID identity against a recent snapshot. Critical Windows system processes and Windows directory binaries can never be terminated.
 - **Uninstaller execution** in `uninstall.rs` validates vendor command lines, normalizes MSI product codes, and rejects shell wrappers (`cmd.exe`, `powershell.exe`, `.bat`, etc.). Executables and arguments are resolved server-side from registered keys; caller-supplied executables are never launched.
 - **Registry modifications** in `leftovers.rs` are guarded against shared vendor keys and system roots, and require an automatic multi-type recursive `.reg` backup before deleting any subkey.
@@ -572,3 +580,13 @@ but slower; neither is a WizTree comparison. Details and caveats are in
 - MFT scanning for volumes above the record budget (e.g. streaming aggregation without retaining all records).
 - Native WinRT COM bindings for Store/MSIX package removal without shell scripts.
 - Cold-cache benchmark methodology and multi-run statistics published from CI hardware.
+
+## Analyzer actions and scoped Cleaner review (2026-11-09)
+
+Scanning remains strictly read-only. User-initiated Analyzer mutations are a narrow exception to the quarantine rule: `prepare_analyzer_action(paths, operation)` creates an opaque server-held ten-minute plan; `execute_analyzer_action(planId)` consumes it once and accepts no replacement paths or operation. `cancel_analyzer_action(planId)` stops between items. The UI collects paths from listing/treemap selection, reviews operation, counts and bytes, then shows per-item outcomes. Every execution attempt invalidates cached scans and selections and starts a fresh scan.
+
+Permanent deletion uses no-follow handles, Windows file identities and empty-only directory disposition. Recycling uses Windows IFileOperation, recycle-only/early-failure flags, no recursion and no connected-file expansion. It handles approved files individually and removes approved directories only when empty. Empty folder entries are not restored by Cyron; files are restored through Windows Recycle Bin. The Windows shell exposes a final pathname operation: parent handles and immediate identity checks reduce substitution risk but do not make it atomic against another process in the same user session. Cleaner/leftover removal retain quarantine and journal recovery.
+
+`list_caches(driveLetters?)` validates mounted local drive letters and measures supported locations only on those drives. Unknown directories named Temp, Cache or node_modules are not made disposable. Recycle Bin contents are inventory-only. Non-system-drive npm and Steam candidates require recognized layout evidence, and preview resolves the evidence again. Cleaner exposes retained Win32 app identities missing from current inventory through `list_removed_apps`; these are session-scoped, review-required remnants, not a guess about arbitrary folders. An incomplete application inventory prevents removed-app classification.
+
+Uninstaller completion requires a post-exit inventory check. Remaining registration or incomplete inventory produces `remaining`; restart, vendor cancellation and failure remain explicit. Batch stop requests apply between vendor uninstallers and never kill the running vendor process. Each batch item is rechecked against live inventory; missing and duplicate selections are rejected. Store lifecycle operations remain Windows Settings/winget guidance.

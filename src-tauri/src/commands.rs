@@ -1,5 +1,8 @@
 use crate::scan::{self, ScanProgress, ScanResult};
-use crate::{apps, caches, cleanup, duplicates, explorer, history, leftovers, mft, process, uninstall, volumes, AppState};
+use crate::{
+    apps, caches, cleanup, duplicates, explorer, history, leftovers, mft, process, uninstall,
+    volumes, AppState,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -66,7 +69,9 @@ fn register_scan(
         .lock()
         .map_err(|_| format!("The {label} scan registry is unavailable."))?;
     if scans.contains_key(job_id) {
-        return Err(format!("A {label} scan with this job id is already running."));
+        return Err(format!(
+            "A {label} scan with this job id is already running."
+        ));
     }
     scans.insert(job_id.to_string(), cancel);
     Ok(())
@@ -116,8 +121,71 @@ pub fn list_volumes() -> Vec<volumes::VolumeInfo> {
 }
 
 #[tauri::command]
-pub async fn list_caches() -> Result<caches::CacheInventory, String> {
-    run_blocking("Cache discovery", caches::discover_caches).await
+pub async fn list_removed_apps(
+    state: State<'_, AppState>,
+) -> Result<Vec<apps::InstalledApp>, String> {
+    let live = run_blocking("Removed application verification", apps::discover_apps).await?;
+    if !live.warnings.is_empty() {
+        return Err("Application inventory was incomplete. Removed applications cannot be reliably identified; refresh later.".into());
+    }
+    let snapshots = state
+        .app_snapshots
+        .lock()
+        .map_err(|_| "Application snapshot registry unavailable.")?;
+    let mut removed: Vec<_> = snapshots
+        .values()
+        .filter(|app| {
+            app.source == "win32"
+                && !app.is_protected
+                && !live.apps.iter().any(|current| current.id == app.id)
+        })
+        .cloned()
+        .collect();
+    removed.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(removed)
+}
+
+#[tauri::command]
+pub async fn list_caches(
+    drive_letters: Option<Vec<String>>,
+) -> Result<caches::CacheInventory, String> {
+    run_blocking("Cache discovery", move || {
+        caches::discover_caches_for_drives(drive_letters)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn prepare_analyzer_action(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    operation: crate::analyzer_actions::AnalyzerAction,
+) -> Result<crate::analyzer_actions::AnalyzerActionPreview, String> {
+    let actions = state.analyzer_actions.clone();
+    run_blocking("Analyzer action review", move || {
+        crate::analyzer_actions::prepare_analyzer_action(&actions, paths, operation)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn execute_analyzer_action(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<crate::analyzer_actions::AnalyzerActionReport, String> {
+    let actions = state.analyzer_actions.clone();
+    run_blocking("Analyzer action", move || {
+        crate::analyzer_actions::execute_analyzer_action(&actions, &plan_id, |progress| {
+            let _ = app.emit("cyron-analyzer-action-progress", progress);
+        })
+    })
+    .await?
+}
+
+#[tauri::command]
+pub fn cancel_analyzer_action(state: State<'_, AppState>, plan_id: String) -> Result<(), String> {
+    crate::analyzer_actions::cancel_analyzer_action(&state.analyzer_actions, &plan_id)
 }
 
 #[tauri::command]
@@ -176,9 +244,8 @@ pub async fn start_scan(
                 Some(scan_index),
             )
         } else {
-            let mft_attempt = mft::support(&root).and_then(|()| {
-                mft::scan(&job_id, &root, &options, Arc::clone(&cancel), &progress)
-            });
+            let mft_attempt = mft::support(&root)
+                .and_then(|()| mft::scan(&job_id, &root, &options, Arc::clone(&cancel), &progress));
             match mft_attempt {
                 Ok(outcome) => mft_scan_result(&job_id, &root, outcome, &started),
                 Err(reason) => {
@@ -400,15 +467,11 @@ fn take_plan(
         .map_err(|_| "The cleanup plan registry is unavailable.".to_string())?;
     plans.retain(|_, plan| plan.expires_at > now);
     plans.remove(plan_id).ok_or_else(|| {
-        "That cleanup preview expired or was already used. Preview the selection again."
-            .to_string()
+        "That cleanup preview expired or was already used. Preview the selection again.".to_string()
     })
 }
 
-fn check_plan_selection(
-    plan: &cleanup::CleanupPlan,
-    target_ids: &[String],
-) -> Result<(), String> {
+fn check_plan_selection(plan: &cleanup::CleanupPlan, target_ids: &[String]) -> Result<(), String> {
     let mut planned: Vec<&str> = plan.specs.iter().map(|spec| spec.id.as_str()).collect();
     planned.sort_unstable();
     let mut requested: Vec<&str> = target_ids.iter().map(String::as_str).collect();
@@ -462,7 +525,11 @@ fn cleanup_log_entry(report: &cleanup::CleanupReport, at: u64) -> cleanup::Clean
             report.skipped,
             report.failed,
             human_bytes(report.bytes),
-            if report.cancelled { " · cancelled" } else { "" }
+            if report.cancelled {
+                " · cancelled"
+            } else {
+                ""
+            }
         ),
     }
 }
@@ -546,6 +613,93 @@ pub async fn preview_cleanup(
 }
 
 #[tauri::command]
+pub async fn preview_remnant_cleanup(
+    state: State<'_, AppState>,
+    app_id: String,
+    plan_id: String,
+    candidate_ids: Vec<String>,
+    exclusions: Vec<String>,
+    drive_letters: Vec<String>,
+) -> Result<cleanup::CleanupPreview, String> {
+    let selected = validate_target_ids(candidate_ids)?;
+    let exclusions = cleanup::validate_exclusions(exclusions)?;
+    let plan = state
+        .leftover_plans
+        .lock()
+        .map_err(|_| "Leftover plan registry unavailable.")?
+        .remove(&plan_id)
+        .ok_or("Residual review expired or was already used. Scan again.")?;
+    if plan.app_id != app_id || plan.expires_at <= now_secs() {
+        return Err("Residual review expired or changed application. Scan again.".into());
+    }
+    let read_only = state.read_only.load(Ordering::Relaxed);
+    let source_app_id = plan.app_id.clone();
+    let (mut cleanup_plan, preview) = run_blocking("Remnant quarantine preview", move || {
+        verify_removed_app(&app_id, &apps::discover_apps())?;
+        let specs =
+            remnant_cleanup_specs(&plan, &selected, &drive_letters, &volumes::list_volumes())?;
+        cleanup::plan_specs_with_exclusions(specs, read_only, exclusions)
+    })
+    .await??;
+    cleanup_plan.source_app_id = Some(source_app_id);
+    state
+        .plans
+        .lock()
+        .map_err(|_| "Cleanup plan registry unavailable.")?
+        .insert(cleanup_plan.plan_id.clone(), cleanup_plan);
+    Ok(preview)
+}
+
+fn verify_removed_app(app_id: &str, inventory: &apps::AppInventory) -> Result<(), String> {
+    if !inventory.warnings.is_empty() || inventory.apps.iter().any(|app| app.id == app_id) {
+        return Err("The application may be installed again or inventory is incomplete. Remnant cleanup was refused; refresh and review again.".into());
+    }
+    Ok(())
+}
+
+fn remnant_cleanup_specs(
+    plan: &leftovers::StoredLeftoverPlan,
+    selected: &[String],
+    drive_letters: &[String],
+    local_volumes: &[volumes::VolumeInfo],
+) -> Result<Vec<cleanup::CleanupSpec>, String> {
+    if drive_letters.is_empty()
+        || drive_letters.iter().any(|letter| {
+            letter.len() != 1
+                || !letter.bytes().all(|byte| byte.is_ascii_alphabetic())
+                || !local_volumes.iter().any(|volume| {
+                    matches!(volume.kind.as_str(), "fixed" | "removable")
+                        && volume
+                            .mount
+                            .to_ascii_uppercase()
+                            .starts_with(&letter.to_ascii_uppercase())
+                })
+        })
+    {
+        return Err("Select mounted local drives before reviewing remnants.".into());
+    }
+    selected.iter().map(|id| {
+        let candidate = plan.candidates.iter().find(|candidate| candidate.id == *id)
+            .ok_or("A selected remnant is outside the server-held review.")?;
+        if candidate.risk == "protected" || !matches!(candidate.kind.as_str(), "file" | "directory") {
+            return Err("Cleaner only quarantines unprotected filesystem remnants. Registry review stays in Uninstaller.".into());
+        }
+        let path = PathBuf::from(&candidate.path);
+        leftovers::guard_leftover_path(&path)?;
+        let display = scan::display_path(&candidate.path);
+        let drive = display.chars().next().ok_or("Residual path has no local drive.")?.to_ascii_uppercase().to_string();
+        if !display.as_bytes().get(1).is_some_and(|byte| *byte == b':') || !drive_letters.iter().any(|letter| letter.eq_ignore_ascii_case(&drive)) {
+            return Err("A selected remnant is outside the selected local drives.".into());
+        }
+        Ok(cleanup::CleanupSpec {
+            id: candidate.id.clone(), tool: plan.app_name.clone(), label: "Reviewed application remnant".into(),
+            risk: "caution".into(), category: "windows".into(), note: candidate.reason.clone(),
+            impact: "Residual data can include application settings. Only reviewed files move to quarantine; existing restore destinations are never overwritten.".into(), path,
+        })
+    }).collect()
+}
+
+#[tauri::command]
 pub async fn start_cleanup(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -558,6 +712,11 @@ pub async fn start_cleanup(
 
     let plan = take_plan(&state.plans, &plan_id, now_secs())?;
     check_plan_selection(&plan, &target_ids)?;
+    if let Some(app_id) = plan.source_app_id.clone() {
+        let inventory =
+            run_blocking("Removed application revalidation", apps::discover_apps).await?;
+        verify_removed_app(&app_id, &inventory)?;
+    }
 
     let quarantine_root = cleanup_quarantine_root(&app)?;
     let data_dir = app_data_dir(&app)?;
@@ -567,12 +726,7 @@ pub async fn start_cleanup(
     let run_id = cleanup_run_id(since_epoch.as_secs(), since_epoch.subsec_nanos());
 
     let cancel = Arc::new(AtomicBool::new(false));
-    register_scan(
-        &state.cleanup_jobs,
-        &run_id,
-        Arc::clone(&cancel),
-        "cleanup",
-    )?;
+    register_scan(&state.cleanup_jobs, &run_id, Arc::clone(&cancel), "cleanup")?;
 
     let jobs = Arc::clone(&state.cleanup_jobs);
     let registered_run = run_id.clone();
@@ -641,7 +795,12 @@ pub async fn restore_quarantine(
         quarantined: 0,
         skipped: report.skipped,
         failed: report.failed,
-        status: if report.failed == 0 { "completed" } else { "failed" }.into(),
+        status: if report.failed == 0 {
+            "completed"
+        } else {
+            "failed"
+        }
+        .into(),
         detail: format!(
             "{} restored · {} skipped · {} failed",
             report.restored, report.skipped, report.failed
@@ -659,8 +818,10 @@ pub async fn purge_quarantine(
     let run_id = validate_cleanup_record_id(&run_id)?;
     let root = cleanup_quarantine_root(&app)?;
     let data_dir = app_data_dir(&app)?;
-    let report =
-        run_blocking("Quarantine purge", move || cleanup::purge_batch(&root, &run_id)).await??;
+    let report = run_blocking("Quarantine purge", move || {
+        cleanup::purge_batch(&root, &run_id)
+    })
+    .await??;
     let at = now_secs();
     let log = cleanup::CleanupLogEntry {
         id: format!("purge-{}-{at}", report.run_id),
@@ -698,14 +859,23 @@ pub async fn discover_app_processes(
     app_id: String,
 ) -> Result<Vec<process::AppProcess>, String> {
     let app_id_trimmed = app_id.trim().to_string();
-    let inventory = run_blocking("Application lookup for process discovery", apps::discover_apps).await?;
+    let inventory = run_blocking(
+        "Application lookup for process discovery",
+        apps::discover_apps,
+    )
+    .await?;
     let app = inventory
         .apps
         .iter()
         .find(|a| a.id == app_id_trimmed)
         .cloned()
         .or_else(|| {
-            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+            state
+                .app_snapshots
+                .lock()
+                .ok()?
+                .get(&app_id_trimmed)
+                .cloned()
         });
 
     if let Some(ref a) = app {
@@ -757,19 +927,18 @@ pub async fn terminate_app_processes(
             .hunter_snapshots
             .lock()
             .map_err(|_| "Hunter process snapshot registry is unavailable.".to_string())?;
-        snapshots
-            .get(&app_id)
-            .cloned()
-            .ok_or_else(|| "Target snapshot expired or process identity changed. Target again.".to_string())?
+        snapshots.get(&app_id).cloned().ok_or_else(|| {
+            "Target snapshot expired or process identity changed. Target again.".to_string()
+        })?
     } else {
         let snapshots = state
             .process_snapshots
             .lock()
             .map_err(|_| "Process snapshot registry is unavailable.".to_string())?;
-        snapshots
-            .get(&app_id)
-            .cloned()
-            .ok_or_else(|| "No verified process snapshot found for this application. Please refresh processes.".to_string())?
+        snapshots.get(&app_id).cloned().ok_or_else(|| {
+            "No verified process snapshot found for this application. Please refresh processes."
+                .to_string()
+        })?
     };
 
     run_blocking("Process termination", move || {
@@ -813,7 +982,10 @@ pub async fn prepare_uninstall(
         .uninstall_plans
         .lock()
         .map_err(|_| "Uninstall plan registry is unavailable.".to_string())?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     plans.retain(|_, p| p.expires_at > now);
     plans.insert(plan.plan_id.clone(), plan);
 
@@ -827,7 +999,10 @@ pub async fn execute_uninstall(
     plan_id: String,
     timeout_secs: Option<u64>,
 ) -> Result<uninstall::UninstallExecutionResult, String> {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
     // Consume single-use plan from backend registry
     let plan = {
@@ -835,9 +1010,9 @@ pub async fn execute_uninstall(
             .uninstall_plans
             .lock()
             .map_err(|_| "Uninstall plan registry is unavailable.".to_string())?;
-        plans
-            .remove(&plan_id)
-            .ok_or_else(|| "Uninstall plan expired or not found. Please review and confirm again.".to_string())?
+        plans.remove(&plan_id).ok_or_else(|| {
+            "Uninstall plan expired or not found. Please review and confirm again.".to_string()
+        })?
     };
 
     if now > plan.expires_at {
@@ -855,34 +1030,71 @@ pub async fn execute_uninstall(
         .iter()
         .find(|a| a.id == app_id)
         .cloned()
-        .or_else(|| {
-            state.app_snapshots.lock().ok()?.get(&app_id).cloned()
-        })
         .ok_or_else(|| "Application is no longer registered in uninstall inventory.".to_string())?;
 
     if let Ok(mut snapshots) = state.app_snapshots.lock() {
         snapshots.insert(live_app.id.clone(), live_app.clone());
     }
 
-    let live_cmd = if plan.command.arguments.iter().any(|a| a == "/qn" || a == "/quiet" || a == "/s" || a == "/S") && live_app.quiet_uninstall_string.is_some() {
-        live_app.quiet_uninstall_string.as_deref().unwrap_or(&plan.raw_command)
-    } else {
-        live_app.uninstall_string.as_deref().unwrap_or(&plan.raw_command)
-    };
-
-    if live_cmd != plan.raw_command {
-        return Err("The registered uninstaller command was modified after confirmation. Execution aborted.".into());
+    if !live_uninstaller_matches(&live_app, &plan.raw_command) {
+        return Err("The registered uninstaller command or protection changed after confirmation. Execution aborted.".into());
     }
-
     let cancel = Arc::new(AtomicBool::new(false));
     let timeout = timeout_secs.unwrap_or(600);
     let plan_command = plan.command;
     let plan_app_id = plan.app_id;
 
-    run_blocking("Standard uninstall", move || {
-        uninstall::execute_uninstaller(&plan_app_id, &plan_command, &cancel, timeout)
+    let result = run_blocking("Standard uninstall", move || {
+        let mut result =
+            uninstall::execute_uninstaller(&plan_app_id, &plan_command, &cancel, timeout)?;
+        reconcile_uninstall_result(&mut result, &apps::discover_apps());
+        Ok::<_, String>(result)
     })
-    .await?
+    .await?;
+    *state
+        .cached_apps
+        .lock()
+        .map_err(|_| "Application cache unavailable.")? = None;
+    result
+}
+
+#[tauri::command]
+pub async fn uninstall_store_app(
+    app_id: String,
+) -> Result<uninstall::UninstallExecutionResult, String> {
+    let _ = app_id;
+    Err("Store apps are managed by Windows. Use Settings → Apps → Installed apps, or winget uninstall. Cyron does not remove Store packages.".into())
+}
+
+fn reconcile_uninstall_result(
+    result: &mut uninstall::UninstallExecutionResult,
+    inventory: &apps::AppInventory,
+) {
+    if result.status != "completed" {
+        return;
+    }
+    if result.restart_required {
+        result.status = "restart_required".into();
+        result.message = "The uninstaller requested a restart. Removal is not yet verified; restart Windows and refresh the inventory.".into();
+    } else if !inventory.warnings.is_empty()
+        || inventory.apps.iter().any(|app| app.id == result.app_id)
+    {
+        result.status = "remaining".into();
+        result.message = "The uninstaller exited, but removal is not verified. The application is still registered or inventory verification was incomplete. Refresh after any vendor windows finish.".into();
+    } else {
+        result.message = "The uninstaller exited and the application is no longer in the installed-app inventory. Residual files may remain; review them separately.".into();
+    }
+}
+
+fn live_uninstaller_matches(app: &apps::InstalledApp, approved: &str) -> bool {
+    !app.is_protected
+        && app.source != "store"
+        && !approved.is_empty()
+        && [
+            app.uninstall_string.as_deref(),
+            app.quiet_uninstall_string.as_deref(),
+        ]
+        .contains(&Some(approved))
 }
 
 #[tauri::command]
@@ -896,10 +1108,9 @@ pub async fn snapshot_app_identity(
             .hunter_app_snapshots
             .lock()
             .map_err(|_| "Hunter application snapshot registry is unavailable.".to_string())?;
-        return snapshots
-            .get(&app_id_trimmed)
-            .cloned()
-            .ok_or_else(|| format!("Target '{app_id_trimmed}' expired or not found. Target again."));
+        return snapshots.get(&app_id_trimmed).cloned().ok_or_else(|| {
+            format!("Target '{app_id_trimmed}' expired or not found. Target again.")
+        });
     }
 
     let inventory = run_blocking("Application lookup for snapshot", apps::discover_apps).await?;
@@ -909,9 +1120,16 @@ pub async fn snapshot_app_identity(
         .find(|a| a.id == app_id_trimmed)
         .cloned()
         .or_else(|| {
-            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+            state
+                .app_snapshots
+                .lock()
+                .ok()?
+                .get(&app_id_trimmed)
+                .cloned()
         })
-        .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
+        .ok_or_else(|| {
+            "Application not found in uninstall inventory or cached snapshots.".to_string()
+        })?;
 
     let mut snapshots = state
         .app_snapshots
@@ -927,16 +1145,24 @@ pub async fn scan_app_leftovers(
     app_id: String,
 ) -> Result<leftovers::LeftoverScanReport, String> {
     let app_id_trimmed = app_id.trim().to_string();
-    let inventory = run_blocking("Application lookup for leftover scan", apps::discover_apps).await?;
+    let inventory =
+        run_blocking("Application lookup for leftover scan", apps::discover_apps).await?;
     let app = inventory
         .apps
         .iter()
         .find(|a| a.id == app_id_trimmed)
         .cloned()
         .or_else(|| {
-            state.app_snapshots.lock().ok()?.get(&app_id_trimmed).cloned()
+            state
+                .app_snapshots
+                .lock()
+                .ok()?
+                .get(&app_id_trimmed)
+                .cloned()
         })
-        .ok_or_else(|| "Application not found in uninstall inventory or cached snapshots.".to_string())?;
+        .ok_or_else(|| {
+            "Application not found in uninstall inventory or cached snapshots.".to_string()
+        })?;
 
     let name = app.name.clone();
     let publisher = app.publisher.clone();
@@ -962,7 +1188,10 @@ pub async fn scan_app_leftovers(
         .leftover_plans
         .lock()
         .map_err(|_| "Leftover plan registry is unavailable.".to_string())?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     plans.retain(|_, p| p.expires_at > now);
     plans.insert(plan.plan_id.clone(), plan);
 
@@ -982,13 +1211,22 @@ pub async fn prepare_broken_inventory_cleanup(
     let (hive, subkey_name) = if let Some((h, s)) = app_id_trimmed.split_once('|') {
         (h.to_string(), s.to_string())
     } else {
-        let inventory = run_blocking("Application lookup for broken entry cleanup", apps::discover_apps).await?;
+        let inventory = run_blocking(
+            "Application lookup for broken entry cleanup",
+            apps::discover_apps,
+        )
+        .await?;
         let found_app = inventory
             .apps
             .iter()
             .find(|a| a.id == app_id_trimmed)
-            .ok_or_else(|| format!("Application '{app_id_trimmed}' not found in registry inventory."))?;
-        let sub = found_app.registry_key_name.clone().unwrap_or_else(|| app_id_trimmed.clone());
+            .ok_or_else(|| {
+                format!("Application '{app_id_trimmed}' not found in registry inventory.")
+            })?;
+        let sub = found_app
+            .registry_key_name
+            .clone()
+            .unwrap_or_else(|| app_id_trimmed.clone());
         (found_app.hive.clone(), sub)
     };
 
@@ -998,7 +1236,10 @@ pub async fn prepare_broken_inventory_cleanup(
     // 2. Verify it qualifies as genuinely broken right now (never trusting stale cached state)
     leftovers::verify_live_broken_status(&live_meta)?;
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let plan_id = leftovers::generate_collision_resistant_plan_id("broken-plan");
 
     let stored_plan = leftovers::StoredBrokenEntryPlan {
@@ -1048,17 +1289,21 @@ pub async fn execute_broken_inventory_cleanup(
             .broken_entry_plans
             .lock()
             .map_err(|_| "Broken entry plan registry is unavailable.".to_string())?;
-        plans
-            .remove(plan_id.trim())
-            .ok_or_else(|| "Broken inventory cleanup plan expired or not found. Please prepare again.".to_string())?
+        plans.remove(plan_id.trim()).ok_or_else(|| {
+            "Broken inventory cleanup plan expired or not found. Please prepare again.".to_string()
+        })?
     };
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     if now > plan.expires_at {
         return Err("Broken inventory cleanup plan has expired. Please prepare again.".into());
     }
 
-    if plan.registry_key_path.to_ascii_lowercase() != confirmed_key_path.trim().to_ascii_lowercase() {
+    if plan.registry_key_path.to_ascii_lowercase() != confirmed_key_path.trim().to_ascii_lowercase()
+    {
         return Err("Confirmed registry key path does not match the prepared cleanup plan.".into());
     }
 
@@ -1079,7 +1324,10 @@ pub async fn execute_broken_inventory_cleanup(
         let log = cleanup::CleanupLogEntry {
             id: format!("clean-broken-{}-{at}", plan.plan_id),
             at,
-            title: format!("Cleaned broken uninstall registry entry ({})", plan.app_name),
+            title: format!(
+                "Cleaned broken uninstall registry entry ({})",
+                plan.app_name
+            ),
             targets: vec![plan.registry_key_path.clone()],
             bytes: 0,
             files: 0,
@@ -1087,7 +1335,159 @@ pub async fn execute_broken_inventory_cleanup(
             skipped: 0,
             failed: 0,
             status: "completed".into(),
-            detail: format!("Created verified .reg backup in quarantine batch {}", plan.plan_id),
+            detail: format!(
+                "Created verified .reg backup in quarantine batch {}",
+                plan.plan_id
+            ),
+        };
+        let _ = cleanup::append_log(&data_dir, &log);
+    }
+
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn prepare_forced_removal_cleanup(
+    state: State<'_, AppState>,
+    app_id: String,
+) -> Result<leftovers::BrokenEntryPlan, String> {
+    let app_id_trimmed = app_id.trim().to_string();
+    if app_id_trimmed.is_empty() {
+        return Err("Application ID is required.".into());
+    }
+
+    if app_id_trimmed.starts_with("store|") {
+        return Err("Microsoft Store packages must be uninstalled using Windows Package Manager, not registry key purging.".into());
+    }
+
+    let (hive, subkey_name) = if let Some((h, s)) = app_id_trimmed.split_once('|') {
+        (h.to_string(), s.to_string())
+    } else {
+        let inventory = run_blocking(
+            "Application lookup for forced removal cleanup",
+            apps::discover_apps,
+        )
+        .await?;
+        let found_app = inventory
+            .apps
+            .iter()
+            .find(|a| a.id == app_id_trimmed)
+            .ok_or_else(|| {
+                format!("Application '{app_id_trimmed}' not found in registry inventory.")
+            })?;
+        let sub = found_app
+            .registry_key_name
+            .clone()
+            .unwrap_or_else(|| app_id_trimmed.clone());
+        (found_app.hive.clone(), sub)
+    };
+
+    let live_meta = leftovers::read_live_broken_entry_metadata(&hive, &subkey_name)?;
+    leftovers::verify_live_forced_removal_status(&live_meta)?;
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let plan_id = leftovers::generate_collision_resistant_plan_id("forced-plan");
+
+    let stored_plan = leftovers::StoredBrokenEntryPlan {
+        plan_id: plan_id.clone(),
+        app_id: app_id_trimmed.clone(),
+        app_name: live_meta.display_name.clone(),
+        registry_key_path: live_meta.registry_key_path.clone(),
+        subkey_name: live_meta.subkey_name.clone(),
+        hive: live_meta.hive.clone(),
+        fingerprint: live_meta.fingerprint.clone(),
+        expires_at: now + 300,
+    };
+
+    let public_plan = leftovers::BrokenEntryPlan {
+        plan_id: plan_id.clone(),
+        app_id: app_id_trimmed,
+        app_name: live_meta.display_name,
+        registry_key_path: live_meta.registry_key_path,
+        subkey_name: live_meta.subkey_name,
+        hive: live_meta.hive,
+        fingerprint: live_meta.fingerprint,
+        expires_at: now + 300,
+    };
+
+    let mut plans = state
+        .broken_entry_plans
+        .lock()
+        .map_err(|_| "Forced removal plan registry is unavailable.".to_string())?;
+    plans.retain(|_, p| p.expires_at > now);
+    plans.insert(plan_id, stored_plan);
+
+    Ok(public_plan)
+}
+
+#[tauri::command]
+pub async fn execute_forced_removal_cleanup(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+    confirmed_key_path: String,
+) -> Result<leftovers::LeftoverCleanReport, String> {
+    ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
+    let quarantine_root = cleanup_quarantine_root(&app)?;
+
+    let plan = {
+        let mut plans = state
+            .broken_entry_plans
+            .lock()
+            .map_err(|_| "Forced removal plan registry is unavailable.".to_string())?;
+        plans.remove(plan_id.trim()).ok_or_else(|| {
+            "Forced removal cleanup plan expired or not found. Please prepare again.".to_string()
+        })?
+    };
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now > plan.expires_at {
+        return Err("Forced removal cleanup plan has expired. Please prepare again.".into());
+    }
+
+    if plan.registry_key_path.to_ascii_lowercase() != confirmed_key_path.trim().to_ascii_lowercase()
+    {
+        return Err("Confirmed registry key path does not match the prepared cleanup plan.".into());
+    }
+
+    // Invalidate app cache on successful cleanup
+    if let Ok(mut cache) = state.cached_apps.lock() {
+        *cache = None;
+    }
+
+    let plan_clone = plan.clone();
+    let report = run_blocking("Clean forced removal entry", move || {
+        leftovers::execute_forced_entry_removal(&plan_clone, &quarantine_root)
+    })
+    .await??;
+
+    // Log the successful cleanup to cleanup-log.json so it is discoverable in Activity/History
+    if let Ok(data_dir) = app_data_dir(&app) {
+        let at = now_secs();
+        let log = cleanup::CleanupLogEntry {
+            id: format!("clean-forced-{}-{at}", plan.plan_id),
+            at,
+            title: format!(
+                "Forced removal of uninstall registry entry ({})",
+                plan.app_name
+            ),
+            targets: vec![plan.registry_key_path.clone()],
+            bytes: 0,
+            files: 0,
+            quarantined: 0,
+            skipped: 0,
+            failed: 0,
+            status: "completed".into(),
+            detail: format!(
+                "Created verified .reg backup in quarantine batch {}",
+                plan.plan_id
+            ),
         };
         let _ = cleanup::append_log(&data_dir, &log);
     }
@@ -1110,7 +1510,9 @@ pub async fn restore_registry_backup(
     let backup_file = batch_dir.join("registry_backup.reg");
 
     if !backup_file.exists() {
-        return Err(format!("No registry backup (.reg) found in quarantine batch '{run_id}'."));
+        return Err(format!(
+            "No registry backup (.reg) found in quarantine batch '{run_id}'."
+        ));
     }
 
     // Read and validate manifest binding
@@ -1118,7 +1520,10 @@ pub async fn restore_registry_backup(
         .ok_or_else(|| format!("Quarantine batch '{run_id}' is missing a valid manifest.json."))?;
 
     if manifest.run_id != run_id {
-        return Err(format!("Manifest runId mismatch: expected '{run_id}', found '{}'", manifest.run_id));
+        return Err(format!(
+            "Manifest runId mismatch: expected '{run_id}', found '{}'",
+            manifest.run_id
+        ));
     }
 
     let allow_overwrite = overwrite_conflict.unwrap_or(false);
@@ -1151,8 +1556,16 @@ pub async fn restore_registry_backup(
         quarantined: 0,
         skipped: 0,
         failed: report.errors.len() as u64,
-        status: if report.errors.is_empty() { "completed" } else { "failed" }.into(),
-        detail: format!("Restored {} keys and {} values from backup", report.keys_restored, report.values_restored),
+        status: if report.errors.is_empty() {
+            "completed"
+        } else {
+            "failed"
+        }
+        .into(),
+        detail: format!(
+            "Restored {} keys and {} values from backup",
+            report.keys_restored, report.values_restored
+        ),
     };
     let _ = cleanup::append_log(&data_dir, &log);
 
@@ -1175,9 +1588,9 @@ pub async fn clean_app_leftovers(
             .leftover_plans
             .lock()
             .map_err(|_| "Leftover plan registry is unavailable.".to_string())?;
-        plans
-            .remove(&plan_id)
-            .ok_or_else(|| "Residual cleanup plan expired or not found. Please scan again.".to_string())?
+        plans.remove(&plan_id).ok_or_else(|| {
+            "Residual cleanup plan expired or not found. Please scan again.".to_string()
+        })?
     };
 
     if plan.app_id != app_id {
@@ -1206,6 +1619,8 @@ pub struct BatchUninstallReport {
     pub total: usize,
     pub completed: usize,
     pub failed: usize,
+    pub cancelled: usize,
+    pub remaining: usize,
     pub restart_required: usize,
     pub results: Vec<BatchUninstallItemResult>,
 }
@@ -1225,9 +1640,27 @@ pub async fn prepare_batch_uninstall(
 
     let inventory = run_blocking("Batch application lookup", apps::discover_apps).await?;
     let mut selected_apps = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for id in &app_ids {
-        if let Some(app) = inventory.apps.iter().find(|a| a.id == *id) {
-            selected_apps.push(app.clone());
+        if !seen.insert(id) {
+            return Err("An application was selected more than once.".into());
+        }
+        let app = inventory.apps.iter().find(|a| a.id == *id).ok_or_else(|| {
+            "A selected application is no longer registered. Refresh and review again.".to_string()
+        })?;
+        if app.is_protected || app.source == "store" {
+            return Err("Protected and Store applications cannot be batch uninstalled.".into());
+        }
+        selected_apps.push(app.clone());
+    }
+
+    {
+        let mut snapshots = state
+            .app_snapshots
+            .lock()
+            .map_err(|_| "Application snapshot registry unavailable.")?;
+        for app in &selected_apps {
+            snapshots.insert(app.id.clone(), app.clone());
         }
     }
 
@@ -1238,7 +1671,10 @@ pub async fn prepare_batch_uninstall(
         .batch_uninstall_plans
         .lock()
         .map_err(|_| "Batch uninstall plan registry is unavailable.".to_string())?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     plans.retain(|_, p| p.expires_at > now);
     plans.insert(plan.plan_id.clone(), plan);
 
@@ -1247,10 +1683,14 @@ pub async fn prepare_batch_uninstall(
 
 #[tauri::command]
 pub async fn execute_batch_uninstall(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     plan_id: String,
 ) -> Result<BatchUninstallReport, String> {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
     // Consume single-use plan from backend registry
     let plan = {
@@ -1258,23 +1698,39 @@ pub async fn execute_batch_uninstall(
             .batch_uninstall_plans
             .lock()
             .map_err(|_| "Batch uninstall plan registry is unavailable.".to_string())?;
-        plans
-            .remove(&plan_id)
-            .ok_or_else(|| "Batch uninstall plan expired or not found. Please review and confirm again.".to_string())?
+        plans.remove(&plan_id).ok_or_else(|| {
+            "Batch uninstall plan expired or not found. Please review and confirm again."
+                .to_string()
+        })?
     };
 
     if now > plan.expires_at {
         return Err("Batch uninstall plan has expired. Please review and confirm again.".into());
     }
 
-    run_blocking("Batch uninstallation", move || {
-        let inventory = apps::discover_apps();
+    let cancel = Arc::new(AtomicBool::new(false));
+    register_scan(
+        &state.batch_uninstall_jobs,
+        &plan_id,
+        cancel.clone(),
+        "batch uninstall",
+    )?;
+    let job_id = plan_id.clone();
+    let result = run_blocking("Batch uninstallation", move || {
         let mut results = Vec::new();
         let mut completed = 0;
         let mut failed = 0;
+        let mut cancelled = 0;
+        let mut remaining = 0;
         let mut restart_required = 0;
-
+        let total = plan.items.len();
         for item in plan.items {
+            if cancel.load(Ordering::Relaxed) {
+                cancelled += 1;
+                results.push(BatchUninstallItemResult { app_id: item.app_id, name: item.app_name, status: "cancelled".into(), exit_code: None, message: "Not launched: queue stopped by the user.".into() });
+                continue;
+            }
+            let _ = app.emit("cyron-batch-uninstall-progress", serde_json::json!({"planId": plan_id, "completed": results.len(), "total": total, "currentApp": item.app_name}));
             if !item.is_valid {
                 results.push(BatchUninstallItemResult {
                     app_id: item.app_id,
@@ -1288,6 +1744,7 @@ pub async fn execute_batch_uninstall(
             }
 
             // Re-verify against live system inventory to detect tampering or changed uninstaller commands
+            let inventory = apps::discover_apps();
             let live_app = inventory.apps.iter().find(|a| a.id == item.app_id);
             let Some(live_app) = live_app else {
                 results.push(BatchUninstallItemResult {
@@ -1301,25 +1758,14 @@ pub async fn execute_batch_uninstall(
                 continue;
             };
 
-            let live_cmd = if item.arguments.iter().any(|a| a == "/qn" || a == "/quiet" || a == "/s" || a == "/S") && live_app.quiet_uninstall_string.is_some() {
-                live_app.quiet_uninstall_string.as_deref().unwrap_or(&item.raw_command)
-            } else {
-                live_app.uninstall_string.as_deref().unwrap_or(&item.raw_command)
-            };
-
-            if live_cmd != item.raw_command {
+            if !live_uninstaller_matches(live_app, &item.raw_command) {
                 results.push(BatchUninstallItemResult {
-                    app_id: item.app_id,
-                    name: item.app_name,
-                    status: "failed".into(),
-                    exit_code: None,
-                    message: "The registered uninstaller command was modified after confirmation. Execution skipped.".into(),
+                    app_id: item.app_id, name: item.app_name, status: "failed".into(), exit_code: None,
+                    message: "The registered uninstaller command or protection changed after confirmation. Execution skipped.".into(),
                 });
                 failed += 1;
                 continue;
             }
-
-            let cancel = Arc::new(AtomicBool::new(false));
             let parsed_cmd = uninstall::ParsedUninstallCommand {
                 executable: item.executable,
                 arguments: item.arguments,
@@ -1328,12 +1774,18 @@ pub async fn execute_batch_uninstall(
                 rejection_reason: None,
             };
 
-            match uninstall::execute_uninstaller(&item.app_id, &parsed_cmd, &cancel, 600) {
-                Ok(res) => {
+            // Stop requests apply between applications; do not kill a running vendor uninstaller.
+            match uninstall::execute_uninstaller(&item.app_id, &parsed_cmd, &AtomicBool::new(false), 600) {
+                Ok(mut res) => {
+                    reconcile_uninstall_result(&mut res, &apps::discover_apps());
                     if res.status == "completed" {
                         completed += 1;
                     } else if res.status == "restart_required" {
                         restart_required += 1;
+                    } else if res.status == "cancelled" {
+                        cancelled += 1;
+                    } else if res.status == "remaining" {
+                        remaining += 1;
                     } else {
                         failed += 1;
                     }
@@ -1363,11 +1815,36 @@ pub async fn execute_batch_uninstall(
             total,
             completed,
             failed,
+            cancelled,
+            remaining,
             restart_required,
             results,
         })
     })
-    .await?
+    .await;
+    state
+        .batch_uninstall_jobs
+        .lock()
+        .map_err(|_| "Batch job registry unavailable.")?
+        .remove(&job_id);
+    *state
+        .cached_apps
+        .lock()
+        .map_err(|_| "Application cache unavailable.")? = None;
+    result?
+}
+
+#[tauri::command]
+pub fn cancel_batch_uninstall(state: State<'_, AppState>, plan_id: String) -> Result<(), String> {
+    let jobs = state
+        .batch_uninstall_jobs
+        .lock()
+        .map_err(|_| "Batch job registry unavailable.")?;
+    let flag = jobs
+        .get(&plan_id)
+        .ok_or("This queue is no longer running.")?;
+    flag.store(true, Ordering::Relaxed);
+    Ok(())
 }
 
 /* ----------------------------------------------------------------- helpers */
@@ -1495,7 +1972,8 @@ pub fn get_startup_route(
 }
 
 #[tauri::command]
-pub fn get_explorer_integration_status() -> Result<crate::explorer::ExplorerIntegrationStatus, String> {
+pub fn get_explorer_integration_status(
+) -> Result<crate::explorer::ExplorerIntegrationStatus, String> {
     Ok(crate::explorer::get_integration_status())
 }
 
@@ -1512,7 +1990,6 @@ pub fn repair_explorer_integration() -> Result<(), String> {
         status.advanced_actions_registered,
     )
 }
-
 
 #[tauri::command]
 pub async fn find_locking_processes(
@@ -1777,47 +2254,8 @@ pub fn list_cleanup_providers() -> Result<Vec<crate::providers::CleanupProviderD
     Ok(crate::providers::get_default_providers())
 }
 
-fn recognize_generic_cache_dir(path: &std::path::Path) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
-    let lower = path.to_string_lossy().to_lowercase();
-    let file_name = path.file_name()?.to_string_lossy().to_lowercase();
-
-    if file_name == "$recycle.bin" || lower.ends_with(r"\$recycle.bin") {
-        return Some(("Windows", "windows", "safe", "Windows volume Recycle Bin containing deleted items."));
-    }
-    if file_name == "temp" || file_name == "tmp" {
-        return Some(("Temporary Files", "windows", "safe", "Temporary workspace and logging files."));
-    }
-    if file_name == "node_modules" {
-        return Some(("Node.js", "packages", "safe", "Project dependency packages; can be re-installed using npm/pnpm/yarn install."));
-    }
-    if file_name == "_cacache" || file_name == "npm-cache" {
-        return Some(("npm", "packages", "safe", "npm content-addressable package tarball cache."));
-    }
-    if file_name == "caches" && lower.contains(".gradle") {
-        return Some(("Gradle", "packages", "safe", "Gradle build dependency and distribution cache."));
-    }
-    if file_name == "cache" && lower.contains(".cargo") {
-        return Some(("Cargo", "packages", "safe", "Cargo crates.io package download cache."));
-    }
-    if file_name == "downloading" && lower.contains("steamapps") {
-        return Some(("Steam", "packages", "safe", "Incomplete or staging game downloads in Steam Library."));
-    }
-    if file_name == "shadercache" && lower.contains("steamapps") {
-        return Some(("Steam", "packages", "safe", "Pre-compiled graphics shaders for Steam games."));
-    }
-    if (file_name == "debug" || file_name == "release") && lower.contains(r"\target\") {
-        return Some(("Rust Cargo", "packages", "safe", "Compiled Rust build target binaries."));
-    }
-    if file_name == ".pnpm-store" || (file_name == "store" && lower.contains("pnpm")) {
-        return Some(("pnpm", "packages", "caution", "Global content-addressable package store for pnpm."));
-    }
-    None
-}
-
 #[tauri::command]
-pub fn inspect_cleanable_directory(
-    path: String,
-) -> Result<CleanableInspection, String> {
+pub fn inspect_cleanable_directory(path: String) -> Result<CleanableInspection, String> {
     let canonical = validate_directory(&path)?;
     let providers = crate::providers::get_default_providers();
 
@@ -1827,7 +2265,7 @@ pub fn inspect_cleanable_directory(
         let explanation = if provider.risk == crate::providers::PROTECTED {
             format!("Protected cache: {}. Cyron protects user history and configurations from automated deletion.", provider.impact)
         } else {
-            format!("Recognized {}: {}. Space will be reclaimed via quarantine.", provider.tool, provider.impact)
+            format!("Recognized {}: {}. Files move to quarantine; space is freed only when permanently purged.", provider.tool, provider.impact)
         };
 
         Ok(CleanableInspection {
@@ -1838,22 +2276,6 @@ pub fn inspect_cleanable_directory(
             risk: Some(provider.risk.clone()),
             category: Some(provider.category.clone()),
             explanation,
-            is_cleanable,
-            expected_reclaimable_bytes: if is_cleanable { measured.allocated } else { 0 },
-            total_occupied_bytes: measured.allocated,
-        })
-    } else if let Some((tool, category, risk, explanation)) = recognize_generic_cache_dir(&canonical) {
-        let is_cleanable = risk != "protected";
-        let measured = scan::measure_path(&canonical);
-        let encoded_id = format!("custom-dir-{}", crate::cleanup::encode_hex(canonical.to_string_lossy().as_bytes()));
-        Ok(CleanableInspection {
-            path: canonical.to_string_lossy().to_string(),
-            is_recognized: true,
-            provider_id: Some(encoded_id),
-            tool_label: Some(tool.to_string()),
-            risk: Some(risk.to_string()),
-            category: Some(category.to_string()),
-            explanation: format!("{explanation} Space will be reclaimed via quarantine."),
             is_cleanable,
             expected_reclaimable_bytes: if is_cleanable { measured.allocated } else { 0 },
             total_occupied_bytes: measured.allocated,
@@ -1919,9 +2341,10 @@ pub fn resolve_cursor_target(
     let target = crate::hunter::resolve_cursor_target(&cached_apps)?;
 
     if let Some(ref t) = target {
-        if let (Ok(mut h_proc_snaps), Ok(mut h_app_snaps)) =
-            (state.hunter_snapshots.lock(), state.hunter_app_snapshots.lock())
-        {
+        if let (Ok(mut h_proc_snaps), Ok(mut h_app_snaps)) = (
+            state.hunter_snapshots.lock(),
+            state.hunter_app_snapshots.lock(),
+        ) {
             crate::hunter::register_target_in_state(t, &mut h_proc_snaps, &mut h_app_snaps);
         }
     }
@@ -1950,6 +2373,129 @@ pub fn set_startup_item_enabled(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn successful_exit_requires_inventory_verification() {
+        let mut result = uninstall::UninstallExecutionResult {
+            app_id: "fixture".into(),
+            exit_code: Some(0),
+            status: "completed".into(),
+            restart_required: false,
+            message: String::new(),
+            elapsed_ms: 1,
+        };
+        let mut inventory = apps::AppInventory {
+            apps: Vec::new(),
+            warnings: vec!["access denied".into()],
+        };
+        reconcile_uninstall_result(&mut result, &inventory);
+        assert_eq!(result.status, "remaining");
+        result.status = "completed".into();
+        inventory.warnings.clear();
+        reconcile_uninstall_result(&mut result, &inventory);
+        assert_eq!(result.status, "completed");
+        assert!(result.message.contains("Residual files may remain"));
+        result.restart_required = true;
+        reconcile_uninstall_result(&mut result, &inventory);
+        assert_eq!(result.status, "restart_required");
+        result.status = "cancelled".into();
+        reconcile_uninstall_result(&mut result, &inventory);
+        assert_eq!(result.status, "cancelled");
+    }
+
+    #[test]
+    fn missing_changed_or_protected_live_commands_are_rejected() {
+        let mut app = apps::InstalledApp {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            version: None,
+            publisher: None,
+            install_location: None,
+            install_date: None,
+            uninstall_string: Some("normal.exe".into()),
+            quiet_uninstall_string: Some("quiet.exe /verysilent".into()),
+            display_icon: None,
+            estimated_size: None,
+            hive: "user-64".into(),
+            scope: "user".into(),
+            architecture: "x64".into(),
+            is_protected: false,
+            source: "win32".into(),
+            uninstall_support: "standard".into(),
+            confidence: "confirmed".into(),
+            detection_reason: None,
+            registry_key_name: None,
+        };
+        assert!(live_uninstaller_matches(&app, "quiet.exe /verysilent"));
+        assert!(live_uninstaller_matches(&app, "normal.exe"));
+        assert!(!live_uninstaller_matches(&app, "changed.exe"));
+        app.uninstall_string = None;
+        assert!(!live_uninstaller_matches(&app, "normal.exe"));
+        app.is_protected = true;
+        assert!(!live_uninstaller_matches(&app, "quiet.exe /verysilent"));
+        app.is_protected = false;
+        app.source = "store".into();
+        assert!(!live_uninstaller_matches(&app, "quiet.exe /verysilent"));
+        let mut inventory = apps::AppInventory {
+            apps: vec![app],
+            warnings: Vec::new(),
+        };
+        assert!(verify_removed_app("fixture", &inventory).is_err());
+        inventory.apps.clear();
+        assert!(verify_removed_app("fixture", &inventory).is_ok());
+        inventory.warnings.push("incomplete inventory".into());
+        assert!(verify_removed_app("fixture", &inventory).is_err());
+    }
+
+    #[test]
+    fn remnant_quarantine_requires_reviewed_filesystem_ids_and_selected_local_drive() {
+        let dir = temp_dir();
+        let path = dir.to_string_lossy().into_owned();
+        let drive = path
+            .chars()
+            .next()
+            .unwrap()
+            .to_ascii_uppercase()
+            .to_string();
+        let local = vec![volumes::VolumeInfo {
+            mount: format!("{drive}:\\"),
+            label: String::new(),
+            file_system: "NTFS".into(),
+            total: 0,
+            free: 0,
+            kind: "fixed".into(),
+        }];
+        let mut plan = leftovers::StoredLeftoverPlan {
+            plan_id: "fixture".into(),
+            app_id: "app".into(),
+            app_name: "Fixture".into(),
+            expires_at: u64::MAX,
+            candidates: vec![leftovers::LeftoverCandidate {
+                id: "cand-0".into(),
+                kind: "directory".into(),
+                path,
+                confidence: "medium".into(),
+                risk: "safe".into(),
+                reason: "Retained application metadata".into(),
+                size: 0,
+                file_count: 0,
+                selected: false,
+            }],
+        };
+        let selected = vec!["cand-0".into()];
+        let specs = remnant_cleanup_specs(&plan, &selected, &[drive.clone()], &local).unwrap();
+        assert_eq!(specs[0].risk, "caution");
+        assert!(
+            remnant_cleanup_specs(&plan, &["forged".into()], &[drive.clone()], &local).is_err()
+        );
+        assert!(remnant_cleanup_specs(&plan, &selected, &[], &local).is_err());
+        plan.candidates[0].kind = "registry_key".into();
+        assert!(remnant_cleanup_specs(&plan, &selected, &[drive.clone()], &local).is_err());
+        plan.candidates[0].kind = "directory".into();
+        plan.candidates[0].risk = "protected".into();
+        assert!(remnant_cleanup_specs(&plan, &selected, &[drive], &local).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -2020,7 +2566,10 @@ mod tests {
 
         assert!(error.contains("already running"));
         let scans = registry.lock().expect("registry lock");
-        assert!(Arc::ptr_eq(scans.get("same-job").expect("original remains"), &original));
+        assert!(Arc::ptr_eq(
+            scans.get("same-job").expect("original remains"),
+            &original
+        ));
         assert!(!replacement.load(Ordering::Relaxed));
     }
 
@@ -2065,6 +2614,7 @@ mod tests {
             read_only: false,
             exclusions: Vec::new(),
             snapshot_paths: HashMap::new(),
+            source_app_id: None,
         }
     }
 
@@ -2206,7 +2756,10 @@ mod tests {
         failed.quarantined = 0;
         failed.failed = 3;
         assert_eq!(cleanup_status(&failed), "failed");
-        assert_eq!(cleanup_history_entry(&cleanup_log_entry(&failed, 1)).status, "failed");
+        assert_eq!(
+            cleanup_history_entry(&cleanup_log_entry(&failed, 1)).status,
+            "failed"
+        );
     }
 
     #[test]

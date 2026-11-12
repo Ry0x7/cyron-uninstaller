@@ -28,7 +28,7 @@ import {
   IconStop,
   IconTrash,
 } from "../../components/Icons";
-import { UninstallWizard } from "./UninstallWizard";
+import { UninstallWizard, type UninstallMode } from "./UninstallWizard";
 
 const HIVE_LABEL: Record<string, string> = {
   "machine-64": "HKLM · 64-bit view",
@@ -50,6 +50,7 @@ export function AppDrawer({
 }) {
   const [tab, setTab] = useState<DrawerTab>("overview");
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardInitialMode, setWizardInitialMode] = useState<UninstallMode | undefined>(undefined);
 
   // Measurement state
   const [measurement, setMeasurement] = useState<{ appId: string; value: Measured } | null>(null);
@@ -335,16 +336,52 @@ export function AppDrawer({
       {/* Tab 1: Overview */}
       {tab === "overview" && (
         <>
-          <div style={{ marginBottom: 14 }}>
-            <Button
-              variant="danger"
-              icon={<IconTrash size={14} />}
-              disabled={app.isProtected}
-              onClick={() => setWizardOpen(true)}
-              style={{ width: "100%", justifyContent: "center" }}
-            >
-              {app.uninstallSupport === "missing" ? "Start Forced Removal…" : "Uninstall Application (Guided Wizard)…"}
-            </Button>
+          <div style={{ marginBottom: 14, display: "flex", gap: 8 }}>
+            {app.source === "store" ? (
+              <Button size="sm" onClick={() => setTab("uninstall")} style={{ width: "100%", justifyContent: "center" }}>
+                Store removal guidance
+              </Button>
+            ) : app.uninstallSupport === "missing" ? (
+              <Button
+                variant="danger"
+                icon={<IconTrash size={14} />}
+                disabled={app.isProtected}
+                onClick={() => {
+                  setWizardInitialMode("forced");
+                  setWizardOpen(true);
+                }}
+                style={{ width: "100%", justifyContent: "center" }}
+              >
+                Clean Broken Entry (Forced Removal)…
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="danger"
+                  icon={<IconTrash size={14} />}
+                  disabled={app.isProtected}
+                  onClick={() => {
+                    setWizardInitialMode("standard");
+                    setWizardOpen(true);
+                  }}
+                  style={{ flex: 1, justifyContent: "center" }}
+                >
+                  Safe Uninstall…
+                </Button>
+                <Button
+                  variant="secondary"
+                  icon={<IconTrash size={14} />}
+                  disabled={app.isProtected}
+                  onClick={() => {
+                    setWizardInitialMode("forced");
+                    setWizardOpen(true);
+                  }}
+                  style={{ flex: 1, justifyContent: "center" }}
+                >
+                  Forced Removal…
+                </Button>
+              </>
+            )}
           </div>
 
           <KeyValue
@@ -542,10 +579,9 @@ export function AppDrawer({
             <Banner tone="info">
               <strong>Microsoft Store / MSIX application.</strong>
               <p style={{ marginTop: 6 }}>
-                This package is managed by Windows Package Manager. Microsoft Store apps do not
-                expose Win32 uninstall executables. To remove it, use Windows Settings &gt; Installed Apps
-                or <code>winget uninstall &quot;{app.name}&quot;</code>. Cyron provides read-only inventory
-                and leftover scanning.
+                This package is managed by Windows. Remove it in Settings → Apps → Installed apps,
+                or use <code>winget uninstall &quot;{app.name}&quot;</code>. Cyron can scan for
+                residual data, but cannot uninstall Store apps directly.
               </p>
               <div style={{ marginTop: 10 }}>
                 <Button size="sm" onClick={() => setTab("leftovers")}>
@@ -571,9 +607,19 @@ export function AppDrawer({
               <strong>Broken uninstaller record.</strong>
               <p style={{ marginTop: 6 }}>
                 The uninstaller executable registered in the Windows registry was not found on disk.
-                Use the Leftover Scanner to safely inspect and clean residual directories and registry keys.
+                Use Forced Removal to cleanly purge this entry and any residual files.
               </p>
-              <div style={{ marginTop: 10 }}>
+              <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => {
+                    setWizardInitialMode("forced");
+                    setWizardOpen(true);
+                  }}
+                >
+                  Forced Removal (Purge Entry)
+                </Button>
                 <Button size="sm" onClick={() => setTab("leftovers")}>
                   Scan for leftovers
                 </Button>
@@ -780,11 +826,17 @@ export function AppDrawer({
       {revealError && <p className="un-inline-error">{revealError}</p>}
 
       <UninstallWizard
+        key={app.id}
         app={app}
         isOpen={wizardOpen}
-        onClose={() => setWizardOpen(false)}
+        initialMode={wizardInitialMode}
+        onClose={() => {
+          setWizardOpen(false);
+          setWizardInitialMode(undefined);
+        }}
         onComplete={() => {
           setWizardOpen(false);
+          setWizardInitialMode(undefined);
           onClose();
           onUninstallSuccess?.();
         }}

@@ -211,6 +211,15 @@ export const DetailedListing = memo(function DetailedListing({
                   <tr
                     key={child.path || `${child.name}-${idx}`}
                     className={`az-details-row ${isSelected ? "is-selected" : ""}`}
+                    tabIndex={child.path ? 0 : undefined}
+                    aria-selected={Boolean(isSelected)}
+                    onKeyDown={(event) => {
+                      if (event.key === " " || event.key === "Enter") {
+                        event.preventDefault();
+                        onSelect(child);
+                      }
+                      if (event.key === "ArrowRight" && child.kind === "dir") onDrill(child);
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       onSelect(child);

@@ -1,5 +1,6 @@
 use serde::Serialize;
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -471,6 +472,24 @@ pub const CATALOG: &[TargetDef] = &[
         note: "Dumps written when applications crash.",
     },
     TargetDef {
+        id: "wer-report-archive",
+        tool: "Windows Error Reporting",
+        label: "Archived error reports",
+        path: "%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportArchive",
+        risk: CAUTION,
+        category: WINDOWS,
+        note: "Archived crash reports and diagnostic evidence; moving them removes local troubleshooting history until Windows writes new reports.",
+    },
+    TargetDef {
+        id: "wer-report-queue",
+        tool: "Windows Error Reporting",
+        label: "Queued error reports",
+        path: "%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportQueue",
+        risk: CAUTION,
+        category: WINDOWS,
+        note: "Crash reports waiting for Windows Error Reporting; moving them removes evidence that may help diagnose recent application failures.",
+    },
+    TargetDef {
         id: "inet-cache",
         tool: "Windows",
         label: "Internet cache",
@@ -548,6 +567,51 @@ pub fn impact_for(definition: &TargetDef) -> String {
 
 /// Measures every known developer, AI and Windows cache location.
 pub fn discover_caches() -> CacheInventory {
+    discover_caches_in(None)
+}
+
+/// Measures only targets on selected mounted local drives. `None` means all
+/// supported local drives; callers pass drive letters, never filesystem paths.
+pub fn discover_caches_for_drives(
+    drive_letters: Option<Vec<String>>,
+) -> Result<CacheInventory, String> {
+    let volumes = crate::volumes::list_volumes();
+    let supported: HashSet<char> = volumes
+        .iter()
+        .filter(|volume| matches!(volume.kind.as_str(), "fixed" | "removable"))
+        .filter_map(|volume| volume.mount.chars().next().map(|c| c.to_ascii_uppercase()))
+        .collect();
+    let selected = select_drives(drive_letters, &supported)?;
+    Ok(discover_caches_in(Some(&selected)))
+}
+
+fn select_drives(
+    drive_letters: Option<Vec<String>>,
+    supported: &HashSet<char>,
+) -> Result<HashSet<char>, String> {
+    match drive_letters {
+        None => Ok(supported.clone()),
+        Some(letters) if letters.is_empty() => {
+            return Err("Select at least one local drive to scan.".into());
+        }
+        Some(letters) => {
+            let mut selected = HashSet::new();
+            for value in letters {
+                let mut chars = value.chars();
+                let Some(letter) = chars.next().map(|c| c.to_ascii_uppercase()) else {
+                    return Err("Drive selections must be single letters.".into());
+                };
+                if chars.next().is_some() || !supported.contains(&letter) {
+                    return Err(format!("{value} is not a mounted fixed or removable drive."));
+                }
+                selected.insert(letter);
+            }
+            Ok(selected)
+        }
+    }
+}
+
+fn discover_caches_in(selected_drives: Option<&HashSet<char>>) -> CacheInventory {
     let mut warnings = Vec::new();
     let mut seen = HashSet::new();
     let mut jobs = Vec::with_capacity(CATALOG.len());
@@ -567,6 +631,10 @@ pub fn discover_caches() -> CacheInventory {
                 continue;
             }
         };
+
+        if selected_drives.is_some_and(|drives| !path_is_on_selected_drive(&path, drives)) {
+            continue;
+        }
 
         if !seen.insert(path.to_lowercase()) {
             continue;
@@ -602,7 +670,7 @@ pub fn discover_caches() -> CacheInventory {
         });
     }
 
-    discover_secondary_drive_caches(&mut seen, &mut targets);
+    discover_secondary_drive_caches(&mut seen, &mut targets, selected_drives);
 
     targets.sort_by(|a, b| {
         category_rank(&a.category)
@@ -623,11 +691,31 @@ pub fn discover_caches() -> CacheInventory {
     }
 }
 
-fn discover_secondary_drive_caches(seen: &mut HashSet<String>, targets: &mut Vec<CacheTarget>) {
+fn path_is_on_selected_drive(path: &str, drives: &HashSet<char>) -> bool {
+    path.chars()
+        .next()
+        .is_some_and(|letter| drives.contains(&letter.to_ascii_uppercase()))
+        && path.as_bytes().get(1) == Some(&b':')
+        && path
+            .as_bytes()
+            .get(2)
+            .is_some_and(|separator| matches!(*separator, b'\\' | b'/'))
+}
+
+fn discover_secondary_drive_caches(
+    seen: &mut HashSet<String>,
+    targets: &mut Vec<CacheTarget>,
+    selected_drives: Option<&HashSet<char>>,
+) {
     let volumes = crate::volumes::list_volumes();
     for vol in volumes {
         let mount = vol.mount.trim_end_matches('\\');
         let letter = mount.chars().next().unwrap_or('C').to_ascii_uppercase();
+        if !matches!(vol.kind.as_str(), "fixed" | "removable")
+            || selected_drives.is_some_and(|drives| !drives.contains(&letter))
+        {
+            continue;
+        }
         let letter_lower = letter.to_ascii_lowercase();
 
         let candidates = [
@@ -636,27 +724,18 @@ fn discover_secondary_drive_caches(seen: &mut HashSet<String>, targets: &mut Vec
                 "Windows",
                 format!("Recycle Bin ({letter}:)"),
                 format!("{mount}\\$Recycle.Bin"),
-                SAFE,
+                PROTECTED,
                 WINDOWS,
-                format!("Deleted files held in the {letter}: volume Recycle Bin."),
-            ),
-            (
-                format!("drive-{letter_lower}-temp"),
-                "Temporary Files",
-                format!("Volume Temp ({letter}:)"),
-                format!("{mount}\\Temp"),
-                SAFE,
-                WINDOWS,
-                format!("Temporary files and logs stored under {letter}:\\Temp."),
+                format!("Windows manages deleted files and restore metadata in the {letter}: Recycle Bin; Cyron measures it but never moves it."),
             ),
             (
                 format!("drive-{letter_lower}-steam-downloading"),
                 "Steam",
                 format!("Steam Downloads ({letter}:)"),
                 format!("{mount}\\SteamLibrary\\steamapps\\downloading"),
-                SAFE,
+                CAUTION,
                 PACKAGES,
-                format!("Staging and incomplete game downloads in {letter}: Steam Library."),
+                format!("Steam's pending downloads on {letter}: may reset if moved; pause active downloads and expect incomplete content to download again."),
             ),
             (
                 format!("drive-{letter_lower}-steam-shadercache"),
@@ -679,10 +758,21 @@ fn discover_secondary_drive_caches(seen: &mut HashSet<String>, targets: &mut Vec
         ];
 
         for (id, tool, label, path, risk, category, note) in candidates {
+            let candidate = Path::new(&path);
+            let supported_layout = if id.ends_with("-npm-cache") {
+                has_npm_cache_marker(candidate)
+            } else if id.contains("-steam-") {
+                has_steam_library_marker(candidate.parent().unwrap_or(candidate))
+            } else {
+                true
+            };
+            if !supported_layout {
+                continue;
+            }
             if !seen.insert(path.to_lowercase()) {
                 continue;
             }
-            let p = Path::new(&path);
+            let p = candidate;
             if p.exists() {
                 let m = measure_target(&path);
                 if m.exists && m.file_count > 0 {
@@ -705,6 +795,49 @@ fn discover_secondary_drive_caches(seen: &mut HashSet<String>, targets: &mut Vec
             }
         }
     }
+}
+
+pub(crate) fn has_steam_library_marker(steamapps: &Path) -> bool {
+    let root = steamapps.parent().unwrap_or(steamapps);
+    let library_list = steamapps.join("libraryfolders.vdf");
+    let library_list_matches = fs::read_to_string(library_list).is_ok_and(|contents| {
+        contents.lines().any(|line| {
+            let line = line.trim();
+            if !line.starts_with("\"path\"") {
+                return false;
+            }
+            line.split('\"')
+                .nth(3)
+                .map(|path| path.replace("\\\\", "\\"))
+                .is_some_and(|path| {
+                    Path::new(&path)
+                        .canonicalize()
+                        .ok()
+                        .zip(root.canonicalize().ok())
+                        .is_some_and(|(found, expected)| found == expected)
+                })
+        })
+    });
+    library_list_matches
+        || fs::read_dir(steamapps).is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !name.starts_with("appmanifest_") || !name.ends_with(".acf") {
+                    return false;
+                }
+                fs::read_to_string(entry.path()).is_ok_and(|contents| {
+                    contents.lines().any(|line| line.trim() == "\"AppState\"")
+                        && contents.lines().any(|line| line.trim().starts_with("\"appid\""))
+                        && contents.lines().any(|line| line.trim().starts_with("\"installdir\""))
+                })
+            })
+        })
+}
+
+pub(crate) fn has_npm_cache_marker(path: &Path) -> bool {
+    let cache = path.join("_cacache");
+    cache.join("content-v2").is_dir() && cache.join("index-v5").is_dir()
 }
 
 struct Job {
@@ -957,6 +1090,55 @@ mod tests {
         ] {
             assert_eq!(catalog_entry(id).risk, PROTECTED, "{id} must be protected");
         }
+    }
+
+    #[test]
+    fn drive_scope_accepts_only_selected_local_drive_letters() {
+        let supported = HashSet::from(['C', 'D']);
+        assert_eq!(
+            select_drives(Some(vec!["d".into(), "C".into()]), &supported).unwrap(),
+            supported
+        );
+        assert!(select_drives(None, &supported).unwrap().contains(&'C'));
+        assert!(select_drives(Some(vec![]), &supported).is_err());
+        assert!(select_drives(Some(vec!["C:\\".into()]), &supported).is_err());
+        assert!(select_drives(Some(vec!["Z".into()]), &supported).is_err());
+    }
+
+    #[test]
+    fn drive_scope_matches_absolute_paths_only() {
+        let selected = HashSet::from(['D']);
+        assert!(path_is_on_selected_drive(r"D:\Temp", &selected));
+        assert!(!path_is_on_selected_drive(r"C:\Temp", &selected));
+        assert!(!path_is_on_selected_drive(r"D:Temp", &selected));
+        assert!(!path_is_on_selected_drive(r"\\server\share", &selected));
+    }
+
+    #[test]
+    fn secondary_cache_candidates_require_known_layout_evidence() {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-cache-classify-{}-{}",
+            std::process::id(),
+            seconds_now()
+        ));
+        let steamapps = root.join("steamapps");
+        let npm = root.join("npm-cache");
+        fs::create_dir_all(&steamapps).expect("steam fixture");
+        fs::create_dir_all(&npm).expect("npm fixture");
+        assert!(!has_steam_library_marker(&steamapps));
+        assert!(!has_npm_cache_marker(&npm));
+        fs::write(
+            steamapps.join("appmanifest_123.acf"),
+            "\"AppState\"\n{\n  \"appid\" \"123\"\n  \"installdir\" \"fixture\"\n}",
+        )
+        .expect("manifest fixture");
+        fs::create_dir_all(npm.join("_cacache").join("content-v2"))
+            .expect("content marker fixture");
+        fs::create_dir(npm.join("_cacache").join("index-v5"))
+            .expect("index marker fixture");
+        assert!(has_steam_library_marker(&steamapps));
+        assert!(has_npm_cache_marker(&npm));
+        fs::remove_dir_all(root).expect("remove fixture");
     }
 
     #[test]

@@ -260,6 +260,13 @@ pub fn guard_leftover_path(path: &Path) -> Result<(), String> {
         ));
     }
 
+    if key.contains(r"\windowsapps\") || key.ends_with(r"\windowsapps") {
+        return Err(format!(
+            "WindowsApps repository ({}) is managed by Windows Package Manager and cannot be modified directly.",
+            path.display()
+        ));
+    }
+
     for env_var in [
         "USERPROFILE",
         "APPDATA",
@@ -1376,9 +1383,9 @@ pub fn is_safe_to_delete_reg_key(full_path: &str) -> bool {
         return false;
     }
 
-    // Protect Windows system trees under Microsoft\Windows
-    if lower.contains("software\\microsoft\\windows") {
-        if lower.contains("currentversion\\uninstall") {
+    // Protect Windows system trees under Microsoft\Windows (both native and WOW6432Node)
+    if lower.contains(r"microsoft\windows") {
+        if lower.contains(r"currentversion\uninstall") {
             let last_part = parts.last().unwrap_or(&"");
             if *last_part == "uninstall"
                 || *last_part == "currentversion"
@@ -1582,13 +1589,30 @@ pub fn verify_broken_entry_candidate(app: &crate::apps::InstalledApp) -> Result<
     Ok((meta.subkey_name, meta.registry_key_path))
 }
 
-pub fn execute_broken_entry_removal(
+pub fn verify_live_forced_removal_status(meta: &BrokenEntryMetadata) -> Result<(), String> {
+    if meta.is_protected {
+        return Err("Application is marked as a protected Windows component and cannot be removed.".into());
+    }
+
+    if meta.system_component {
+        return Err("Application is marked as a Windows SystemComponent and cannot be removed.".into());
+    }
+
+    if !is_safe_to_delete_reg_key(&meta.registry_key_path) {
+        return Err(format!("Registry path '{}' is a protected system key or root.", meta.registry_key_path));
+    }
+
+    Ok(())
+}
+
+fn execute_entry_removal_internal(
     plan: &StoredBrokenEntryPlan,
     quarantine_root: &Path,
+    require_broken: bool,
 ) -> Result<LeftoverCleanReport, String> {
     let now_ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
     if plan.expires_at < now_ts {
-        return Err("Cleanup plan has expired. Please re-scan and preview broken entries before removing.".into());
+        return Err("Cleanup plan has expired. Please re-scan and preview before removing.".into());
     }
 
     // 1. Re-read live metadata and re-verify everything right now
@@ -1599,8 +1623,12 @@ pub fn execute_broken_entry_removal(
         return Err("Registry metadata has changed since this cleanup plan was prepared. Aborting deletion to prevent modifying altered applications.".into());
     }
 
-    // 3. Re-verify broken qualification (e.g. uninstaller binary wasn't restored on disk)
-    verify_live_broken_status(&live_meta)?;
+    // 3. Status verification
+    if require_broken {
+        verify_live_broken_status(&live_meta)?;
+    } else {
+        verify_live_forced_removal_status(&live_meta)?;
+    }
 
     // 4. Create quarantine batch with durable write-ahead recovery journal and manifest
     let batch = quarantine_root.join(&plan.plan_id);
@@ -1608,12 +1636,16 @@ pub fn execute_broken_entry_removal(
     let reg_backup_file = batch.join("registry_backup.reg");
 
     let candidate = LeftoverCandidate {
-        id: "cand-broken-entry".into(),
+        id: "cand-entry-removal".into(),
         kind: "registry_key".into(),
         path: plan.registry_key_path.clone(),
         confidence: "high".into(),
         risk: "safe".into(),
-        reason: "Broken Windows application uninstall registration key.".into(),
+        reason: if require_broken {
+            "Broken Windows application uninstall registration key.".into()
+        } else {
+            "Forced removal of application uninstall registration key.".into()
+        },
         size: 0,
         file_count: 0,
         selected: true,
@@ -1681,7 +1713,11 @@ pub fn execute_broken_entry_removal(
     if pre_del_meta.fingerprint != plan.fingerprint {
         return Err("Registry metadata changed immediately before deletion. Aborting deletion.".into());
     }
-    verify_live_broken_status(&pre_del_meta)?;
+    if require_broken {
+        verify_live_broken_status(&pre_del_meta)?;
+    } else {
+        verify_live_forced_removal_status(&pre_del_meta)?;
+    }
 
     // 5. Delete the subkey
     if !delete_registry_key(&plan.registry_key_path) {
@@ -1698,6 +1734,20 @@ pub fn execute_broken_entry_removal(
         quarantine_dir: Some(batch.to_string_lossy().to_string()),
         errors: Vec::new(),
     })
+}
+
+pub fn execute_broken_entry_removal(
+    plan: &StoredBrokenEntryPlan,
+    quarantine_root: &Path,
+) -> Result<LeftoverCleanReport, String> {
+    execute_entry_removal_internal(plan, quarantine_root, true)
+}
+
+pub fn execute_forced_entry_removal(
+    plan: &StoredBrokenEntryPlan,
+    quarantine_root: &Path,
+) -> Result<LeftoverCleanReport, String> {
+    execute_entry_removal_internal(plan, quarantine_root, false)
 }
 
 fn measure_directory_shallow(path: &Path) -> (u64, u64) {

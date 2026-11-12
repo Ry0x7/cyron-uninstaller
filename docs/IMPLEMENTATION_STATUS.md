@@ -55,7 +55,7 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | Feature | Status | Verification & Evidence |
 |---|---|---|
 | Extensible Declarative Providers | Done | `providers.rs`: versioned (`schema_version: 1`) declarative definitions; validates environment roots, rejects path traversals and attempts to mark protected data safe. |
-| Cache Catalog & Guard | Done | `caches.rs`: 48 fixed locations; `cleanup.rs` guard refuses protected entries (histories, models, configurations, browser profiles, Docker/WSL). |
+| Cache Catalog & Guard | Done | `caches.rs`: 51 fixed locations; `cleanup.rs` guard refuses protected entries (histories, models, configurations, browser profiles, Docker/WSL). |
 | Read-Only Mode Default | Done | Backend initializes with `read_only = true`, gating `start_cleanup` and `clean_app_leftovers` until explicitly enabled. |
 | Crash-Consistent Quarantine | Done | Files moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\`; durable write-ahead recovery journal (`recovery_journal.jsonl`) physically synced (`sync_all`) before moves. |
 | Atomic No-Overwrite Restore | Done | Restores use Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, preventing destination file overwrites. |

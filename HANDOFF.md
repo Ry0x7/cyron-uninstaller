@@ -1,3 +1,16 @@
+# Capability work — 2026-11-09
+
+Implementation adds separate Analyzer selection plans for recycling/permanent deletion, selected-drive Cleaner scanning and evidence-based removed-app review, WER diagnostic targets, cross-volume quarantine/restore, stronger stale-file refusal, and truthful single/batch uninstall results. Standard uninstall reviews the server-resolved command and skips the process page when no processes need review. Ten Luna subagents handled scoped implementation, reviews and fixtures; the orchestrator integrated and independently verified their work. Existing uncommitted Uninstaller work was retained and corrected.
+
+Verification completed for the scoped acceptance gates G57–G61 (5/5 met). TypeScript, 92 frontend tests, the full Rust suite (207 passed, 4 ignored), documentation integrity, the MSVC desktop debug build and isolated cleanup/uninstall/process/registry/recovery fixtures passed. The ignored interactive Recycle Bin marker fixture was separately invoked and passed. All ten Luna leaves were parent-reviewed and their ownership leases released. Existing release/signing evidence below predates these changes.
+
+Desktop verification covered the normal 1320x860 and minimum 1000x680 client sizes, plus expanded Uninstaller: loading, empty search and recovery, protected-target error, review, live progress, safe cancellation, partial completion, stale-selection invalidation, C-only Cleaner scope and Store guidance. A 4000-file disposable folder stopped after 2115 deletions; an independent count confirmed 1885 remaining files and preserved unrelated siblings. Two final UI findings were corrected and reinspected: the permanent-action error title and the drive selector hidden behind inventory loading. The [visual receipt](.unlazy/capabilities/visual/visual-evidence.json) contains eight checks, captures and source hashes; its integrity check passed. Ignored .unlazy artifacts are local evidence and are not shipped.
+
+Not exercised: real user cache mutation, real vendor uninstallation, Store removal, exhaustive screen-reader/provider/state coverage, signing and installer-release verification. Mutation, process and registry tests used disposable fixtures only; real inventory/cache measurements were read-only. No commits, pushes, rebases or telemetry changes were made.
+
+Known scope limits: removed-app identities last for this session; remnant age is not in the existing candidate contract; unknown stale installers are not classified; Store removal stays in Windows Settings/winget. Cross-volume quarantine/restore is supported by Cleaner, including its known-removed-app review. Uninstaller's existing residual-file engine still uses same-volume renames and reports failures for files on another volume; those filesystem remnants can instead be reviewed through Cleaner. Windows shell recycling cannot atomically bind its final pathname operation to Cyron's file handle against another process controlling the same user session. Scanning stays read-only; Cleaner and leftovers stay quarantined. Tests only modify disposable fixtures.
+
+---
 # Cyron — Active Handoff
 
 Updated: 2026-11-08 (Milestone 7.4: Hunter Navigation & Explorer Destructive Actions)

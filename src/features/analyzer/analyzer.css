@@ -1304,3 +1304,6 @@
     transition: none;
   }
 }
+.az-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; }
+.az-actions > p, .az-actions > details { flex-basis: 100%; margin: 0; }
+.az-actions li, .az-action-path { overflow-wrap: anywhere; }

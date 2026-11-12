@@ -403,3 +403,28 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   the engine was exercised only against isolated fixtures.
 - [ ] Elevation: Cyron never requests administrator rights for cleaning; locked or system-owned
   files are reported and skipped.
+
+## Capability improvements — 2026-11-09
+
+Acceptance contract recorded before implementation in .unlazy/capabilities/PLAN.md. Existing gates above remain historical evidence. Task gates cover Analyzer actions/safety, Cleaner scope/classification/recovery, Uninstaller outcomes, visual states, frontend/Rust/docs/build and fixture integration. Results will be appended after verification.
+
+## Capability acceptance — 2026-11-09
+
+Task-specific acceptance was recorded before implementation in .unlazy/capabilities/PLAN.md; the historical gates above are preserved. The current verification receipts are separate from historical release evidence.
+
+- [x] G57: Analyzer supports reviewed file/folder selections, separate Recycle Bin and permanent actions, expiring single-use plans, protected/reparse/stale-target refusal, progress, cancellation, partial results and scan invalidation.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test analyzer_actions
+  EXPECT: test result: ok
+  EVIDENCE: Public permanent/cancellation fixture tests passed; module tests cover expiration/reuse, protected/reparse paths, altered targets and partial failures. The separately invoked interactive test confirmed its unique marker in the real Windows Recycle Bin. Desktop review and permanent execution removed only the disposable 8 KB marker, preserved its sibling and invalidated the scan. Windows shell pathname identity has the documented final same-name race. Rendering coverage is qualified in G61.
+- [x] G58: Cleaner scopes supported locations to selected local drives, shows evidence/age/risk/consequences, preserves unrelated fixture files, quarantine journaling, limits and no-overwrite restoration across volumes.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib cleanup::tests
+  EXPECT: test result: ok
+  EVIDENCE: Parent cache classification and cleanup regression suites passed, including changed-file refusal, unrelated single-file siblings, hard links, recovery and no-overwrite conflicts. Cross-volume quarantine/restore fixture passed where another writable local volume was available. Remnants now enter the same capped, journaled CleanupPlan engine and recheck app absence before execution. Unknown stale installers are intentionally not inferred; known removed-app metadata is session-scoped and its existing candidate contract has no age.
+- [x] G59: Uninstaller reviews live registered commands, skips an empty process step, separates vendor exit from verified inventory absence, distinguishes cancellation/restart/remaining/failure, and supports stop-after-current batch results.
+  CHECK: npx vitest run src/features/uninstaller/uninstallerFlow.test.ts src/lib/capabilities.test.ts
+  EXPECT: Test Files
+  EVIDENCE: Frontend outcome/IPC regressions passed (92 tests across the complete frontend suite). Rust server reconciliation and changed-command tests passed. Root reviewed batch cancellation, Store guidance and the empty-process shortcut. Minimum-window search, empty results and clear-filter recovery were inspected in the desktop app. No real application uninstall was performed.
+- [x] G60: frontend, Rust, documentation, desktop build and isolated cleanup/uninstall/recovery integration checks succeed using the MSVC wrapper where required.
+  EVIDENCE: 92 frontend tests passed across 11 files; TypeScript passed. Full Rust suite passed (207 passed, 4 ignored); the ignored interactive Recycle Bin fixture was separately invoked and passed. Documentation, MSVC desktop debug build, isolated cleanup/recovery fixture and eight-scenario uninstall/process/registry/recovery fixture passed. Signing, installer bundles and release metadata were not rerun for this change. Current automatic command receipts live in .unlazy/capabilities/GATES.md.
+- [x] G61: actual UI reviewed at representative window sizes with loading, empty, error, progress and result evidence; unexercised vendor/Store-specific scenarios named explicitly.
+  EVIDENCE: Eight scoped visual/interaction checks recorded in .unlazy/capabilities/visual/visual-evidence.json; integrity verification passed (76 files, including 59 source hashes). Inspected 1320x860 and minimum 1000x680 client windows and expanded Uninstaller. Covered Cleaner loading/C-only scan/inaccessible warning/session-remnant empty state, Uninstaller empty search/clear-filter recovery/Store guidance, and Analyzer protected-target refusal/review/live progress/cancel/result/rescan. A disposable 4000-file folder stopped with 2115 files deleted and an independently counted 1885 preserved; unrelated siblings remained. No real vendor uninstall, real cache cleanup, full screen-reader traversal or exhaustive provider/state matrix was exercised.
