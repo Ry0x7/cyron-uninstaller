@@ -122,6 +122,13 @@ export function parentPath(path: string): string | null {
   return cleaned.slice(0, index);
 }
 
+/** Hides the Win32 verbatim prefix canonicalized local paths carry. Display only. */
+export function displayPath(value: string): string {
+  return value.startsWith("\\\\?\\") && /^[A-Za-z]:[\\/]/.test(value.slice(4))
+    ? value.slice(4)
+    : value;
+}
+
 /** Shortens long paths from the middle so the tail stays readable. */
 export function truncateMiddle(value: string, max = 56): string {
   if (max <= 0) return "";

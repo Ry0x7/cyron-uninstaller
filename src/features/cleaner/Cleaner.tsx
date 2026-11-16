@@ -60,11 +60,12 @@ import {
   type VolumeInfo,
 } from "../../lib/types";
 import { CleanerRemnants } from "./CleanerRemnants";
+import { DeveloperStorage } from "./DeveloperStorage";
 import "./cleaner.css";
 
 type RiskFilter = "all" | Risk;
 type Status = "loading" | "ready" | "error";
-type Tab = "cleanup" | "quarantine" | "history";
+type Tab = "cleanup" | "projects" | "quarantine" | "history";
 type Pending = { kind: "restore" | "purge"; batch: QuarantineBatch };
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -118,6 +119,7 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("cleanup");
+  const [projectsVisited, setProjectsVisited] = useState(false);
 
   useEffect(() => {
     if (initialTargetId) {
@@ -211,6 +213,13 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
       setQuarantineError(errorMessage(caught));
     }
   }, []);
+
+  // The Quarantine tab is a live view. Refresh it whenever it is opened, so a
+  // run from Projects or another view cannot leave a stale "empty" message.
+  const openQuarantine = useCallback(() => {
+    setTab("quarantine");
+    void loadQuarantine();
+  }, [loadQuarantine]);
 
   const loadLog = useCallback(async () => {
     try {
@@ -479,8 +488,9 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
       if (kind === "restore") {
         const result = await api.restoreQuarantine(batch.runId);
         if (!mounted.current) return;
+        const firstError = result.failed > 0 && result.errors.length > 0 ? ` ${result.errors[0]}` : "";
         setSideNote(
-          `Restored ${plural(result.restored, "file")}${result.skipped ? `, ${plural(result.skipped, "skipped")}` : ""}${result.failed ? `, ${plural(result.failed, "failed")}` : ""}.`,
+          `Restored ${plural(result.restored, "file")}${result.skipped ? `, ${plural(result.skipped, "skipped")}` : ""}${result.failed ? `, ${plural(result.failed, "failed")}` : ""}.${firstError}`,
         );
       } else {
         const result = await api.purgeQuarantine(batch.runId);
@@ -635,14 +645,30 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
           <Segmented<Tab>
             ariaLabel="Cleaner sections"
             value={tab}
-            onChange={setTab}
+            onChange={(next) => {
+              if (next === "projects") setProjectsVisited(true);
+              if (next === "quarantine") void loadQuarantine();
+              setTab(next);
+            }}
             options={[
               { value: "cleanup", label: "Cleanup" },
+              { value: "projects", label: "Projects" },
               { value: "quarantine", label: "Quarantine", count: batches.length },
               { value: "history", label: "History", count: log?.length },
             ]}
           />
         </div>
+
+        {projectsVisited && (
+          <div hidden={tab !== "projects"}>
+            <DeveloperStorage
+              readOnly={readOnly}
+              scanDrives={scanDrives}
+              cacheInventory={inventory}
+              onOpenQuarantine={openQuarantine}
+            />
+          </div>
+        )}
 
         {tab === "quarantine" && (
           <QuarantinePanel
@@ -995,6 +1021,9 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
                                   </span>
                                   <span className="cl-row__risk">
                                     <RiskBadge risk={target.risk} />
+                                    {target.risk !== "protected" && target.installState === "not-detected" && (
+                                      <Badge tone="caution">Tool not detected</Badge>
+                                    )}
                                   </span>
                                   <IconChevronRight size={14} className="cl-row__chev" />
                                   <span className="cl-row__bar" aria-hidden="true">
@@ -1035,6 +1064,16 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
                                   <div className="cl-meta-row">
                                     <dt>Risk</dt>
                                     <dd>{RISK_LABEL[target.risk]}</dd>
+                                  </div>
+                                  <div className="cl-meta-row">
+                                    <dt>Tool status</dt>
+                                    <dd>
+                                      {target.installState === "detected"
+                                        ? "Installed"
+                                        : target.installState === "not-detected"
+                                          ? "Not detected — orphaned cache"
+                                          : "Not verified"}
+                                    </dd>
                                   </div>
                                 </dl>
                               </div>
@@ -1469,8 +1508,11 @@ function QuarantinePanel({
             </>
           ) : (
             <>
-              <strong>Restore this batch?</strong> {plural(pending.batch.fileCount, "file")} go back to
-              their original paths. Existing files are never overwritten.
+              <strong>Restore this batch?</strong> {plural(pending.batch.fileCount, "file")}{" "}
+              {pending.batch.fileCount === 1
+                ? "will go back to its original path."
+                : "will go back to their original paths."}{" "}
+              Existing files are never overwritten.
             </>
           )}
         </Banner>

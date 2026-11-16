@@ -9,7 +9,7 @@ use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use winreg::enums::*;
 use winreg::{RegKey, RegValue};
 use windows_sys::Win32::Foundation::{POINT, RECT};
@@ -109,8 +109,8 @@ fn main() {
     };
     assert_eq!(disp_pid, gui_child.id());
 
-    // Allow window to be visible and message loop active
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Allow window to be visible, raised and running its message loop.
+    std::thread::sleep(Duration::from_millis(100));
 
     // Measure window rect and target the window center
     let mut rect: RECT = unsafe { std::mem::zeroed() };
@@ -121,10 +121,24 @@ fn main() {
         y: (rect.top + rect.bottom) / 2,
     };
 
-    // Assert WindowFromPoint resolves the exact HWND, PID, and title
-    let target_resolved = hunter::resolve_target_from_point(target_point, &[])
-        .expect("resolve_target_from_point succeeds")
-        .expect("target must be found at center point of disposable window");
+    // Assert WindowFromPoint resolves the exact HWND, PID, and title. The
+    // disposable window is topmost, but poll briefly so a slow desktop
+    // compositor cannot turn this into a one-shot race.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let target_resolved = loop {
+        let resolved = hunter::resolve_target_from_point(target_point, &[])
+            .expect("resolve_target_from_point succeeds");
+        if let Some(candidate) = resolved {
+            if candidate.hwnd == hwnd_val {
+                break candidate;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "target must be found at center point of disposable window"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    };
     assert_eq!(target_resolved.hwnd, hwnd_val, "Resolved HWND must match expected disposable GUI HWND");
     assert_eq!(target_resolved.pid, disp_pid, "Resolved PID must match expected disposable GUI PID");
     assert_eq!(target_resolved.window_title.as_deref(), Some("Cyron External Target App"), "Window title must match");

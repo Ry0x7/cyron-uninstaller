@@ -604,7 +604,7 @@ export function Uninstaller({
                           type="checkbox"
                           disabled={app.isProtected || app.source === "store"}
                           checked={selectedIds.has(app.id)}
-                          title={app.source === "store" ? "Store apps must be removed through Windows Settings or winget" : undefined}
+                          title={app.source === "store" ? "Batch removal does not support Store packages. Remove this app individually." : undefined}
                           onChange={() => {}}
                           onClick={(e) => toggleSelectRow(app.id, e)}
                         />
@@ -660,18 +660,18 @@ export function Uninstaller({
                           disabled={app.isProtected}
                           title={
                             app.source === "store"
-                              ? "View Windows Settings removal guidance"
+                              ? "Ask Windows Package Manager to remove this package for the current user. Windows may refuse or require Settings."
                               : app.uninstallSupport === "missing"
                               ? "Clean Broken Registration Entry"
                               : "Safe Vendor Uninstall with Residual Scan"
                           }
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (app.source === "store") setSelected(app);
+                            if (app.source === "store") openWizard(app, "store");
                             else openWizard(app, app.uninstallSupport === "missing" ? "forced" : "standard");
                           }}
                         >
-                          {app.source === "store" ? "Guide" : app.uninstallSupport === "missing" ? "Clean" : "Uninstall"}
+                          {app.source === "store" ? "Remove" : app.uninstallSupport === "missing" ? "Clean" : "Uninstall"}
                         </Button>
                       </td>
                     </tr>
@@ -692,11 +692,11 @@ export function Uninstaller({
                   type="button"
                   className="un-context-item"
                   onClick={() => {
-                    setSelected(contextMenu.app);
+                    openWizard(contextMenu.app, "store");
                     setContextMenu(null);
                   }}
                 >
-                  Store removal guidance
+                  Remove Store app…
                 </button>
               ) : contextMenu.app.uninstallSupport === "missing" ? (
                 <button

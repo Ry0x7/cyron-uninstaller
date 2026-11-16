@@ -3,6 +3,7 @@ import type {
   AnalyzerAction,
   AnalyzerActionPreview,
   AnalyzerActionReport,
+  AppHistoryRecord,
   AppInventory,
   AppProcess,
   BatchUninstallPlan,
@@ -10,6 +11,8 @@ import type {
   BrokenEntryPlan,
   CacheInventory,
   CleanupLogEntry,
+  DeveloperCleanupVerification,
+  DeveloperStorageScan,
   CleanupPreview,
   CleanupReport,
   DuplicateOptions,
@@ -31,6 +34,8 @@ import type {
   UninstallPlan,
   VolumeInfo,
   StartupRoute,
+  StoreUninstallPlan,
+  StoreUninstallResult,
   ExplorerIntegrationStatus,
   CleanableInspection,
   CleanupProviderDef,
@@ -46,6 +51,9 @@ import type {
   ForceDeleteResult,
   KillProcessPlanPreview,
   LockingProcessInfo,
+  PerformanceBaseline,
+  PerformanceSnapshot,
+  PerformanceTraceStatus,
 } from "./types";
 
 export function isDesktop(): boolean {
@@ -90,8 +98,18 @@ export function errorMessage(error: unknown): string {
 export const api = {
   listInstalledApps: () => call<AppInventory>("list_installed_apps"),
   listRemovedApps: () => call<InstalledApp[]>("list_removed_apps"),
+  listAppHistory: () => call<AppHistoryRecord[]>("list_app_history"),
   listVolumes: () => call<VolumeInfo[]>("list_volumes"),
   listCaches: (driveLetters?: string[]) => call<CacheInventory>("list_caches", driveLetters ? { driveLetters } : undefined),
+  scanDeveloperStorage: (roots: string[], driveLetters?: string[]) =>
+    call<DeveloperStorageScan>("scan_developer_storage", {
+      roots,
+      ...(driveLetters ? { driveLetters } : {}),
+    }),
+  previewDeveloperCleanup: (scanId: string, artifactIds: string[], exclusions: string[] = []) =>
+    call<CleanupPreview>("preview_developer_cleanup", { scanId, artifactIds, exclusions }),
+  verifyDeveloperCleanup: (scanId: string, artifactIds: string[]) =>
+    call<DeveloperCleanupVerification>("verify_developer_cleanup", { scanId, artifactIds }),
   prepareAnalyzerAction: (paths: string[], operation: AnalyzerAction) =>
     call<AnalyzerActionPreview>("prepare_analyzer_action", { paths, operation }),
   executeAnalyzerAction: (planId: string) =>
@@ -134,6 +152,12 @@ export const api = {
     call<UninstallExecutionResult>("execute_uninstall", { appId, planId, timeoutSecs }),
   scanAppLeftovers: (appId: string) =>
     call<LeftoverScanReport>("scan_app_leftovers", { appId }),
+  scanNamedRemnants: (
+    appName: string,
+    publisher: string | null,
+    installLocation: string | null,
+  ) =>
+    call<LeftoverScanReport>("scan_named_remnants", { appName, publisher, installLocation }),
   cleanAppLeftovers: (appId: string, planId: string, candidateIds: string[]) =>
     call<LeftoverCleanReport>("clean_app_leftovers", { appId, planId, candidateIds }),
   snapshotAppIdentity: (appId: string) =>
@@ -146,8 +170,10 @@ export const api = {
     call<BrokenEntryPlan>("prepare_forced_removal_cleanup", { appId }),
   executeForcedRemovalCleanup: (planId: string, confirmedKeyPath: string) =>
     call<LeftoverCleanReport>("execute_forced_removal_cleanup", { planId, confirmedKeyPath }),
-  uninstallStoreApp: (appId: string) =>
-    call<UninstallExecutionResult>("uninstall_store_app", { appId }),
+  prepareStoreUninstall: (appId: string) =>
+    call<StoreUninstallPlan>("prepare_store_uninstall", { appId }),
+  executeStoreUninstall: (planId: string) =>
+    call<StoreUninstallResult>("execute_store_uninstall", { planId }),
   restoreRegistryBackup: (runId: string, overwriteConflict = false) =>
     call<RegistryRestoreReport>("restore_registry_backup", { runId, overwriteConflict }),
   prepareBatchUninstall: (appIds: string[], quiet = false) =>
@@ -187,6 +213,15 @@ export const api = {
   listStartupItems: () => call<StartupItem[]>("list_startup_items"),
   setStartupItemEnabled: (id: string, enabled: boolean) =>
     call<StartupItem>("set_startup_item_enabled", { id, enabled }),
+  capturePerformanceSnapshot: (forceStartup = false) =>
+    call<PerformanceSnapshot>("capture_performance_snapshot", { forceStartup }),
+  listPerformanceBaselines: () => call<PerformanceBaseline[]>("list_performance_baselines"),
+  recordPerformanceBaseline: (label: string) =>
+    call<PerformanceBaseline>("record_performance_baseline", { label }),
+  startPerformanceTrace: () => call<PerformanceTraceStatus>("start_performance_trace"),
+  stopPerformanceTrace: () => call<PerformanceTraceStatus>("stop_performance_trace"),
+  openPerformanceSettings: (page: string) =>
+    call<void>("open_performance_settings", { page }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;

@@ -248,6 +248,15 @@ export const IconCrosshair = (props: IconProps) => (
   </Svg>
 );
 
+export const IconGauge = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M4.2 18.2a8.6 8.6 0 1 1 15.6 0" />
+    <path d="M12 13.4 16 9" />
+    <circle cx="12" cy="14" r="1.5" />
+    <path d="M3.2 18.2h17.6" />
+  </Svg>
+);
+
 export const IconCpu = (props: IconProps) => (
   <Svg {...props}>
     <rect x="5" y="5" width="14" height="14" rx="2" />

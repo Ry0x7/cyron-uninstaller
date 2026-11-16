@@ -84,6 +84,112 @@ pub struct UninstallExecutionResult {
     pub elapsed_ms: u64,
 }
 
+/// Classifies a finished vendor process exit code without consulting inventory.
+/// Returns `(status, exit_code, restart_required)`, where status is
+/// `completed`, `cancelled`, `not_installed`, or `failed`.
+/// `not_installed` (Windows Installer 1605/1614) is not a final user-facing
+/// status: reconciliation must combine it with a complete live inventory check.
+pub fn classify_exit(code: i32) -> (String, Option<i32>, bool) {
+    let restart_required = code == 3010 || code == 1641;
+    let status = match code {
+        0 | 3010 | 1641 => "completed",
+        1602 => "cancelled",
+        1605 | 1614 => "not_installed",
+        _ => "failed",
+    };
+    (status.to_string(), Some(code), restart_required)
+}
+
+/// Reconciles an exit code with a complete live inventory observation.
+/// A nonzero exit does not by itself disprove removal: if the application is
+/// gone, removal is verified. Conversely, exit 0 never proves removal while the
+/// application is still registered. Restart requests are never verified removal.
+pub fn reconcile_status(
+    code: Option<i32>,
+    app_still_registered: bool,
+    restart_required: bool,
+) -> (String, String) {
+    if restart_required {
+        return (
+            "restart_required".into(),
+            "The uninstaller requested a restart. Removal is not yet verified; restart Windows and refresh the inventory."
+                .into(),
+        );
+    }
+
+    let Some(code) = code else {
+        return if app_still_registered {
+            (
+                "failed".into(),
+                "The uninstaller timed out and the application is still registered. Removal is not verified."
+                    .into(),
+            )
+        } else {
+            (
+                "completed".into(),
+                "The uninstaller timed out, but the application is no longer registered. Removal is verified."
+                    .into(),
+            )
+        };
+    };
+
+    let (classification, _, _) = classify_exit(code);
+    if classification == "cancelled" {
+        return (
+            "cancelled".into(),
+            "Uninstallation was cancelled. Removal is not verified.".into(),
+        );
+    }
+
+    if !app_still_registered {
+        let message = match classification.as_str() {
+            "not_installed" => "Windows Installer reports the product is not installed, and it is absent from the inventory. Removal is verified.".to_string(),
+            _ => format!(
+                "The uninstaller exited with code {code}, but the application is no longer registered. Removal is verified. Residual files may remain; review them separately."
+            ),
+        };
+        return ("completed".into(), message);
+    }
+
+    match classification.as_str() {
+        "not_installed" => (
+            "remaining".into(),
+            "Windows Installer reports the product is not installed, but the inventory still lists it. Refresh after any vendor windows finish."
+                .into(),
+        ),
+        "completed" => (
+            "remaining".into(),
+            "The uninstaller exited but removal is not verified. The application is still registered. Refresh after any vendor windows finish."
+                .into(),
+        ),
+        _ => (
+            "failed".into(),
+            format!(
+                "The uninstaller exited with code {code} and the application is still registered. Removal is not verified."
+            ),
+        ),
+    }
+}
+
+/// Waits for a vendor uninstaller's background work to remove the registration.
+/// Returns true when `still_registered` becomes false within `attempts` checks.
+/// The first check is immediate; later checks are separated by 500 ms.
+pub fn verify_after_exit(
+    mut still_registered: impl FnMut() -> bool,
+    attempts: u32,
+) -> bool {
+    let attempts = attempts.max(1);
+    for attempt in 0..attempts {
+        if !still_registered() {
+            return true;
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
+    false
+}
+
 pub fn is_forbidden_shell(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
@@ -444,6 +550,19 @@ pub fn to_public_batch_plan(stored: &StoredBatchUninstallPlan) -> BatchUninstall
     }
 }
 
+fn timeout_result(app_id: &str, timeout_secs: u64, elapsed_ms: u64) -> UninstallExecutionResult {
+    UninstallExecutionResult {
+        app_id: app_id.to_string(),
+        exit_code: None,
+        status: "failed".into(),
+        restart_required: false,
+        message: format!(
+            "Uninstaller timed out after {timeout_secs} seconds and was stopped. Removal is not verified."
+        ),
+        elapsed_ms,
+    }
+}
+
 /// Executes a validated uninstaller process and waits for completion.
 pub fn execute_uninstaller(
     app_id: &str,
@@ -491,11 +610,13 @@ pub fn execute_uninstaller(
         match child.try_wait() {
             Ok(Some(status)) => {
                 let code = status.code().unwrap_or(-1);
-                let restart_required = code == 3010 || code == 1641;
-                let status_str = match code {
-                    0 | 3010 | 1641 => "completed",
-                    1602 => "cancelled",
-                    _ => "failed",
+                let (classification, _, restart_required) = classify_exit(code);
+                // `not_installed` is resolved by reconciliation against inventory;
+                // this result alone must not claim removal verified.
+                let status_str = if classification == "not_installed" {
+                    "failed".to_string()
+                } else {
+                    classification
                 };
                 let message = match code {
                     0 => "Uninstaller completed successfully.".to_string(),
@@ -504,13 +625,14 @@ pub fn execute_uninstaller(
                     1602 => "Uninstallation was cancelled by the user in the installer wizard.".to_string(),
                     1603 => "Fatal error during uninstallation (error 1603). The uninstaller may require elevated privileges or has missing files.".to_string(),
                     1618 => "Another installation is already in progress. Please wait for it to complete.".to_string(),
-                    1605 => "This action is only valid for products that are currently installed (error 1605).".to_string(),
+                    1605 => "Windows Installer reports this product is not currently installed (error 1605).".to_string(),
+                    1614 => "Windows Installer reports this product is already uninstalled (error 1614).".to_string(),
                     other => format!("Uninstaller exited with code {other}."),
                 };
                 return Ok(UninstallExecutionResult {
                     app_id: app_id.to_string(),
                     exit_code: Some(code),
-                    status: status_str.into(),
+                    status: status_str,
                     restart_required,
                     message,
                     elapsed_ms: started.elapsed().as_millis() as u64,
@@ -519,7 +641,11 @@ pub fn execute_uninstaller(
             Ok(None) => {
                 if started.elapsed() > timeout {
                     let _ = child.kill();
-                    return Err(format!("Uninstaller timed out after {} seconds.", timeout.as_secs()));
+                    return Ok(timeout_result(
+                        app_id,
+                        timeout.as_secs(),
+                        started.elapsed().as_millis() as u64,
+                    ));
                 }
                 std::thread::sleep(poll_interval);
             }
@@ -573,5 +699,113 @@ mod tests {
         let parsed = parse_uninstall_command("msiexec.exe /x {GUID} & calc.exe | notepad.exe");
         assert!(parsed.is_valid);
         assert!(!parsed.arguments.iter().any(|a| a == "&" || a == "|"));
+    }
+
+    fn test_command(arguments: &[&str]) -> ParsedUninstallCommand {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
+        ParsedUninstallCommand {
+            executable: format!("{windir}\\System32\\cmd.exe"),
+            arguments: arguments.iter().map(|arg| arg.to_string()).collect(),
+            is_msi: false,
+            is_valid: true,
+            rejection_reason: None,
+        }
+    }
+
+    #[test]
+    fn phase2_completion_codes_classify_installer_outcomes() {
+        assert_eq!(classify_exit(0).0, "completed");
+        assert_eq!(classify_exit(3010).0, "completed");
+        assert!(classify_exit(3010).2);
+        assert!(classify_exit(1641).2);
+        assert_eq!(classify_exit(1602).0, "cancelled");
+        assert_eq!(classify_exit(1605).0, "not_installed");
+        assert_eq!(classify_exit(1614).0, "not_installed");
+        assert_eq!(classify_exit(1603).0, "failed");
+
+        // A nonzero "not installed" code is verification only when inventory agrees.
+        let (status, message) = reconcile_status(Some(1605), false, false);
+        assert_eq!(status, "completed");
+        assert!(message.contains("Removal is verified"));
+
+        // Exit 0 never proves removal while the app is registered.
+        let (status, _) = reconcile_status(Some(0), true, false);
+        assert_eq!(status, "remaining");
+
+        // Restart is never verified removal.
+        let (status, _) = reconcile_status(Some(3010), false, true);
+        assert_eq!(status, "restart_required");
+    }
+
+    #[test]
+    fn phase2_completion_partial_success_reconciles_against_inventory() {
+        let (status, message) = reconcile_status(Some(1603), false, false);
+        assert_eq!(status, "completed");
+        assert!(message.contains("code 1603"));
+        assert!(message.contains("Removal is verified"));
+
+        let (status, _) = reconcile_status(Some(1603), true, false);
+        assert_eq!(status, "failed");
+
+        let (status, _) = reconcile_status(Some(1605), true, false);
+        assert_eq!(status, "remaining");
+
+        let (status, _) = reconcile_status(Some(1602), false, false);
+        assert_eq!(status, "cancelled");
+
+        let (status, _) = reconcile_status(None, true, false);
+        assert_eq!(status, "failed");
+        let (status, _) = reconcile_status(None, false, false);
+        assert_eq!(status, "completed");
+    }
+
+    #[test]
+    fn phase2_completion_settle_window_polls_without_sleeping_first() {
+        let immediate = Instant::now();
+        assert!(verify_after_exit(|| false, 3));
+        assert!(immediate.elapsed() < Duration::from_millis(300));
+
+        let mut checks = 0;
+        let absent = verify_after_exit(
+            || {
+                checks += 1;
+                checks < 3
+            },
+            4,
+        );
+        assert!(absent);
+        assert_eq!(checks, 3);
+
+        let mut always = 0;
+        assert!(!verify_after_exit(
+            || {
+                always += 1;
+                true
+            },
+            2
+        ));
+        assert_eq!(always, 2);
+    }
+
+    #[test]
+    fn phase2_completion_timeout_result_is_reported_not_lost() {
+        let result = timeout_result("fixture", 10, 10_500);
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.exit_code, None);
+        assert!(result.message.contains("timed out"));
+        assert!(!result.restart_required);
+
+        // Exercise the real exit path, including 1605/3010, with a harmless test-only command.
+        let cancel = AtomicBool::new(false);
+        let missing = execute_uninstaller("fixture", &test_command(&["/c", "exit 1605"]), &cancel, 10)
+            .expect("vendor exit must be a result, not a transport error");
+        assert_eq!(missing.exit_code, Some(1605));
+        assert_eq!(missing.status, "failed");
+        assert!(missing.message.contains("1605"));
+
+        let reboot = execute_uninstaller("fixture", &test_command(&["/c", "exit 3010"]), &cancel, 10)
+            .expect("reboot exit must be a result");
+        assert_eq!(reboot.status, "completed");
+        assert!(reboot.restart_required);
     }
 }

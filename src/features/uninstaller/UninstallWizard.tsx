@@ -7,6 +7,7 @@ import type {
   InstalledApp,
   LeftoverCleanReport,
   LeftoverScanReport,
+  StoreUninstallPlan,
   UninstallExecutionResult,
   UninstallPlan,
 } from "../../lib/types";
@@ -23,7 +24,7 @@ import {
 import "./uninstallWizard.css";
 
 export type WizardStep = "mode" | "processes" | "execute" | "leftovers" | "complete";
-export type UninstallMode = "standard" | "forced" | "clean_entry";
+export type UninstallMode = "standard" | "store" | "forced" | "clean_entry";
 
 interface UninstallWizardProps {
   app: InstalledApp | null;
@@ -57,6 +58,10 @@ export function UninstallWizard({
   const [uninstallError, setUninstallError] = useState<string | null>(null);
   const [uninstallPlan, setUninstallPlan] = useState<UninstallPlan | null>(null);
   const [preparingUninstall, setPreparingUninstall] = useState(false);
+  const [storePlan, setStorePlan] = useState<StoreUninstallPlan | null>(null);
+  const [preparingStore, setPreparingStore] = useState(false);
+  const [storeError, setStoreError] = useState<string | null>(null);
+  const [storeRefresh, setStoreRefresh] = useState(0);
   const [elapsedSecs, setElapsedSecs] = useState(0);
 
   // Leftovers state
@@ -96,6 +101,22 @@ export function UninstallWizard({
     return () => { active = false; };
   }, [isOpen, app?.id, mode, isQuiet]);
 
+  // A Store plan is single-use and expires; prepare a fresh one whenever the
+  // review is opened. Package identity is re-verified again by the backend.
+  useEffect(() => {
+    setStorePlan(null);
+    setStoreError(null);
+    if (!isOpen || !app || mode !== "store" || app.isProtected || app.source !== "store") return;
+    let active = true;
+    setPreparingStore(true);
+    api.prepareStoreUninstall(app.id).then((plan) => {
+      if (active) setStorePlan(plan);
+    }).catch((error) => {
+      if (active) setStoreError(errorMessage(error));
+    }).finally(() => { if (active) setPreparingStore(false); });
+    return () => { active = false; };
+  }, [isOpen, app?.id, mode, storeRefresh]);
+
   // Initialize state when app changes or opens
   useEffect(() => {
     if (!isOpen || !app) return;
@@ -110,11 +131,15 @@ export function UninstallWizard({
     setCleanReport(null);
     setBrokenPlan(null);
     setRegistryRestoreResult(null);
+    setStorePlan(null);
+    setStoreError(null);
     setSelectedCandidateIds(new Set());
     setElapsedSecs(0);
 
     // Initial default mode
-    if (initialMode) {
+    if (app.source === "store" && !app.isProtected) {
+      setMode("store");
+    } else if (initialMode) {
       setMode(initialMode);
     } else if (app.uninstallSupport === "missing") {
       setMode("forced");
@@ -198,16 +223,67 @@ export function UninstallWizard({
     }
   };
 
+  const handleExecuteStore = async () => {
+    if (!storePlan || storePlan.appId !== app.id || uninstalling) return;
+    const plan = storePlan;
+    setStorePlan(null);
+    setUninstalling(true);
+    setUninstallError(null);
+    setElapsedSecs(0);
+    setStep("execute");
+    try {
+      const result = await api.executeStoreUninstall(plan.planId);
+      const status: UninstallExecutionResult["status"] =
+        result.status === "completed"
+          ? "completed"
+          : result.status === "remaining"
+          ? "remaining"
+          : result.status === "restart_required"
+          ? "restart_required"
+          : result.status === "cancelled"
+          ? "cancelled"
+          : "failed";
+      setUninstallResult({
+        appId: result.appId,
+        exitCode: null,
+        status,
+        restartRequired: false,
+        message: result.message,
+        elapsedMs: result.elapsedMs,
+      });
+      invalidateInstalledApps();
+    } catch (err) {
+      setUninstallError(errorMessage(err));
+    } finally {
+      setUninstalling(false);
+    }
+  };
+
   const handleScanLeftovers = async () => {
     setScanningLeftovers(true);
     setLeftoverError(null);
     try {
       const report = await api.scanAppLeftovers(app.id);
       if (activeAppId.current === app.id) {
-        setLeftoverReport(report);
+        // Store packages have no Cyron registry cleanup. Filesystem residue may
+        // still be reviewed, but registry keys are never offered here.
+        const candidates =
+          app.source === "store"
+            ? report.candidates.filter((candidate) => candidate.kind !== "registry_key")
+            : report.candidates;
+        const visibleReport = app.source === "store"
+          ? {
+              ...report,
+              candidates,
+              totalSize: candidates.reduce((sum, candidate) => sum + candidate.size, 0),
+              totalFiles: candidates.reduce((sum, candidate) => sum + candidate.fileCount, 0),
+              registryKeysCount: 0,
+            }
+          : report;
+        setLeftoverReport(visibleReport);
         // Pre-select all safe candidates
         const safeIds = new Set(
-          report.candidates.filter((c) => c.risk === "safe" && c.selected).map((c) => c.id),
+          visibleReport.candidates.filter((c) => c.risk === "safe" && c.selected).map((c) => c.id),
         );
         setSelectedCandidateIds(safeIds);
         setStep("leftovers");
@@ -421,7 +497,7 @@ export function UninstallWizard({
               { label: "Install Location", value: app.installLocation ?? "Not recorded" },
               {
                 label: "Architecture / Scope",
-                value: `${app.architecture === "x64" ? "64-bit" : "32-bit"} · ${
+                value: `${app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : "Neutral"} · ${
                   app.scope === "machine" ? "Machine" : "User"
                 }`,
               },
@@ -440,6 +516,29 @@ export function UninstallWizard({
             <h4 style={{ fontSize: 13, marginBottom: 8, color: "var(--text-base)" }}>
               Choose Removal Mode:
             </h4>
+
+            {/* Store Mode Card */}
+            {app.source === "store" && (
+              <div className={`un-mode-card ${mode === "store" ? "un-mode-card--selected" : ""}`}>
+                <div className="un-mode-card-content">
+                  <div className="un-mode-card-title">
+                    <span>Remove with Windows (current user)</span>
+                    <Badge tone="accent">Native Store removal</Badge>
+                  </div>
+                  <div className="un-mode-card-desc">
+                    Cyron asks the Windows Package Manager to remove this package for your user
+                    account only. Cyron never elevates automatically, and Windows policy can deny
+                    the request. Removal is reported only after the live package inventory confirms
+                    the package is gone.
+                  </div>
+                  <div className="un-mode-card-desc" style={{ marginTop: 6 }}>
+                    If Windows refuses, remove it from Settings → Apps → Installed apps, or run{" "}
+                    <code>winget uninstall &quot;{app.name}&quot;</code>. Cyron can still review
+                    filesystem residue afterward, but cleanup never proves the package was removed.
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Standard Mode Card */}
             {app.source !== "store" &&
@@ -482,6 +581,7 @@ export function UninstallWizard({
             )}
 
             {/* Forced Removal Card */}
+            {app.source !== "store" && (
             <label
               className={`un-mode-card ${mode === "forced" ? "un-mode-card--selected" : ""}`}
               onClick={() => setMode("forced")}
@@ -505,9 +605,10 @@ export function UninstallWizard({
                 </div>
               </div>
             </label>
+            )}
 
             {/* Clean Entry Only Card */}
-            {app.uninstallSupport === "missing" && (
+            {app.source !== "store" && app.uninstallSupport === "missing" && (
               <label
                 className={`un-mode-card ${mode === "clean_entry" ? "un-mode-card--selected" : ""}`}
                 onClick={() => {
@@ -571,11 +672,46 @@ export function UninstallWizard({
             </div>
           )}
 
+          {mode === "store" && (
+            <div className="stack">
+              {preparingStore ? (
+                <p>Preparing the Windows package removal for review…</p>
+              ) : storePlan ? (
+                <>
+                  <strong>Exact package to remove for this Windows account</strong>
+                  <code style={{ overflowWrap: "anywhere" }}>{storePlan.packageFullName}</code>
+                  <p className="small muted">
+                    Family: <span className="mono">{storePlan.packageFamilyName}</span>
+                    {storePlan.publisher ? ` · Publisher: ${storePlan.publisher}` : ""}
+                  </p>
+                  <p className="small muted">
+                    Windows performs the removal. This plan expires shortly and can be used once.
+                  </p>
+                </>
+              ) : null}
+              {storeError && <Banner tone="danger">{storeError}</Banner>}
+            </div>
+          )}
+
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            {mode === "clean_entry" ? (
+            {mode === "store" ? (
+              <Button
+                variant="primary"
+                loading={uninstalling}
+                disabled={app.isProtected || preparingStore || !storePlan || !storePlan.appId || storePlan.appId !== app.id}
+                onClick={() => {
+                  if (processes.length === 0 && !processError) void handleExecuteStore();
+                  else setStep("processes");
+                }}
+              >
+                {processes.length === 0 && !processError
+                  ? "Remove with Windows…"
+                  : "Review running processes →"}
+              </Button>
+            ) : mode === "clean_entry" ? (
               brokenPlan ? (
                 <Button
                   variant="danger"
@@ -713,18 +849,27 @@ export function UninstallWizard({
             <Button
               variant="primary"
               loading={scanningLeftovers || uninstalling}
-              disabled={mode === "standard" && !uninstallPlan}
+              disabled={
+                (mode === "standard" && !uninstallPlan) ||
+                (mode === "store" && !storePlan)
+              }
               onClick={() => {
                 if (mode === "standard") {
                   setStep("execute");
-                  handleExecuteStandard();
+                  void handleExecuteStandard();
+                } else if (mode === "store") {
+                  void handleExecuteStore();
                 } else {
                   // Forced removal moves directly to leftover scanning
-                  handleScanLeftovers();
+                  void handleScanLeftovers();
                 }
               }}
             >
-              {mode === "standard" ? "Launch Safe Uninstaller →" : "Scan & Force Remove →"}
+              {mode === "standard"
+                ? "Launch Safe Uninstaller →"
+                : mode === "store"
+                ? "Remove with Windows →"
+                : "Scan & Force Remove →"}
             </Button>
           </div>
         </div>
@@ -735,10 +880,12 @@ export function UninstallWizard({
         <div className="stack" style={{ gap: 16 }}>
           <div>
             <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-base)" }}>
-              Running Vendor Uninstaller
+              {mode === "store" ? "Removing Windows Package" : "Running Vendor Uninstaller"}
             </h4>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Monitoring the vendor process, then checking the live installed-app inventory. Any separate vendor windows may need time to finish.
+              {mode === "store"
+                ? "Windows Package Manager is removing the package for your Windows account, then Cyron checks the live package inventory. Windows policy may still refuse the request."
+                : "Monitoring the vendor process, then checking the live installed-app inventory. Any separate vendor windows may need time to finish."}
             </p>
           </div>
 
@@ -754,13 +901,15 @@ export function UninstallWizard({
             >
               <Spinner size={24} />
               <p style={{ marginTop: 12, fontWeight: 600, color: "var(--text-base)" }}>
-                Uninstaller is running...
+                {mode === "store" ? "Windows is removing the package..." : "Uninstaller is running..."}
               </p>
               <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
                 Elapsed time: {elapsedSecs}s
               </p>
               <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8 }}>
-                Please complete any prompts inside the vendor uninstaller window.
+                {mode === "store"
+                  ? "Cyron reports success only after the package disappears from the live inventory."
+                  : "Please complete any prompts inside the vendor uninstaller window."}
               </p>
             </div>
           ) : uninstallResult ? (
@@ -787,15 +936,28 @@ export function UninstallWizard({
                 <Banner tone="caution">The uninstaller exited, but the application is still registered. Cyron has not marked it as removed.</Banner>
               )}
               {uninstallResult.status !== "completed" && uninstallResult.status !== "restart_required" && (
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    setMode("forced");
-                    handleScanLeftovers();
-                  }}
-                >
-                  Review Forced Removal →
-                </Button>
+                mode === "store" ? (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setMode("store");
+                      setStoreRefresh((value) => value + 1);
+                      setStep("mode");
+                    }}
+                  >
+                    Review Store removal again →
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setMode("forced");
+                      handleScanLeftovers();
+                    }}
+                  >
+                    Review Forced Removal →
+                  </Button>
+                )
               )}
             </div>
           ) : null}
@@ -806,18 +968,31 @@ export function UninstallWizard({
                 <strong>Uninstallation Failed:</strong> {uninstallError}
               </Banner>
               <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                The uninstaller may be corrupted or missing. You can switch to Forced Removal to
-                clean associated files and registry keys directly.
+                {mode === "store"
+                  ? "Windows did not start the package removal. This is not proof the app was removed; refresh and review again, or use Settings → Apps → Installed apps."
+                  : "The uninstaller may be corrupted or missing. You can switch to Forced Removal to clean associated files and registry keys directly."}
               </p>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setMode("forced");
-                  handleScanLeftovers();
-                }}
-              >
-                Switch to Forced Removal →
-              </Button>
+              {mode === "store" ? (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setStoreRefresh((value) => value + 1);
+                    setStep("mode");
+                  }}
+                >
+                  Back to Store review →
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setMode("forced");
+                    handleScanLeftovers();
+                  }}
+                >
+                  Switch to Forced Removal →
+                </Button>
+              )}
             </div>
           )}
 
@@ -845,8 +1020,9 @@ export function UninstallWizard({
               Residual & Leftover Scan
             </h4>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-              Review residual files, folders, shortcuts, and registry entries. Files will be moved to
-              quarantine and registry entries backed up to .reg before removal.
+              {mode === "store"
+                ? "Review residual files, folders, and shortcuts left outside the Windows package repository. Files will be moved to quarantine; Windows-managed package files and registry keys are not offered."
+                : "Review residual files, folders, shortcuts, and registry entries. Files will be moved to quarantine and registry entries backed up to .reg before removal."}
             </p>
           </div>
 
@@ -970,7 +1146,7 @@ export function UninstallWizard({
                             <div className="un-leftover-item-path">{cand.path}</div>
                             <div className="un-leftover-item-reason">{cand.reason}</div>
                           </div>
-                          <Badge tone="safe">safe</Badge>
+                          <Badge tone={getRiskTone(cand.risk)}>{cand.risk}</Badge>
                         </label>
                       ))}
                     </div>

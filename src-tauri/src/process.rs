@@ -641,17 +641,29 @@ pub fn terminate_single_process(
         };
     }
 
-    if expected_creation_time > 0 {
-        let current_time = get_process_creation_time(pid).unwrap_or(0);
-        if current_time == 0 || current_time != expected_creation_time {
-            return ProcessTerminateResult {
-                pid,
-                name,
-                success: false,
-                graceful: false,
-                error: Some("Process creation time mismatch (process identity recycled). Aborted.".into()),
-            };
-        }
+    // Fail closed: a plan without a verified creation time cannot prove the PID
+    // still names the approved process, so it must never terminate anything.
+    if expected_creation_time == 0 {
+        return ProcessTerminateResult {
+            pid,
+            name,
+            success: false,
+            graceful: false,
+            error: Some(
+                "Process creation time was not verified when this plan was built. Re-scan and target the process again."
+                    .into(),
+            ),
+        };
+    }
+    let current_time = get_process_creation_time(pid).unwrap_or(0);
+    if current_time == 0 || current_time != expected_creation_time {
+        return ProcessTerminateResult {
+            pid,
+            name,
+            success: false,
+            graceful: false,
+            error: Some("Process creation time mismatch (process identity recycled). Aborted.".into()),
+        };
     }
 
     let graceful_success = attempt_graceful_close(pid);
@@ -824,6 +836,20 @@ fn is_within_key(child: &str, parent: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_process_termination_fails_closed_without_verified_creation_time() {
+        let result = terminate_single_process(std::process::id(), 0, true);
+        assert!(!result.success);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("creation time")),
+            "unexpected error: {:?}",
+            result.error
+        );
+    }
 
     #[test]
     fn identifies_windows_critical_processes() {

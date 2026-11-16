@@ -619,7 +619,7 @@ pub fn get_available_disk_space(path: &Path) -> Result<u64, String> {
     Ok(free_bytes_available)
 }
 
-fn append_journal_entry_file(file: &mut fs::File, item: &ManifestItem) -> Result<(), String> {
+pub(crate) fn append_journal_entry_file(file: &mut fs::File, item: &ManifestItem) -> Result<(), String> {
     use std::io::Write;
     let json = serde_json::to_string(item)
         .map_err(|error| format!("Could not encode journal item: {error}"))?;
@@ -629,7 +629,28 @@ fn append_journal_entry_file(file: &mut fs::File, item: &ManifestItem) -> Result
     Ok(())
 }
 
-fn append_journal_entry(journal_path: &Path, item: &ManifestItem) -> Result<(), String> {
+/// Enforces the shared quarantine byte cap and free-space floor before a new
+/// batch or move is started.
+pub(crate) fn ensure_quarantine_capacity(root: &Path, incoming_bytes: u64) -> Result<(), String> {
+    if let Ok(free_space) = get_available_disk_space(root) {
+        if free_space < MIN_FREE_SPACE_BYTES {
+            return Err(format!(
+                "Low disk space on quarantine volume ({} MB free, minimum 512 MB required). Clean cancelled to protect system stability.",
+                free_space / (1024 * 1024)
+            ));
+        }
+    }
+    let existing: u64 = list_quarantine(root).iter().map(|batch| batch.bytes).sum();
+    if existing.saturating_add(incoming_bytes) > MAX_QUARANTINE_TOTAL_BYTES {
+        return Err(
+            "Quarantine storage limit reached (20 GB max). Please purge older quarantine batches before cleaning."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+fn append_journal_entry_path(journal_path: &Path, item: &ManifestItem) -> Result<(), String> {
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -682,23 +703,7 @@ pub fn execute_plan(
         return Err("Read-only mode is on. Turn it off in Settings before cleaning.".into());
     }
 
-    if let Ok(free_space) = get_available_disk_space(quarantine_root) {
-        if free_space < MIN_FREE_SPACE_BYTES {
-            return Err(format!(
-                "Low disk space on quarantine volume ({} MB free, minimum 512 MB required). Clean cancelled to protect system stability.",
-                free_space / (1024 * 1024)
-            ));
-        }
-    }
-
-    let existing_quarantine = list_quarantine(quarantine_root);
-    let total_quarantine_bytes: u64 = existing_quarantine.iter().map(|b| b.bytes).sum();
-    if total_quarantine_bytes.saturating_add(plan.expected_bytes) > MAX_QUARANTINE_TOTAL_BYTES {
-        return Err(
-            "Quarantine storage limit reached (20 GB max). Please purge older quarantine batches before cleaning."
-                .into(),
-        );
-    }
+    ensure_quarantine_capacity(quarantine_root, plan.expected_bytes)?;
 
     let started = Instant::now();
     let now = seconds_now();
@@ -1028,7 +1033,7 @@ fn quarantine_file(
     Ok((destination, size))
 }
 
-fn move_to_quarantine(source: &Path, destination: &Path) -> std::io::Result<()> {
+pub(crate) fn move_to_quarantine(source: &Path, destination: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
 
     let mut source_wide: Vec<u16> = source.as_os_str().encode_wide().collect();
@@ -1197,7 +1202,7 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
         let journal_path = dir.join(JOURNAL_FILE);
         let _ = fs::remove_file(&journal_path);
         for item in &manifest.items {
-            let _ = append_journal_entry(&journal_path, item);
+            let _ = append_journal_entry_path(&journal_path, item);
         }
         if has_reg_backup {
             let reg_file = dir.join("registry_backup.reg");
@@ -1247,7 +1252,9 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
             remaining.push(item);
             continue;
         }
-        match fs::remove_file(&canonical) {
+        // A Force Delete batch can hold one whole directory as a single entry.
+        let removed = remove_entry_no_follow(&canonical);
+        match removed {
             Ok(()) => {
                 report.removed_files += 1;
                 report.freed_bytes += item.size;
@@ -1295,7 +1302,7 @@ pub fn purge_batch(root: &Path, run_id: &str) -> Result<PurgeReport, String> {
         let journal_path = dir.join(JOURNAL_FILE);
         let _ = fs::remove_file(&journal_path);
         for item in &manifest.items {
-            let _ = append_journal_entry(&journal_path, item);
+            let _ = append_journal_entry_path(&journal_path, item);
         }
         if has_reg_backup {
             let reg_file = dir.join("registry_backup.reg");
@@ -1334,6 +1341,28 @@ pub fn cleanup_restored_registry_batch(dir: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Removes one quarantine-owned entry recursively without following reparse
+/// points. Junctions and symlinks are unlinked, never traversed. Used by the
+/// manifest-scoped purge and by failed Force Delete batch cleanup.
+pub(crate) fn remove_entry_no_follow(path: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(path)?;
+    if has_reparse_attribute(meta.file_attributes()) {
+        return if meta.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        };
+    }
+    if meta.is_dir() {
+        for entry in fs::read_dir(path)? {
+            remove_entry_no_follow(&entry?.path())?;
+        }
+        fs::remove_dir(path)
+    } else {
+        fs::remove_file(path)
+    }
 }
 
 fn batch_dir(root: &Path, run_id: &str) -> Result<PathBuf, String> {
@@ -1390,7 +1419,7 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
     }
 
     let os_error = std::io::Error::last_os_error();
-    if os_error.raw_os_error() == Some(80) || os_error.raw_os_error() == Some(183) {
+    if matches!(os_error.raw_os_error(), Some(80) | Some(183) | Some(145)) {
         return Err(format!(
             "{} already exists, so the quarantined copy was kept.",
             original.display()
@@ -1405,9 +1434,91 @@ fn move_back(stored: &Path, original: &Path) -> Result<(), String> {
     ))
 }
 
+/// Copies a quarantined tree into a same-volume staging folder, publishes it
+/// with a no-overwrite rename, and only then removes the quarantined copy.
+/// Reparse points are never followed or dropped: a quarantined tree that holds
+/// one is refused so the batch stays intact and fully restorable.
+fn restore_cross_volume_directory(stored: &Path, original: &Path) -> Result<(), String> {
+    let parent = original
+        .parent()
+        .ok_or_else(|| "Restore destination has no parent folder.".to_string())?;
+    let temp = parent.join(format!(".cyron-{}.restore", next_id("restore", seconds_now())));
+
+    if let Err(error) = copy_tree_to_staging(stored, &temp) {
+        let _ = remove_entry_no_follow(&temp);
+        return Err(format!(
+            "Could not stage restored folder {}: {error}",
+            original.display()
+        ));
+    }
+
+    if let Err(error) = fs::rename(&temp, original) {
+        let _ = remove_entry_no_follow(&temp);
+        if matches!(error.raw_os_error(), Some(80) | Some(183) | Some(145)) {
+            return Err(format!(
+                "{} already exists, so the quarantined copy was kept.",
+                original.display()
+            ));
+        }
+        return Err(format!(
+            "Could not publish restored folder {}: {error}",
+            original.display()
+        ));
+    }
+
+    // The folder is visible before the quarantine copy is removed. A crash can
+    // leave two complete copies, never zero.
+    remove_entry_no_follow(stored).map_err(|error| {
+        format!(
+            "Restored {} but kept its quarantine copy because it could not be removed: {error}",
+            original.display()
+        )
+    })
+}
+
+fn copy_tree_to_staging(source: &Path, dest: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dest.join(entry.file_name());
+        let meta = fs::symlink_metadata(&path)?;
+        if has_reparse_attribute(meta.file_attributes()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "{} is a link or junction. Cyron does not follow reparse points, so this folder was left in quarantine.",
+                    path.display()
+                ),
+            ));
+        }
+        if meta.is_dir() {
+            copy_tree_to_staging(&path, &target)?;
+        } else {
+            fs::copy(&path, &target)?;
+            if let Ok(modified) = meta.modified() {
+                if let Ok(file) = fs::OpenOptions::new().write(true).open(&target) {
+                    let _ = file.set_times(fs::FileTimes::new().set_modified(modified));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn restore_cross_volume(stored: &Path, original: &Path) -> Result<(), String> {
     use std::io::Write;
     use std::os::windows::ffi::OsStrExt;
+
+    let stored_meta = fs::symlink_metadata(stored).map_err(|error| {
+        format!(
+            "Could not read quarantined entry {}: {error}",
+            stored.display()
+        )
+    })?;
+    if stored_meta.is_dir() {
+        return restore_cross_volume_directory(stored, original);
+    }
 
     let parent = original
         .parent()
@@ -1454,7 +1565,7 @@ fn restore_cross_volume(stored: &Path, original: &Path) -> Result<(), String> {
     if published == 0 {
         let error = std::io::Error::last_os_error();
         let _ = fs::remove_file(&temp);
-        if error.raw_os_error() == Some(80) || error.raw_os_error() == Some(183) {
+        if matches!(error.raw_os_error(), Some(80) | Some(183) | Some(145)) {
             return Err(format!(
                 "{} already exists, so the quarantined copy was kept.",
                 original.display()
@@ -2354,6 +2465,54 @@ mod tests {
     }
 
     #[test]
+    fn cross_volume_folder_restore_stages_and_publishes() {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-cross-volume-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let stored = root.join("quarantine").join("batch").join("folder");
+        let original = root.join("origin").join("folder");
+        fs::create_dir_all(stored.join("nested")).expect("stored tree");
+        fs::write(stored.join("nested").join("file.txt"), b"restored").expect("stored file");
+        fs::create_dir_all(original.parent().unwrap()).expect("origin parent");
+
+        restore_cross_volume_directory(&stored, &original).expect("folder restore");
+
+        assert_eq!(
+            fs::read(original.join("nested").join("file.txt")).expect("restored file"),
+            b"restored"
+        );
+        assert!(!stored.exists(), "quarantine copy is removed after publish");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cross_volume_folder_restore_never_overwrites() {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-cross-volume-conflict-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let stored = root.join("quarantine").join("batch").join("folder");
+        let original = root.join("origin").join("folder");
+        fs::create_dir_all(&stored).expect("stored tree");
+        fs::write(stored.join("file.txt"), b"quarantined").expect("stored file");
+        fs::create_dir_all(&original).expect("existing original");
+        fs::write(original.join("keep.txt"), b"keep").expect("existing file");
+
+        let error = restore_cross_volume_directory(&stored, &original).expect_err("conflict");
+
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+        assert_eq!(
+            fs::read(original.join("keep.txt")).expect("kept file"),
+            b"keep"
+        );
+        assert!(stored.exists(), "quarantine copy is kept on conflict");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn purge_removes_only_batch_files() {
         let fixture = Fixture::new("purge");
         let (plan, _) = plan_specs(vec![fixture.spec()], false).expect("plan");
@@ -2652,5 +2811,17 @@ mod tests {
         let purge2 = purge_batch(&fixture.quarantine(), &report.run_id).expect("retry purge");
         assert_eq!(purge2.removed_files, 1);
         assert!(!batch_dir.exists(), "batch folder should be removed once all files are purged");
+    }
+
+    #[test]
+    fn phase2_quarantine_capacity_rejects_overflow() {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-quarantine-capacity-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&root);
+        let error = ensure_quarantine_capacity(&root, u64::MAX).expect_err("overflow must fail");
+        assert!(error.contains("20 GB") || error.contains("space"), "{error}");
+        let _ = fs::remove_dir(&root);
     }
 }

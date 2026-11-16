@@ -7,6 +7,7 @@ import {
   IconApps,
   IconCleaner,
   IconCrosshair,
+  IconGauge,
   IconMonitor,
   IconMoon,
   IconOverview,
@@ -25,6 +26,7 @@ import { ForceDeleteModal } from "./features/explorer/ForceDeleteModal";
 import { FindLocksModal } from "./features/explorer/FindLocksModal";
 import { KillProcessModal } from "./features/explorer/KillProcessModal";
 import { Overview } from "./features/overview/Overview";
+import { Performance } from "./features/performance/Performance";
 import { Settings } from "./features/settings/Settings";
 import { Uninstaller } from "./features/uninstaller/Uninstaller";
 import { loadInstalledApps } from "./lib/api";
@@ -43,6 +45,7 @@ const PRIMARY_NAV: NavEntry[] = [
   { id: "overview", label: "Overview", icon: IconOverview },
   { id: "uninstaller", label: "Uninstaller", icon: IconApps },
   { id: "analyzer", label: "Disk Analyzer", icon: IconAnalyzer },
+  { id: "performance", label: "Performance", icon: IconGauge },
   { id: "cleaner", label: "Cleaner", icon: IconCleaner },
   { id: "activity", label: "Activity", icon: IconActivity },
 ];
@@ -343,6 +346,7 @@ export default function App() {
     ),
     [analyzerInitialPath, analyzerInitialMode, navigateToCleanerWithTarget],
   );
+  const performanceView = useMemo(() => <Performance onNavigate={navigate} />, [navigate]);
   const cleanerView = useMemo(() => <Cleaner initialTargetId={cleanerTargetId} />, [cleanerTargetId]);
   const activityView = useMemo(() => <Activity />, []);
   const settingsView = useMemo(() => <Settings />, []);
@@ -355,6 +359,8 @@ export default function App() {
         return uninstallerView;
       case "analyzer":
         return analyzerView;
+      case "performance":
+        return performanceView;
       case "cleaner":
         return cleanerView;
       case "activity":

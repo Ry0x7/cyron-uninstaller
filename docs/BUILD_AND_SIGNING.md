@@ -68,13 +68,13 @@ Cyron classifies build and release artifacts into:
 | Build Classification | Signature Status | Intended Audience | Distribution Scope |
 |---|---|---|---|
 | `UNSIGNED_RC` | None | Maintainers & core developers | Private testing; verify SHA-256 against `SHA256SUMS.txt`. |
-| `CHRYYPT_SIGNED` | Signed certificate (`CN=Chryypt Organization`) | General users & official releases | Authenticode signed release binaries and installer packages. |
+| `CHRYYPT_SIGNED` | Self-signed certificate (`CN=Chryypt Organization`) | Local or manually signed builds | Authenticode-signed binaries and installers; cryptographically intact but not publicly trusted. |
 
 ---
 
 ## 4. Chryypt Organization Signing (`CHRYYPT_SIGNED`)
 
-Cyron provides automated code signing using the official Chryypt Organization certificate:
+Cyron provides automated signing with a Chryypt Organization **self-signed** certificate. This proves artifact integrity and signer identity, not public trust. The GitHub release workflow currently runs `npm run tauri -- build` without a signing step, so published release assets are unsigned unless a maintainer signs them locally before upload.
 
 ### Certificate Specification:
 - **Subject**: `CN=Chryypt Organization`
@@ -86,6 +86,11 @@ Cyron provides automated code signing using the official Chryypt Organization ce
 ### Lifecycle Automation:
 - **`scripts/create-signing-cert.ps1`**: Idempotently finds an existing valid certificate matching the Chryypt Organization subject or generates a fresh one in `Cert:\CurrentUser\My`. It never touches machine root stores.
 - **`scripts/sign-build.ps1`**: Uses the official Windows SDK `signtool.exe` to sign `cyron.exe`, the NSIS setup `.exe`, and the WiX `.msi` package with SHA-256 digests under `CN=Chryypt Organization`.
+
+### Trust Boundary:
+- A self-signed signature reports an untrusted root on machines that do not import the public certificate. It does not earn SmartScreen reputation.
+- The isolated-VM procedure in section 7 is for testing the publisher name and UAC presentation only; it must never be applied to a user machine.
+- Release notes must state whether an artifact is unsigned, self-signed, or publicly trusted.
 
 ### Security Standards:
 1. **No Root Store Tampering**: Never automatically install development or signing certificates into `Trusted Root Certification Authorities` or `Trusted Publishers` on developer or end-user machines.

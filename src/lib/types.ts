@@ -4,6 +4,7 @@ export type ViewId =
   | "overview"
   | "uninstaller"
   | "analyzer"
+  | "performance"
   | "cleaner"
   | "activity"
   | "settings";
@@ -185,6 +186,8 @@ export interface CacheTarget {
   category: string;
   note: string;
   lastModified: number | null;
+  /** detected, not-detected or unknown. Only not-detected is shown as orphaned. */
+  installState?: "detected" | "not-detected" | "unknown";
 }
 
 export interface CacheInventory {
@@ -195,6 +198,99 @@ export interface CacheInventory {
   totalProtected: number;
   scannedAt: number;
   warnings: string[];
+}
+
+/* ------------------------------------------------------- developer storage */
+
+export interface DeveloperArtifact {
+  id: string;
+  projectId: string;
+  projectName: string;
+  path: string;
+  kind: string;
+  label: string;
+  risk: Risk;
+  confidence: string;
+  evidence: string;
+  /** What must be run to reproduce this artifact. */
+  rebuild: string;
+  /** What is lost or affected while the artifact is in quarantine. */
+  loss: string;
+  size: number;
+  allocated: number;
+  fileCount: number;
+  dirCount: number;
+  lastModified: number | null;
+  activity: "active" | "recent" | "old" | "unknown";
+  stale: boolean;
+  skippedLinks: number;
+  truncated: boolean;
+}
+
+export interface ProtectedComponent {
+  path: string;
+  kind: string;
+  reason: string;
+  size: number;
+}
+
+export interface DeveloperProject {
+  id: string;
+  name: string;
+  path: string;
+  kind: string;
+  markers: string[];
+  frameworks: string[];
+  modified: number | null;
+  activity: "active" | "recent" | "old" | "unknown";
+  artifacts: DeveloperArtifact[];
+  protected: ProtectedComponent[];
+  sourceProtected: boolean;
+}
+
+export interface DeveloperTotals {
+  projectCount: number;
+  artifactCount: number;
+  artifactBytes: number;
+  artifactAllocated: number;
+  protectedBytes: number;
+  activeProjects: number;
+  oldProjects: number;
+}
+
+export interface ProjectRoot {
+  path: string;
+  source: "selected" | "automatic";
+  exists: boolean;
+}
+
+export interface DeveloperStorageScan {
+  scanId: string;
+  scannedAt: number;
+  roots: ProjectRoot[];
+  projects: DeveloperProject[];
+  totals: DeveloperTotals;
+  warnings: string[];
+}
+
+export interface ArtifactVerification {
+  id: string;
+  path: string;
+  label: string;
+  status: "removed" | "remaining" | "changed";
+  expectedBytes: number;
+  remainingBytes: number;
+  remainingFiles: number;
+}
+
+export interface DeveloperCleanupVerification {
+  scanId: string;
+  artifacts: ArtifactVerification[];
+  remainingBytes: number;
+  removedArtifacts: number;
+  remainingArtifacts: number;
+  restorableRunIds: string[];
+  errors: string[];
 }
 
 export interface HistoryEntry {
@@ -436,6 +532,40 @@ export interface UninstallExecutionResult {
   restartRequired: boolean;
   message: string;
   elapsedMs: number;
+}
+
+export interface StoreUninstallPlan {
+  planId: string;
+  appId: string;
+  appName: string;
+  packageFullName: string;
+  packageFamilyName: string;
+  publisher: string | null;
+  publisherId: string | null;
+  installLocation: string | null;
+  expiresAt: number;
+}
+
+export interface StoreUninstallResult {
+  appId: string;
+  status: string;
+  packageFullName: string;
+  message: string;
+  elapsedMs: number;
+}
+
+export interface AppHistoryRecord {
+  id: string;
+  name: string;
+  publisher: string | null;
+  version: string | null;
+  source: string;
+  installLocation: string | null;
+  installDate: string | null;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  removedAt: number | null;
+  removalMethod: string | null;
 }
 
 export interface LeftoverCandidate {
@@ -707,6 +837,178 @@ export interface StartupItem {
   canToggle: boolean;
 }
 
+
+export interface CpuMetrics {
+  utilizationPercent: number;
+  userPercent: number;
+  kernelPercent: number;
+  idlePercent: number;
+  logicalCores: number;
+}
+
+export interface MemoryMetrics {
+  totalBytes: number;
+  availableBytes: number;
+  usedPercent: number;
+  commitUsedBytes: number;
+  commitLimitBytes: number;
+  commitPercent: number;
+}
+
+export interface DiskIoMetrics {
+  status: "measured" | "unavailable";
+  busyPercent: number | null;
+  queueLength: number | null;
+  note: string | null;
+}
+
+export interface ProcessUsage {
+  pid: number;
+  name: string;
+  path: string | null;
+  cpuPercent: number;
+  workingSetBytes: number;
+  privateBytes: number;
+  ioReadBytesPerSec: number;
+  ioWriteBytesPerSec: number;
+  isCritical: boolean;
+  isCyron: boolean;
+}
+
+export interface StartupEvidence {
+  id: string;
+  name: string;
+  command: string;
+  location: string;
+  scope: "user" | "machine";
+  enabled: boolean;
+  canToggle: boolean;
+  isProtected: boolean;
+  launchPath: string | null;
+  currentCpuPercent: number;
+  currentWorkingSetBytes: number;
+  bootImpactMs: number | null;
+  bootTotalMs: number | null;
+  evidenceSource: "diagnostics-performance" | "live-process" | "inventory";
+}
+
+export interface ScheduledStartupTask {
+  name: string;
+  path: string;
+  author: string;
+  enabled: boolean;
+  triggers: ("boot" | "logon" | "registration")[];
+  delay: string | null;
+  command: string;
+  arguments: string;
+  isMicrosoft: boolean;
+}
+
+export interface BootSummary {
+  observedAt: string;
+  bootTimeMs: number;
+  mainPathBootMs: number;
+  postBootTimeMs: number;
+  startupAppCount: number;
+  degradationMs: number;
+  isDegradation: boolean;
+}
+
+export interface BootOffender {
+  eventId: number;
+  name: string;
+  friendlyName: string;
+  path: string;
+  totalTimeMs: number;
+  degradationTimeMs: number;
+  category: "application" | "driver" | "service" | "device" | "system";
+}
+
+export interface StartupAnalysis {
+  items: StartupEvidence[];
+  scheduledTasks: ScheduledStartupTask[];
+  boot: BootSummary | null;
+  offenders: BootOffender[];
+  eventLogStatus: "available" | "denied" | "unavailable";
+  eventLogNote: string;
+  enabledCount: number;
+  totalCount: number;
+}
+
+export interface RecommendationAction {
+  kind: "startup" | "view" | "page" | "trace" | "none";
+  label: string;
+  targetId: string | null;
+  view: ViewId | null;
+  page: string | null;
+}
+
+export interface RecommendationEvidence {
+  label: string;
+  value: string;
+}
+
+export interface PerformanceRecommendation {
+  id: string;
+  category: "cpu" | "memory" | "disk" | "storage" | "startup" | "system";
+  severity: "attention" | "review" | "info";
+  title: string;
+  summary: string;
+  evidence: RecommendationEvidence[];
+  expectedEffect: string;
+  risk: string;
+  verification: string;
+  action: RecommendationAction;
+}
+
+export interface PerformanceFinding {
+  id: string;
+  tone: "ok" | "watch" | "attention";
+  title: string;
+  detail: string;
+}
+
+export interface PerformanceTraceStatus {
+  available: boolean;
+  active: boolean;
+  startedAt: number | null;
+  outputPath: string | null;
+  message: string;
+}
+
+export interface PerformanceSnapshot {
+  capturedAt: number;
+  sampleMs: number;
+  elevated: boolean;
+  cpu: CpuMetrics;
+  memory: MemoryMetrics;
+  diskIo: DiskIoMetrics;
+  volumes: VolumeInfo[];
+  processes: ProcessUsage[];
+  processCount: number;
+  unmeasuredProcessCount: number;
+  startup: StartupAnalysis;
+  recommendations: PerformanceRecommendation[];
+  findings: PerformanceFinding[];
+  limitations: string[];
+  trace: PerformanceTraceStatus;
+}
+
+export interface PerformanceBaseline {
+  id: string;
+  label: string;
+  recordedAt: number;
+  cpuPercent: number;
+  memoryUsedPercent: number;
+  availableMemoryBytes: number;
+  commitPercent: number;
+  diskBusyPercent: number | null;
+  diskQueueLength: number | null;
+  topCpuProcess: string | null;
+  topMemoryProcess: string | null;
+  bootTimeMs: number | null;
+  enabledStartupCount: number;
+}
 
 export type AnalyzerAction = "recycle" | "permanent";
 export interface AnalyzerActionTarget {

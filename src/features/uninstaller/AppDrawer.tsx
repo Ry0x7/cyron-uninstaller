@@ -338,8 +338,17 @@ export function AppDrawer({
         <>
           <div style={{ marginBottom: 14, display: "flex", gap: 8 }}>
             {app.source === "store" ? (
-              <Button size="sm" onClick={() => setTab("uninstall")} style={{ width: "100%", justifyContent: "center" }}>
-                Store removal guidance
+              <Button
+                variant="primary"
+                icon={<IconTrash size={14} />}
+                disabled={app.isProtected}
+                onClick={() => {
+                  setWizardInitialMode("store");
+                  setWizardOpen(true);
+                }}
+                style={{ width: "100%", justifyContent: "center" }}
+              >
+                Remove Store app…
               </Button>
             ) : app.uninstallSupport === "missing" ? (
               <Button
@@ -579,11 +588,28 @@ export function AppDrawer({
             <Banner tone="info">
               <strong>Microsoft Store / MSIX application.</strong>
               <p style={{ marginTop: 6 }}>
-                This package is managed by Windows. Remove it in Settings → Apps → Installed apps,
-                or use <code>winget uninstall &quot;{app.name}&quot;</code>. Cyron can scan for
-                residual data, but cannot uninstall Store apps directly.
+                Cyron asks Windows Package Manager to remove this package for the current user only.
+                It never attempts machine-wide deprovisioning or removal for other users. Windows
+                policy, package dependencies, or an in-use package can still deny the request, and
+                removal is only confirmed after the live package inventory no longer lists it.
               </p>
-              <div style={{ marginTop: 10 }}>
+              <p style={{ marginTop: 6 }}>
+                If Windows refuses, use Settings → Apps → Installed apps or{" "}
+                <code>winget uninstall &quot;{app.name}&quot;</code>.
+              </p>
+              <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={<IconTrash size={14} />}
+                  disabled={app.isProtected}
+                  onClick={() => {
+                    setWizardInitialMode("store");
+                    setWizardOpen(true);
+                  }}
+                >
+                  Review Store removal…
+                </Button>
                 <Button size="sm" onClick={() => setTab("leftovers")}>
                   Scan for leftover data
                 </Button>

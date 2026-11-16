@@ -1,7 +1,7 @@
 use crate::scan::{self, ScanProgress, ScanResult};
 use crate::{
-    apps, caches, cleanup, duplicates, explorer, history, leftovers, mft, process, uninstall,
-    volumes, AppState,
+    app_history, apps, caches, cleanup, devscan, duplicates, explorer, history, leftovers, mft,
+    perf, process, store, uninstall, volumes, AppState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -107,12 +107,23 @@ pub(crate) fn get_or_discover_cached_apps(state: &AppState) -> Vec<apps::Install
 }
 
 #[tauri::command]
-pub async fn list_installed_apps(state: State<'_, AppState>) -> Result<apps::AppInventory, String> {
+pub async fn list_installed_apps(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<apps::AppInventory, String> {
     let inv = run_blocking("Application discovery", apps::discover_apps).await?;
+    app_history::sync_inventory(&app, &inv);
     if let Ok(mut cache) = state.cached_apps.lock() {
         *cache = Some((std::time::Instant::now(), inv.clone()));
     }
     Ok(inv)
+}
+
+/// Returns the bounded installed/removed lifecycle history. Records are
+/// descriptive only; cleanup still needs a fresh scan and a server-held plan.
+#[tauri::command]
+pub fn list_app_history(app: tauri::AppHandle) -> Vec<app_history::AppHistoryRecord> {
+    app_history::load(&app)
 }
 
 #[tauri::command]
@@ -122,25 +133,59 @@ pub fn list_volumes() -> Vec<volumes::VolumeInfo> {
 
 #[tauri::command]
 pub async fn list_removed_apps(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<apps::InstalledApp>, String> {
     let live = run_blocking("Removed application verification", apps::discover_apps).await?;
     if !live.warnings.is_empty() {
         return Err("Application inventory was incomplete. Removed applications cannot be reliably identified; refresh later.".into());
     }
-    let snapshots = state
-        .app_snapshots
-        .lock()
-        .map_err(|_| "Application snapshot registry unavailable.")?;
-    let mut removed: Vec<_> = snapshots
-        .values()
-        .filter(|app| {
-            app.source == "win32"
-                && !app.is_protected
-                && !live.apps.iter().any(|current| current.id == app.id)
-        })
-        .cloned()
-        .collect();
+    let mut removed = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    if let Ok(snapshots) = state.app_snapshots.lock() {
+        for record in snapshots.values().filter(|app| {
+            !app.is_protected && !live.apps.iter().any(|current| current.id == app.id)
+        }) {
+            if seen.insert(record.id.clone()) {
+                removed.push(record.clone());
+            }
+        }
+    }
+    for record in app_history::load(&app)
+        .into_iter()
+        .filter(|record| record.removed_at.is_some())
+    {
+        if seen.contains(&record.id)
+            || live.apps.iter().any(|current| current.id == record.id)
+        {
+            continue;
+        }
+        seen.insert(record.id.clone());
+        removed.push(apps::InstalledApp {
+            id: record.id,
+            name: record.name,
+            version: record.version,
+            publisher: record.publisher,
+            install_location: record.install_location,
+            install_date: record.install_date,
+            uninstall_string: None,
+            quiet_uninstall_string: None,
+            display_icon: None,
+            estimated_size: None,
+            hive: "history".into(),
+            scope: "unknown".into(),
+            architecture: "neutral".into(),
+            is_protected: false,
+            source: record.source,
+            uninstall_support: "missing".into(),
+            confidence: "confirmed".into(),
+            detection_reason: Some(format!(
+                "Persistent lifecycle history ({}); removal is descriptive, not ownership proof.",
+                record.removal_method.unwrap_or_else(|| "observed".into())
+            )),
+            registry_key_name: None,
+        });
+    }
     removed.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(removed)
 }
@@ -153,6 +198,113 @@ pub async fn list_caches(
         caches::discover_caches_for_drives(drive_letters)
     })
     .await?
+}
+
+#[tauri::command]
+pub async fn scan_developer_storage(
+    state: State<'_, AppState>,
+    roots: Option<Vec<String>>,
+    drive_letters: Option<Vec<String>>,
+) -> Result<devscan::DeveloperStorageScan, String> {
+    let roots = roots.unwrap_or_default();
+    if roots.len() > devscan::MAX_ROOTS {
+        return Err(format!(
+            "Select at most {} project folders.",
+            devscan::MAX_ROOTS
+        ));
+    }
+    let scan = run_blocking("Developer project scan", move || {
+        devscan::scan(roots, drive_letters)
+    })
+    .await??;
+    let mut scans = state
+        .developer_scans
+        .lock()
+        .map_err(|_| "The developer scan registry is unavailable.".to_string())?;
+    let now = now_secs();
+    scans.retain(|_, existing| now.saturating_sub(existing.scanned_at) < 3_600);
+    scans.insert(scan.scan_id.clone(), scan.clone());
+    Ok(scan)
+}
+
+/// Builds a cleanup preview only from artifact ids in a server-held project
+/// scan. The frontend never supplies artifact paths or execution commands.
+#[tauri::command]
+pub async fn preview_developer_cleanup(
+    state: State<'_, AppState>,
+    scan_id: String,
+    artifact_ids: Vec<String>,
+    exclusions: Option<Vec<String>>,
+) -> Result<cleanup::CleanupPreview, String> {
+    let scan_id = validate_job_id(&scan_id)?;
+    let artifact_ids = validate_target_ids(artifact_ids)?;
+    let exclusions = cleanup::validate_exclusions(exclusions.unwrap_or_default())?;
+    let scan = {
+        let scans = state
+            .developer_scans
+            .lock()
+            .map_err(|_| "The developer scan registry is unavailable.".to_string())?;
+        let scan = scans
+            .get(&scan_id)
+            .cloned()
+            .ok_or("The project scan expired. Scan again before reviewing artifacts.")?;
+        if now_secs().saturating_sub(scan.scanned_at) >= 3_600 {
+            return Err("The project scan expired. Scan again before reviewing artifacts.".into());
+        }
+        scan
+    };
+
+    let (plan, preview) = run_blocking("Developer cleanup preview", move || {
+        let specs = devscan::selected_specs(&scan, &artifact_ids)?;
+        cleanup::plan_specs_with_exclusions(specs, false, exclusions)
+    })
+    .await??;
+
+    let mut plans = state
+        .plans
+        .lock()
+        .map_err(|_| "The cleanup plan registry is unavailable.".to_string())?;
+    let now = now_secs();
+    plans.retain(|_, existing| existing.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan);
+    Ok(preview)
+}
+
+/// Re-measures the selected artifacts after execution and reports which
+/// quarantine batches still hold recoverable copies. Read-only.
+#[tauri::command]
+pub async fn verify_developer_cleanup(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    scan_id: String,
+    artifact_ids: Vec<String>,
+) -> Result<devscan::DeveloperCleanupVerification, String> {
+    let scan_id = validate_job_id(&scan_id)?;
+    let artifact_ids = validate_target_ids(artifact_ids)?;
+    let scan = state
+        .developer_scans
+        .lock()
+        .map_err(|_| "The developer scan registry is unavailable.".to_string())?
+        .get(&scan_id)
+        .cloned()
+        .ok_or("The project scan expired. Scan again to verify the result.")?;
+    let ids_for_verify = artifact_ids.clone();
+    let mut report = run_blocking("Developer cleanup verification", move || {
+        devscan::verify(&scan, &ids_for_verify)
+    })
+    .await??;
+    let root = cleanup_quarantine_root(&app)?;
+    report.restorable_run_ids = cleanup::list_quarantine(&root)
+        .into_iter()
+        .filter(|batch| {
+            batch
+                .target_ids
+                .iter()
+                .any(|id| artifact_ids.iter().any(|selected| selected == id))
+        })
+        .map(|batch| batch.run_id)
+        .collect();
+    Ok(report)
 }
 
 #[tauri::command]
@@ -994,6 +1146,7 @@ pub async fn prepare_uninstall(
 
 #[tauri::command]
 pub async fn execute_uninstall(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     app_id: String,
     plan_id: String,
@@ -1044,46 +1197,217 @@ pub async fn execute_uninstall(
     let plan_command = plan.command;
     let plan_app_id = plan.app_id;
 
-    let result = run_blocking("Standard uninstall", move || {
+    let outcome = run_blocking("Standard uninstall", move || {
         let mut result =
             uninstall::execute_uninstaller(&plan_app_id, &plan_command, &cancel, timeout)?;
-        reconcile_uninstall_result(&mut result, &apps::discover_apps());
-        Ok::<_, String>(result)
+        let app_id = result.app_id.clone();
+        let inventory = settle_and_reconcile(&app_id, &mut result);
+        Ok::<_, String>((result, inventory))
     })
     .await?;
+    let (result, inventory) = outcome?;
+    app_history::sync_inventory(&app, &inventory);
+    if result.status == "completed" {
+        app_history::record_removal(&app, &result.app_id, "vendor-uninstaller");
+    }
     *state
         .cached_apps
         .lock()
         .map_err(|_| "Application cache unavailable.")? = None;
-    result
+    Ok(result)
 }
 
 #[tauri::command]
-pub async fn uninstall_store_app(
+pub async fn prepare_store_uninstall(
+    state: State<'_, AppState>,
     app_id: String,
-) -> Result<uninstall::UninstallExecutionResult, String> {
-    let _ = app_id;
-    Err("Store apps are managed by Windows. Use Settings → Apps → Installed apps, or winget uninstall. Cyron does not remove Store packages.".into())
+) -> Result<store::StoreUninstallPlan, String> {
+    let app_id = app_id.trim().to_string();
+    if app_id.is_empty() {
+        return Err("Application ID is required.".into());
+    }
+    let inventory = run_blocking("Store application lookup", apps::discover_apps).await?;
+    let app = inventory
+        .apps
+        .iter()
+        .find(|candidate| candidate.id == app_id)
+        .cloned()
+        .ok_or_else(|| "Application is not present in the current inventory.".to_string())?;
+    if app.source != "store" {
+        return Err("This application is not a Microsoft Store / MSIX package.".into());
+    }
+    if app.is_protected {
+        return Err("Windows system packages are protected and cannot be removed by Cyron.".into());
+    }
+    let family = app
+        .id
+        .strip_prefix("store|")
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Store package identity is missing.".to_string())?;
+    let package = store::package_for_family(family)?.ok_or_else(|| {
+        "Windows no longer reports this package for the current user. Refresh the inventory.".to_string()
+    })?;
+    if package.is_framework || package.is_resource || package.is_bundle || package.is_system {
+        return Err("This package is a Windows dependency or system component and cannot be removed.".into());
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let nonce = leftovers::generate_crypto_nonce(6);
+    let plan = store::StoredStoreUninstallPlan {
+        plan_id: format!("store-{now}-{}-{nonce}", std::process::id()),
+        app_id: app.id.clone(),
+        app_name: app.name.clone(),
+        package_full_name: package.full_name.clone(),
+        package_family_name: package.family_name.clone(),
+        publisher: package.publisher.clone(),
+        publisher_id: package.publisher_id.clone(),
+        install_location: package.install_location.clone(),
+        expires_at: now + 600,
+    };
+    let public = plan.to_public();
+    let mut plans = state
+        .store_uninstall_plans
+        .lock()
+        .map_err(|_| "Store uninstall plan registry is unavailable.".to_string())?;
+    plans.retain(|_, stored| stored.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan);
+    Ok(public)
+}
+
+#[tauri::command]
+pub async fn execute_store_uninstall(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+) -> Result<store::StoreUninstallResult, String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let plan = {
+        let mut plans = state
+            .store_uninstall_plans
+            .lock()
+            .map_err(|_| "Store uninstall plan registry is unavailable.".to_string())?;
+        plans.remove(&plan_id).ok_or_else(|| {
+            "Store removal plan expired or not found. Review the package again.".to_string()
+        })?
+    };
+    if now > plan.expires_at {
+        return Err("Store removal plan expired. Review the package again.".into());
+    }
+
+    let live = store::package_for_family(&plan.package_family_name)?;
+    let Some(live) = live else {
+        app_history::record_removal(&app, &plan.app_id, "store-native");
+        return Ok(store::StoreUninstallResult {
+            app_id: plan.app_id,
+            status: "completed".into(),
+            package_full_name: plan.package_full_name,
+            message: "Windows no longer reports this package for the current user; removal is verified.".into(),
+            elapsed_ms: 0,
+        });
+    };
+    if !live.full_name.eq_ignore_ascii_case(&plan.package_full_name)
+        || live.family_name != plan.package_family_name
+        || live.publisher_id != plan.publisher_id
+    {
+        return Err("The Store package identity changed after confirmation. Review the package again.".into());
+    }
+    if live.is_framework || live.is_resource || live.is_bundle || live.is_system {
+        return Err("The package is now a Windows dependency or system component; removal was refused.".into());
+    }
+
+    let started = std::time::Instant::now();
+    let full_name = plan.package_full_name.clone();
+    let outcome = run_blocking("Store package removal", move || store::remove_package(&full_name)).await?;
+    let mut last_inventory: Option<apps::AppInventory> = None;
+    let absent = uninstall::verify_after_exit(
+        || {
+            let inventory = apps::discover_apps();
+            let present = inventory.apps.iter().any(|candidate| candidate.id == plan.app_id);
+            last_inventory = Some(inventory);
+            present
+        },
+        6,
+    );
+    if let Some(inventory) = last_inventory.as_ref() {
+        app_history::sync_inventory(&app, inventory);
+    }
+    if absent {
+        app_history::record_removal(&app, &plan.app_id, "store-native");
+    }
+
+    let status = if absent {
+        "completed"
+    } else if outcome.permission_denied {
+        "permission_denied"
+    } else if outcome.success {
+        "remaining"
+    } else {
+        "failed"
+    };
+    let message = if absent {
+        "Windows removed the package for the current user. Removal is verified in the live package inventory.".to_string()
+    } else if outcome.permission_denied {
+        outcome.error.unwrap_or_else(|| "Windows denied permission to remove this package.".into())
+    } else if outcome.success {
+        "Windows reported success, but the package is still registered. Refresh after any package operations finish.".to_string()
+    } else {
+        outcome.error.unwrap_or_else(|| "Windows did not remove the package.".into())
+    };
+    Ok(store::StoreUninstallResult {
+        app_id: plan.app_id,
+        status: status.into(),
+        package_full_name: plan.package_full_name,
+        message,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
 }
 
 fn reconcile_uninstall_result(
     result: &mut uninstall::UninstallExecutionResult,
     inventory: &apps::AppInventory,
 ) {
-    if result.status != "completed" {
+    // User cancellation is a final outcome, not an exit-code question.
+    if result.status == "cancelled" {
         return;
     }
-    if result.restart_required {
-        result.status = "restart_required".into();
-        result.message = "The uninstaller requested a restart. Removal is not yet verified; restart Windows and refresh the inventory.".into();
-    } else if !inventory.warnings.is_empty()
-        || inventory.apps.iter().any(|app| app.id == result.app_id)
-    {
-        result.status = "remaining".into();
-        result.message = "The uninstaller exited, but removal is not verified. The application is still registered or inventory verification was incomplete. Refresh after any vendor windows finish.".into();
-    } else {
-        result.message = "The uninstaller exited and the application is no longer in the installed-app inventory. Residual files may remain; review them separately.".into();
-    }
+    // An incomplete inventory is not evidence of absence. Treat it as
+    // still-registered so a failed read can never become a removal claim.
+    let still_registered = !inventory.warnings.is_empty()
+        || inventory.apps.iter().any(|app| app.id == result.app_id);
+    let (status, message) = uninstall::reconcile_status(
+        result.exit_code,
+        still_registered,
+        result.restart_required,
+    );
+    result.status = status;
+    result.message = message;
+}
+
+/// Gives a vendor uninstaller a short window to finish its own background
+/// registration work, then reconciles against the last complete inventory read.
+fn settle_and_reconcile(
+    app_id: &str,
+    result: &mut uninstall::UninstallExecutionResult,
+) -> apps::AppInventory {
+    let mut last_inventory: Option<apps::AppInventory> = None;
+    uninstall::verify_after_exit(
+        || {
+            let inventory = apps::discover_apps();
+            let present = inventory.apps.iter().any(|app| app.id == app_id);
+            last_inventory = Some(inventory);
+            present
+        },
+        4,
+    );
+    let inventory = last_inventory.unwrap_or_else(apps::discover_apps);
+    reconcile_uninstall_result(result, &inventory);
+    inventory
 }
 
 fn live_uninstaller_matches(app: &apps::InstalledApp, approved: &str) -> bool {
@@ -1141,35 +1465,57 @@ pub async fn snapshot_app_identity(
 
 #[tauri::command]
 pub async fn scan_app_leftovers(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     app_id: String,
 ) -> Result<leftovers::LeftoverScanReport, String> {
     let app_id_trimmed = app_id.trim().to_string();
     let inventory =
         run_blocking("Application lookup for leftover scan", apps::discover_apps).await?;
-    let app = inventory
+    let live_app = inventory
         .apps
         .iter()
-        .find(|a| a.id == app_id_trimmed)
-        .cloned()
-        .or_else(|| {
-            state
-                .app_snapshots
-                .lock()
-                .ok()?
-                .get(&app_id_trimmed)
-                .cloned()
-        })
-        .ok_or_else(|| {
-            "Application not found in uninstall inventory or cached snapshots.".to_string()
-        })?;
-
-    let name = app.name.clone();
-    let publisher = app.publisher.clone();
-    let install_location = app.install_location.clone();
-    let uninstall_string = app.uninstall_string.clone();
-    let display_icon = app.display_icon.clone();
-    let app_hive = app.hive.clone();
+        .find(|candidate| candidate.id == app_id_trimmed)
+        .cloned();
+    let snapshot = state
+        .app_snapshots
+        .lock()
+        .ok()
+        .and_then(|snapshots| snapshots.get(&app_id_trimmed).cloned());
+    let history = app_history::load(&app)
+        .into_iter()
+        .find(|record| record.id == app_id_trimmed && record.removed_at.is_some());
+    let (name, publisher, install_location, uninstall_string, display_icon, app_hive) =
+        if let Some(live) = live_app {
+            (
+                live.name,
+                live.publisher,
+                live.install_location,
+                live.uninstall_string,
+                live.display_icon,
+                live.hive,
+            )
+        } else if let Some(snapshot) = snapshot {
+            (
+                snapshot.name,
+                snapshot.publisher,
+                snapshot.install_location,
+                snapshot.uninstall_string,
+                snapshot.display_icon,
+                snapshot.hive,
+            )
+        } else if let Some(record) = history {
+            (
+                record.name,
+                record.publisher,
+                record.install_location,
+                None,
+                None,
+                String::new(),
+            )
+        } else {
+            return Err("Application not found in live inventory, cached snapshots, or persistent removal history.".into());
+        };
 
     let (plan, report) = run_blocking("Leftover scan", move || {
         leftovers::scan_app_leftovers_expanded(
@@ -1195,6 +1541,56 @@ pub async fn scan_app_leftovers(
     plans.retain(|_, p| p.expires_at > now);
     plans.insert(plan.plan_id.clone(), plan);
 
+    Ok(report)
+}
+
+/// Scans for an application removed before Cyron was installed. The supplied
+/// name, publisher, and path are unverified evidence: every returned candidate
+/// stays caution and unselected until the user reviews it.
+#[tauri::command]
+pub async fn scan_named_remnants(
+    state: State<'_, AppState>,
+    app_name: String,
+    publisher: Option<String>,
+    install_location: Option<String>,
+) -> Result<leftovers::LeftoverScanReport, String> {
+    let name = app_name.trim().to_string();
+    if name.is_empty() {
+        return Err("An application name is required for an explicit remnant scan.".into());
+    }
+    if name.len() > 120 || name.chars().any(|character| character.is_control()) {
+        return Err("The application name is too long or contains unsupported characters.".into());
+    }
+    let publisher = publisher
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let install_location = install_location
+        .map(|value| value.trim().trim_matches('"').to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(path) = install_location.as_deref() {
+        let candidate = std::path::Path::new(path);
+        if !candidate.is_absolute() {
+            return Err("The optional install path must be an absolute path.".into());
+        }
+        if !candidate.exists() {
+            return Err("The optional install path does not exist.".into());
+        }
+    }
+
+    let (plan, report) = run_blocking("Explicit remnant scan", move || {
+        leftovers::scan_named_leftovers(&name, publisher.as_deref(), install_location.as_deref())
+    })
+    .await?;
+    let mut plans = state
+        .leftover_plans
+        .lock()
+        .map_err(|_| "Leftover plan registry is unavailable.".to_string())?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    plans.retain(|_, stored| stored.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan);
     Ok(report)
 }
 
@@ -1603,6 +1999,111 @@ pub async fn clean_app_leftovers(
     .await?
 }
 
+#[tauri::command]
+pub async fn capture_performance_snapshot(
+    state: State<'_, AppState>,
+    force_startup: Option<bool>,
+) -> Result<perf::PerformanceSnapshot, String> {
+    let force_startup = force_startup.unwrap_or(false);
+    let mut snapshot = run_blocking("Performance capture", move || {
+        perf::capture_snapshot(force_startup)
+    })
+    .await?;
+    let active = state
+        .performance_trace
+        .lock()
+        .map_err(|_| "Performance trace state is unavailable.".to_string())?
+        .clone();
+    snapshot.trace = perf::trace_status(&active);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub fn list_performance_baselines(app: tauri::AppHandle) -> Vec<perf::PerformanceBaseline> {
+    perf::list_baselines(&app)
+}
+
+/// The baseline is measured again on the backend. A frontend payload never
+/// becomes a persisted measurement, so a stale or edited snapshot cannot be
+/// presented as a before/after result.
+#[tauri::command]
+pub async fn record_performance_baseline(
+    app: tauri::AppHandle,
+    label: String,
+) -> Result<perf::PerformanceBaseline, String> {
+    let snapshot = run_blocking("Performance baseline", || perf::capture_snapshot(true)).await?;
+    perf::record_baseline(&app, &label, &snapshot)
+}
+
+#[tauri::command]
+pub async fn start_performance_trace(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<perf::TraceStatus, String> {
+    if state
+        .performance_trace
+        .lock()
+        .map_err(|_| "Performance trace state is unavailable.".to_string())?
+        .is_some()
+    {
+        return Err("A Cyron performance trace is already recording. Stop it first.".into());
+    }
+
+    let handle = app.clone();
+    let session = run_blocking("Performance trace start", move || {
+        perf::start_trace(&handle)
+    })
+    .await??;
+
+    let mut active = state
+        .performance_trace
+        .lock()
+        .map_err(|_| "Performance trace state is unavailable.".to_string())?;
+    if active.is_some() {
+        let _ = perf::stop_trace(&session);
+        return Err("Another Cyron performance trace started at the same time.".into());
+    }
+    *active = Some(session.clone());
+    Ok(perf::trace_status(&Some(session)))
+}
+
+#[tauri::command]
+pub async fn stop_performance_trace(
+    state: State<'_, AppState>,
+) -> Result<perf::TraceStatus, String> {
+    let session = state
+        .performance_trace
+        .lock()
+        .map_err(|_| "Performance trace state is unavailable.".to_string())?
+        .take()
+        .ok_or_else(|| "No Cyron performance trace is recording.".to_string())?;
+    let fallback = session.clone();
+    match run_blocking("Performance trace stop", move || perf::stop_trace(&session)).await? {
+        Ok(path) => {
+            let mut status = perf::trace_status(&None);
+            status.output_path = Some(path.to_string_lossy().to_string());
+            status.message = format!(
+                "Trace saved to {}. Open it in Windows Performance Analyzer (WPA) to inspect CPU, disk and wait behaviour.",
+                path.display()
+            );
+            Ok(status)
+        }
+        Err(error) => {
+            let mut active = state
+                .performance_trace
+                .lock()
+                .map_err(|_| "Performance trace state is unavailable.".to_string())?;
+            *active = Some(fallback);
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn open_performance_settings(page: String) -> Result<(), String> {
+    perf::open_supported_tool(&page)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchUninstallItemResult {
@@ -1777,8 +2278,10 @@ pub async fn execute_batch_uninstall(
             // Stop requests apply between applications; do not kill a running vendor uninstaller.
             match uninstall::execute_uninstaller(&item.app_id, &parsed_cmd, &AtomicBool::new(false), 600) {
                 Ok(mut res) => {
-                    reconcile_uninstall_result(&mut res, &apps::discover_apps());
+                    let inventory = settle_and_reconcile(&item.app_id, &mut res);
+                    app_history::sync_inventory(&app, &inventory);
                     if res.status == "completed" {
+                        app_history::record_removal(&app, &item.app_id, "vendor-uninstaller-batch");
                         completed += 1;
                     } else if res.status == "restart_required" {
                         restart_required += 1;
@@ -2044,6 +2547,11 @@ pub async fn execute_force_delete_plan(
     plan_id: String,
     mode: String,
 ) -> Result<explorer::ForceDeleteResult, String> {
+    if mode != "quarantine" && mode != "permanent" {
+        return Err(format!(
+            "Unknown force delete mode '{mode}'. Use quarantine or permanent."
+        ));
+    }
     let plan = {
         let mut plans = state
             .force_delete_plans
@@ -2107,7 +2615,11 @@ pub async fn execute_force_delete_plan(
             at: now,
             bytes: result.freed_bytes,
             items: result.deleted_files + result.deleted_dirs,
-            status: "completed".into(),
+            status: if result.success {
+                "completed".into()
+            } else {
+                "partial".into()
+            },
         },
     );
 

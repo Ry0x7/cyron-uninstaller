@@ -1,7 +1,9 @@
+pub mod app_history;
 pub mod apps;
 pub mod analyzer_actions;
 pub mod caches;
 pub mod cleanup;
+pub mod devscan;
 pub mod commands;
 pub mod duplicates;
 pub mod explorer;
@@ -11,10 +13,12 @@ pub mod hunter;
 pub mod index;
 pub mod leftovers;
 pub mod mft;
+pub mod perf;
 pub mod process;
 pub mod providers;
 pub mod scan;
 pub mod storage;
+pub mod store;
 pub mod system;
 pub mod uninstall;
 pub mod volumes;
@@ -30,9 +34,13 @@ pub struct AppState {
     pub scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub duplicate_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub plans: Arc<Mutex<HashMap<String, cleanup::CleanupPlan>>>,
+    /// Read-only project scans whose artifact ids are the only inputs accepted
+    /// by the developer cleanup preview and verification commands.
+    pub developer_scans: Arc<Mutex<HashMap<String, devscan::DeveloperStorageScan>>>,
     pub cleanup_jobs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredUninstallPlan>>>,
     pub batch_uninstall_plans: Arc<Mutex<HashMap<String, uninstall::StoredBatchUninstallPlan>>>,
+    pub store_uninstall_plans: Arc<Mutex<HashMap<String, store::StoredStoreUninstallPlan>>>,
     pub batch_uninstall_jobs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub process_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub hunter_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
@@ -44,6 +52,8 @@ pub struct AppState {
     pub kill_process_plans: Arc<Mutex<HashMap<String, explorer::StoredKillProcessPlan>>>,
     pub cached_apps: Arc<Mutex<Option<(std::time::Instant, apps::AppInventory)>>>,
     pub startup_route: Arc<Mutex<Option<explorer::StartupRoute>>>,
+    /// One optional Windows Performance Recorder session started by this app.
+    pub performance_trace: Arc<Mutex<Option<perf::TraceSession>>>,
     pub index_manager: Arc<index::IndexManager>,
     /// True until the user deliberately enables cleaning.
     pub read_only: Arc<AtomicBool>,
@@ -56,9 +66,11 @@ impl Default for AppState {
             scans: Arc::default(),
             duplicate_scans: Arc::default(),
             plans: Arc::default(),
+            developer_scans: Arc::default(),
             cleanup_jobs: Arc::default(),
             uninstall_plans: Arc::default(),
             batch_uninstall_plans: Arc::default(),
+            store_uninstall_plans: Arc::default(),
             batch_uninstall_jobs: Arc::default(),
             process_snapshots: Arc::default(),
             hunter_snapshots: Arc::default(),
@@ -70,6 +82,7 @@ impl Default for AppState {
             kill_process_plans: Arc::default(),
             cached_apps: Arc::default(),
             startup_route: Arc::default(),
+            performance_trace: Arc::default(),
             index_manager: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
         }
@@ -88,8 +101,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::list_installed_apps,
             commands::list_removed_apps,
+            commands::list_app_history,
             commands::list_volumes,
             commands::list_caches,
+            commands::scan_developer_storage,
+            commands::preview_developer_cleanup,
+            commands::verify_developer_cleanup,
             commands::prepare_analyzer_action,
             commands::execute_analyzer_action,
             commands::cancel_analyzer_action,
@@ -112,12 +129,14 @@ pub fn run() {
             commands::get_cleanup_log,
             commands::prepare_uninstall,
             commands::prepare_batch_uninstall,
+            commands::prepare_store_uninstall,
+            commands::execute_store_uninstall,
             commands::discover_app_processes,
             commands::terminate_app_processes,
             commands::parse_uninstall_command,
             commands::execute_uninstall,
-            commands::uninstall_store_app,
             commands::scan_app_leftovers,
+            commands::scan_named_remnants,
             commands::clean_app_leftovers,
             commands::execute_batch_uninstall,
             commands::cancel_batch_uninstall,
@@ -140,6 +159,12 @@ pub fn run() {
             commands::get_system_specs,
             commands::list_startup_items,
             commands::set_startup_item_enabled,
+            commands::capture_performance_snapshot,
+            commands::list_performance_baselines,
+            commands::record_performance_baseline,
+            commands::start_performance_trace,
+            commands::stop_performance_trace,
+            commands::open_performance_settings,
             commands::prepare_force_delete_plan,
             commands::execute_force_delete_plan,
             commands::terminate_force_delete_locking_process,

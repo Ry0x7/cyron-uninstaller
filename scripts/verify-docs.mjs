@@ -47,6 +47,27 @@ function getMarkdownFiles(dir) {
   return results;
 }
 
+// Directories that are intentionally local-only (gitignored). Documentation must
+// never link into them: a clean clone and CI cannot open the target. Verification
+// evidence belongs under docs/evidence/ instead.
+const LOCAL_ONLY_ROOTS = [
+  ".unlazy",
+  ".chryypt",
+  "node_modules",
+  "dist",
+  "tmp",
+  "screenshots",
+  "target",
+];
+
+function localOnlyRoot(resolved) {
+  const rel = path.relative(root, resolved);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  const parts = rel.split(path.sep);
+  if (parts[0] === "src-tauri" && parts[1] === "target") return "src-tauri/target";
+  return LOCAL_ONLY_ROOTS.includes(parts[0]) ? parts[0] : null;
+}
+
 function slugify(text) {
   return text
     .toLowerCase()
@@ -104,6 +125,7 @@ const requiredDocs = [
   "HANDOFF.md",
   "GATES.md",
   "docs/ARCHITECTURE.md",
+  "docs/evidence/README.md",
   "docs/SECURITY.md",
   "docs/USER_GUIDE.md",
   "docs/BENCHMARKS.md",
@@ -190,6 +212,15 @@ for (const filePath of mdFiles) {
 
     // Resolve target path
     const resolvedPath = path.resolve(dir, targetFilePath);
+    const localRoot = localOnlyRoot(resolvedPath);
+    if (localRoot) {
+      error(
+        filePath,
+        `Link "${target}" points into gitignored local-only "${localRoot}/". ` +
+          "Readers and CI cannot open it; record the evidence under docs/evidence/ instead."
+      );
+      continue;
+    }
     if (!existsSync(resolvedPath)) {
       error(filePath, `Broken link to missing file: "${target}" (resolved to ${path.relative(root, resolvedPath)})`);
     } else if (targetAnchor) {

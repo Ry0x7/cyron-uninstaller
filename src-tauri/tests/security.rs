@@ -459,6 +459,12 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         "leftovers.rs",
         "explorer.rs",
         "analyzer_actions.rs",
+        // Atomic publish of the bounded lifecycle JSON; no user files are
+        // renamed or removed here.
+        "app_history.rs",
+        // Atomic publish of Cyron's own bounded performance-baselines.json;
+        // no user files or system paths are touched.
+        "perf.rs",
     ];
     let mut command_invocations = Vec::new();
 
@@ -563,13 +569,15 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         }
     }
 
-    // Only two reviewed process execution paths:
+    // Three reviewed process execution paths:
     // 1. Explorer in commands.rs (to reveal folders).
     // 2. Validated uninstaller binary in uninstall.rs.
+    // 3. Fixed Windows binaries in perf.rs, resolved under %SystemRoot% by
+    //    windows_binary() and launched through one helper.
     assert_eq!(
         command_invocations.len(),
-        2,
-        "only Explorer and validated uninstaller binaries may be launched: {command_invocations:?}"
+        3,
+        "only Explorer, validated uninstaller and fixed System32 diagnostics may be launched: {command_invocations:?}"
     );
     assert!(
         command_invocations
@@ -582,6 +590,12 @@ fn destructive_calls_stay_inside_reviewed_modules() {
             .iter()
             .any(|(f, _, cmd)| f == "uninstall.rs" && cmd.contains("&cmd.executable")),
         "uninstall.rs must launch validated uninstaller"
+    );
+    assert!(
+        command_invocations
+            .iter()
+            .any(|(f, _, cmd)| f == "perf.rs" && cmd.contains("Command::new(path)")),
+        "perf.rs must launch only the path resolved by windows_binary"
     );
 }
 

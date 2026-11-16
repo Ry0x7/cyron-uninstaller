@@ -30,6 +30,10 @@ pub struct CacheTarget {
     pub category: String,
     pub note: String,
     pub last_modified: Option<u64>,
+    /// detected, not-detected or unknown. `not-detected` is the only evidence
+    /// Cyron treats as an orphaned tool cache; protected data is never selected
+    /// because of this flag.
+    pub install_state: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,11 +141,11 @@ pub const CATALOG: &[TargetDef] = &[
     TargetDef {
         id: "gemini-tmp",
         tool: "Gemini CLI",
-        label: "Temporary working files",
+        label: "Session history and temporary files",
         path: "%USERPROFILE%\\.gemini\\tmp",
-        risk: SAFE,
+        risk: PROTECTED,
         category: AI,
-        note: "Temporary files Gemini CLI uses while running.",
+        note: "Gemini CLI saves chats, shell history and /restore checkpoint state under tmp. It is protected data, not a disposable cache.",
     },
     TargetDef {
         id: "gemini-history",
@@ -173,11 +177,56 @@ pub const CATALOG: &[TargetDef] = &[
     TargetDef {
         id: "lmstudio-models",
         tool: "LM Studio",
-        label: "Model weights",
+        label: "Model weights (legacy cache)",
         path: "%USERPROFILE%\\.cache\\lm-studio\\models",
         risk: PROTECTED,
         category: AI,
-        note: "Downloaded LM Studio model weights.",
+        note: "Downloaded LM Studio model weights in the older cache layout. Model files are measured but never offered for removal.",
+    },
+    TargetDef {
+        id: "lmstudio-models-local",
+        tool: "LM Studio",
+        label: "Model weights",
+        path: "%USERPROFILE%\\.lmstudio\\models",
+        risk: PROTECTED,
+        category: AI,
+        note: "LM Studio's model library. Model files are re-downloadable but enormous; Cyron never treats model size as a reason to delete.",
+    },
+    TargetDef {
+        id: "lmstudio-conversations",
+        tool: "LM Studio",
+        label: "Conversations",
+        path: "%USERPROFILE%\\.lmstudio\\conversations",
+        risk: PROTECTED,
+        category: AI,
+        note: "LM Studio chat conversations stored as JSON. Never a cleanup target.",
+    },
+    TargetDef {
+        id: "lmstudio-config-presets",
+        tool: "LM Studio",
+        label: "Configuration presets",
+        path: "%USERPROFILE%\\.lmstudio\\config-presets",
+        risk: PROTECTED,
+        category: AI,
+        note: "LM Studio configuration presets. Settings and presets are never cleanup targets.",
+    },
+    TargetDef {
+        id: "huggingface-home",
+        tool: "Hugging Face",
+        label: "Model, dataset and token cache",
+        path: "%USERPROFILE%\\.cache\\huggingface",
+        risk: PROTECTED,
+        category: AI,
+        note: "Hugging Face hub cache, Xet data and saved access tokens. Use hf cache prune for reviewed unreferenced revisions; Cyron measures this root and never cleans it.",
+    },
+    TargetDef {
+        id: "freebuff-config",
+        tool: "Freebuff",
+        label: "Application settings and skills",
+        path: "%USERPROFILE%\\.config\\freebuff-desktop",
+        risk: PROTECTED,
+        category: AI,
+        note: "Freebuff settings, account skills and local agent configuration. Protected; no cache subfolder is assumed.",
     },
     TargetDef {
         id: "lmstudio-logs",
@@ -194,9 +243,9 @@ pub const CATALOG: &[TargetDef] = &[
         tool: "Cursor",
         label: "Renderer cache",
         path: "%APPDATA%\\Cursor\\Cache",
-        risk: SAFE,
+        risk: CAUTION,
         category: IDE,
-        note: "Electron renderer cache, rebuilt automatically on launch.",
+        note: "Electron renderer cache. Cursor can force onboarding or reset local session state when it is removed; review before cleaning.",
     },
     TargetDef {
         id: "cursor-code-cache",
@@ -228,11 +277,11 @@ pub const CATALOG: &[TargetDef] = &[
     TargetDef {
         id: "cursor-workspace-storage",
         tool: "Cursor",
-        label: "Workspace window state",
+        label: "Workspace state and chat history",
         path: "%APPDATA%\\Cursor\\User\\workspaceStorage",
-        risk: CAUTION,
+        risk: PROTECTED,
         category: IDE,
-        note: "Window layout and local workspace state; clearing it resets recent editor state.",
+        note: "Cursor stores per-workspace SQLite state here, including chat history. Protected: never offered for removal.",
     },
     TargetDef {
         id: "cursor-history",
@@ -289,6 +338,33 @@ pub const CATALOG: &[TargetDef] = &[
         note: "Your settings, prompt history and agent state. Never a cleanup target.",
     },
     TargetDef {
+        id: "antigravity-gemini",
+        tool: "Antigravity",
+        label: "App conversations and brain",
+        path: "%USERPROFILE%\\.gemini\\antigravity",
+        risk: PROTECTED,
+        category: IDE,
+        note: "Antigravity app data, including brain conversation transcripts. Protected; never a cleanup target.",
+    },
+    TargetDef {
+        id: "antigravity-cli",
+        tool: "Antigravity",
+        label: "CLI settings and conversations",
+        path: "%USERPROFILE%\\.gemini\\antigravity-cli",
+        risk: PROTECTED,
+        category: IDE,
+        note: "Antigravity CLI settings, history and cache. Protected as agent memory and settings.",
+    },
+    TargetDef {
+        id: "antigravity-ide",
+        tool: "Antigravity",
+        label: "IDE agent state",
+        path: "%USERPROFILE%\\.gemini\\antigravity-ide",
+        risk: PROTECTED,
+        category: IDE,
+        note: "Antigravity IDE agent data and conversation state. Protected.",
+    },
+    TargetDef {
         id: "vscode-cache",
         tool: "VS Code",
         label: "Renderer cache",
@@ -327,11 +403,11 @@ pub const CATALOG: &[TargetDef] = &[
     TargetDef {
         id: "vscode-workspace-storage",
         tool: "VS Code",
-        label: "Workspace window state",
+        label: "Workspace extension state",
         path: "%APPDATA%\\Code\\User\\workspaceStorage",
-        risk: CAUTION,
+        risk: PROTECTED,
         category: IDE,
-        note: "Window layout and local workspace state; clearing it resets recent editor state.",
+        note: "Per-workspace extension state, including chat and database-backed extensions. Microsoft documents this as extension-managed state, not cache.",
     },
     TargetDef {
         id: "vscode-history",
@@ -368,7 +444,52 @@ pub const CATALOG: &[TargetDef] = &[
         path: "%LOCALAPPDATA%\\pnpm\\store",
         risk: CAUTION,
         category: PACKAGES,
-        note: "Packages re-link from this store. Removing it forces a fresh download.",
+        note: "Packages re-link from this store. Removing it forces a fresh download. pnpm can also use a per-drive .pnpm-store, which Cyron does not assume.",
+    },
+    TargetDef {
+        id: "pnpm-cache",
+        tool: "pnpm",
+        label: "Metadata cache",
+        path: "%LOCALAPPDATA%\\pnpm-cache",
+        risk: SAFE,
+        category: PACKAGES,
+        note: "pnpm registry metadata cache. The content store is separate and stays caution-rated.",
+    },
+    TargetDef {
+        id: "yarn-berry-cache",
+        tool: "Yarn",
+        label: "Berry cache",
+        path: "%LOCALAPPDATA%\\Yarn\\Berry\\cache",
+        risk: CAUTION,
+        category: PACKAGES,
+        note: "Yarn Berry's global cache. Zero-Installs projects keep their install inside the repository and are not in this location.",
+    },
+    TargetDef {
+        id: "uv-cache",
+        tool: "uv",
+        label: "Package cache",
+        path: "%LOCALAPPDATA%\\uv\\cache",
+        risk: SAFE,
+        category: PACKAGES,
+        note: "uv wheel and source cache. uv rebuilds it on demand; UV_CACHE_DIR can move it elsewhere.",
+    },
+    TargetDef {
+        id: "poetry-cache",
+        tool: "Poetry",
+        label: "Artifact cache",
+        path: "%LOCALAPPDATA%\\pypoetry\\Cache",
+        risk: SAFE,
+        category: PACKAGES,
+        note: "Poetry's downloaded package archive cache, re-created on demand.",
+    },
+    TargetDef {
+        id: "gradle-caches",
+        tool: "Gradle",
+        label: "User dependency cache",
+        path: "%USERPROFILE%\\.gradle\\caches",
+        risk: CAUTION,
+        category: PACKAGES,
+        note: "Gradle's shared dependency and build cache. Builds re-download dependencies and may fail offline until refreshed.",
     },
     TargetDef {
         id: "yarn-cache",
@@ -667,6 +788,7 @@ fn discover_caches_in(selected_drives: Option<&HashSet<char>>) -> CacheInventory
             category: job.def.category.to_string(),
             note: job.def.note.to_string(),
             last_modified: measurement.last_modified,
+            install_state: tool_install_state(job.def.tool).to_string(),
         });
     }
 
@@ -790,6 +912,7 @@ fn discover_secondary_drive_caches(
                         category: category.to_string(),
                         note,
                         last_modified: m.last_modified,
+                        install_state: tool_install_state(tool).to_string(),
                     });
                 }
             }
@@ -919,6 +1042,109 @@ fn targeted_sum(targets: &[CacheTarget], include: impl Fn(&CacheTarget) -> bool)
         .filter(|target| target.exists && include(target))
         .map(|target| target.size)
         .sum()
+}
+
+/// Conservative install detection for the tool-cache orphan distinction.
+/// `unknown` is intentional whenever Cyron cannot prove either state, because
+/// an existing cache folder alone is not evidence that the tool is gone.
+fn tool_install_state(tool: &str) -> &'static str {
+    let detected = match tool {
+        "Claude Code" => {
+            executable_in_path(&["claude.exe", "claude.cmd", "claude"])
+                || env_dir_exists("USERPROFILE", ".claude")
+                || env_dir_exists("USERPROFILE", r".local\bin")
+        }
+        "Codex CLI" => {
+            executable_in_path(&["codex.exe", "codex.cmd", "codex"])
+                || env_dir_exists("USERPROFILE", ".codex")
+        }
+        "Gemini CLI" => {
+            executable_in_path(&["gemini.exe", "gemini.cmd", "gemini"])
+                || env_dir_exists("USERPROFILE", ".gemini")
+        }
+        "Cursor" => file_under_local_appdata(r"Programs\cursor\Cursor.exe")
+            || file_under_local_appdata(r"Programs\Cursor\Cursor.exe")
+            || executable_in_path(&["cursor.exe", "cursor"]),
+        "VS Code" => file_under_local_appdata(r"Programs\Microsoft VS Code\Code.exe")
+            || executable_in_path(&["code.exe", "code.cmd", "code"]),
+        "Antigravity" => file_under_local_appdata(r"Programs\Antigravity\Antigravity.exe")
+            || file_under_local_appdata(r"Programs\Antigravity\antigravity.exe")
+            || executable_in_path(&["antigravity.exe", "antigravity"]),
+        "Ollama" => file_under_local_appdata(r"Programs\Ollama\ollama.exe")
+            || executable_in_path(&["ollama.exe", "ollama"]),
+        "LM Studio" => file_under_local_appdata(r"Programs\LM Studio\LM Studio.exe")
+            || file_under_local_appdata(r"Programs\lm-studio\LM Studio.exe")
+            || executable_in_path(&["lms.exe", "lms"]),
+        "npm" => executable_in_path(&["npm.cmd", "npm.exe", "npm"]),
+        "pnpm" => executable_in_path(&["pnpm.exe", "pnpm.cmd", "pnpm"]),
+        "Yarn" => executable_in_path(&["yarn.exe", "yarn.cmd", "yarn"]),
+        "pip" => executable_in_path(&["pip.exe", "pip.cmd", "pip", "python.exe", "py.exe"]),
+        "uv" => executable_in_path(&["uv.exe", "uv"]),
+        "Poetry" => executable_in_path(&["poetry.exe", "poetry.cmd", "poetry"]),
+        "Cargo" => {
+            executable_in_path(&["cargo.exe", "cargo"])
+                || env_dir_exists("USERPROFILE", r".cargo\bin")
+        }
+        "Docker Desktop" => executable_in_path(&["docker.exe", "docker"])
+            || file_under_program_files(r"Docker\Docker\Docker Desktop.exe"),
+        "WSL" => std::env::var("WINDIR")
+            .ok()
+            .map(|root| Path::new(&root).join(r"System32\wsl.exe").is_file())
+            .unwrap_or(false),
+        "Freebuff" => file_under_local_appdata(r"Programs\Freebuff\Freebuff.exe")
+            || executable_in_path(&["freebuff.exe", "freebuff"]),
+        "Hugging Face" => executable_in_path(&["hf.exe", "hf", "huggingface-cli.exe"]),
+        "Google Chrome" => file_under_program_files(r"Google\Chrome\Application\chrome.exe")
+            || file_under_program_files_x86(r"Google\Chrome\Application\chrome.exe"),
+        "Microsoft Edge" => file_under_program_files_x86(r"Microsoft\Edge\Application\msedge.exe")
+            || file_under_program_files(r"Microsoft\Edge\Application\msedge.exe"),
+        "Mozilla Firefox" => file_under_program_files(r"Mozilla Firefox\firefox.exe"),
+        // Gradle projects often use a wrapper without a machine-wide gradle
+        // command, so a missing executable is not evidence that Gradle is gone.
+        _ => return "unknown",
+    };
+    if detected {
+        "detected"
+    } else {
+        "not-detected"
+    }
+}
+
+fn executable_in_path(names: &[&str]) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|directory| {
+        names.iter().any(|name| directory.join(name).is_file())
+    })
+}
+
+fn env_dir_exists(variable: &str, relative: &str) -> bool {
+    std::env::var(variable)
+        .ok()
+        .map(|root| Path::new(&root).join(relative).is_dir())
+        .unwrap_or(false)
+}
+
+fn file_under_local_appdata(relative: &str) -> bool {
+    std::env::var("LOCALAPPDATA")
+        .ok()
+        .map(|root| Path::new(&root).join(relative).is_file())
+        .unwrap_or(false)
+}
+
+fn file_under_program_files(relative: &str) -> bool {
+    std::env::var("ProgramFiles")
+        .ok()
+        .map(|root| Path::new(&root).join(relative).is_file())
+        .unwrap_or(false)
+}
+
+fn file_under_program_files_x86(relative: &str) -> bool {
+    std::env::var("ProgramFiles(x86)")
+        .ok()
+        .map(|root| Path::new(&root).join(relative).is_file())
+        .unwrap_or(false)
 }
 
 fn category_rank(category: &str) -> usize {
@@ -1079,11 +1305,22 @@ mod tests {
             "claude-code-projects",
             "codex-sessions",
             "gemini-history",
+            "gemini-tmp",
             "cursor-history",
+            "cursor-workspace-storage",
             "vscode-history",
+            "vscode-workspace-storage",
             "antigravity-user",
+            "antigravity-gemini",
+            "antigravity-cli",
+            "antigravity-ide",
             "ollama-models",
             "lmstudio-models",
+            "lmstudio-models-local",
+            "lmstudio-conversations",
+            "lmstudio-config-presets",
+            "huggingface-home",
+            "freebuff-config",
             "docker-wsl",
             "wsl-distros",
             "firefox-profiles",
@@ -1166,6 +1403,37 @@ mod tests {
     }
 
     #[test]
+    fn requested_ai_and_developer_tools_have_a_reviewed_location() {
+        for tool in [
+            "Claude Code",
+            "Codex CLI",
+            "Gemini CLI",
+            "Antigravity",
+            "Cursor",
+            "VS Code",
+            "Freebuff",
+            "Ollama",
+            "LM Studio",
+            "Hugging Face",
+            "npm",
+            "pnpm",
+            "Yarn",
+            "pip",
+            "uv",
+            "Poetry",
+            "Cargo",
+            "Gradle",
+            "Docker Desktop",
+            "WSL",
+        ] {
+            assert!(
+                CATALOG.iter().any(|definition| definition.tool == tool),
+                "missing catalog coverage for {tool}"
+            );
+        }
+    }
+
+    #[test]
     fn discovery_reports_catalog_and_consistent_totals() {
         let inventory = discover_caches();
         assert!(
@@ -1180,6 +1448,11 @@ mod tests {
             assert!(ids.insert(target.id.clone()), "duplicate discovered id");
             assert!(!target.path.is_empty());
             assert!(Path::new(&target.path).is_absolute());
+            assert!(
+                matches!(target.install_state.as_str(), "detected" | "not-detected" | "unknown"),
+                "invalid install state for {}",
+                target.id
+            );
             if !target.exists {
                 assert_eq!(target.size, 0);
                 assert!(target.last_modified.is_none());

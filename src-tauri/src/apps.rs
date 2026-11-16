@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use winreg::enums::*;
 use winreg::RegKey;
@@ -124,7 +125,7 @@ pub fn discover_apps() -> AppInventory {
         &mut warnings,
     );
 
-    // 2. Microsoft Store / AppX / MSIX read-only inventory
+    // 2. Microsoft Store / MSIX package inventory through Windows Runtime.
     discover_store_apps(&hkcu, &mut apps, &mut warnings);
 
     // 3. Steam installed-game detection
@@ -186,6 +187,7 @@ fn read_app(
     scope: &str,
     architecture: &str,
 ) -> Option<InstalledApp> {
+    let windows_installer = read_dword(key, "WindowsInstaller").unwrap_or(0) == 1;
     let raw = RawApp {
         display_name: read_string(key, "DisplayName"),
         version: read_string(key, "DisplayVersion"),
@@ -209,10 +211,14 @@ fn read_app(
     let name = raw.display_name?;
     let windir = std::env::var("WINDIR").ok();
 
-    // Check uninstall support and missing executable detection
+    // Check uninstall support and missing executable detection. Windows
+    // Installer products are identified by the documented IsMSI flags and by
+    // the product GUID in either command or the uninstall subkey name.
     let uninstall_support = determine_win32_uninstall_support(
         raw.uninstall_string.as_deref(),
         raw.quiet_uninstall_string.as_deref(),
+        key_name,
+        windows_installer,
     );
 
     Some(InstalledApp {
@@ -247,19 +253,30 @@ fn read_app(
 fn determine_win32_uninstall_support(
     uninstall_string: Option<&str>,
     quiet_uninstall_string: Option<&str>,
+    key_name: &str,
+    windows_installer: bool,
 ) -> String {
     let uninst = uninstall_string.or(quiet_uninstall_string);
+    let product_code = msi_product_code(uninst.unwrap_or(""), key_name);
     let Some(cmd) = uninst else {
-        return "missing".to_string();
+        return if windows_installer || product_code.is_some() {
+            "standard".to_string()
+        } else {
+            "missing".to_string()
+        };
     };
 
     let trimmed = cmd.trim();
     if trimmed.is_empty() {
-        return "missing".to_string();
+        return if windows_installer || product_code.is_some() {
+            "standard".to_string()
+        } else {
+            "missing".to_string()
+        };
     }
 
     let parsed = crate::uninstall::parse_uninstall_command(trimmed);
-    if parsed.is_msi {
+    if parsed.is_msi || windows_installer || product_code.is_some() {
         if quiet_uninstall_string.is_some() && uninstall_string.is_none() {
             return "silent_only".to_string();
         }
@@ -282,8 +299,66 @@ fn determine_win32_uninstall_support(
     }
 }
 
-/// Discovers Microsoft Store / MSIX / AppX packages in HKCU AppModel Repository.
+/// Discovers current-user Microsoft Store / MSIX packages through the Windows
+/// Runtime package manager, then falls back to the read-only AppModel registry
+/// repository when that API is unavailable. Frameworks, resources, bundles and
+/// system packages are filtered by `store::list_store_apps`.
 fn discover_store_apps(
+    hkcu: &RegKey,
+    out: &mut Vec<InstalledApp>,
+    warnings: &mut Vec<String>,
+) {
+    match crate::store::list_store_apps() {
+        Ok(packages) => {
+            for package in packages {
+                let name = package
+                    .display_name
+                    .clone()
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| package.name.clone());
+                if name.trim().is_empty() {
+                    continue;
+                }
+                out.push(InstalledApp {
+                    id: format!("store|{}", package.family_name),
+                    name,
+                    version: package.version,
+                    publisher: package.publisher,
+                    install_location: package.install_location,
+                    install_date: None,
+                    uninstall_string: None,
+                    quiet_uninstall_string: None,
+                    display_icon: None,
+                    estimated_size: None,
+                    hive: "store".to_string(),
+                    scope: "user".to_string(),
+                    architecture: "neutral".to_string(),
+                    is_protected: package.is_system,
+                    source: "store".to_string(),
+                    uninstall_support: "store_managed".to_string(),
+                    confidence: "confirmed".to_string(),
+                    detection_reason: Some(format!(
+                        "Windows Runtime package inventory ({}; {})",
+                        package.full_name, package.signature_kind
+                    )),
+                    registry_key_name: None,
+                });
+            }
+            return;
+        }
+        Err(error) => push_warning(
+            warnings,
+            format!("Windows Runtime Store inventory was unavailable ({error}); using the read-only AppModel registry fallback."),
+        ),
+    }
+
+    discover_store_registry_fallback(hkcu, out, warnings);
+}
+
+/// Read-only registry fallback used only when the Windows Runtime package
+/// manager cannot enumerate packages. It cannot remove packages and marks that
+/// limitation through the Store package plan.
+fn discover_store_registry_fallback(
     hkcu: &RegKey,
     out: &mut Vec<InstalledApp>,
     _warnings: &mut Vec<String>,
@@ -493,6 +568,175 @@ fn parse_steam_manifest(content: &str, library_dir: &Path) -> Option<InstalledAp
     })
 }
 
+/// Returns a braced Windows Installer product GUID from a command string or
+/// from a GUID-named uninstall subkey. Only syntactically valid braces and hex
+/// positions are accepted, so an arbitrary path cannot be mistaken for an MSI.
+fn msi_product_code(raw_command: &str, key_name: &str) -> Option<String> {
+    fn valid_guid(candidate: &str) -> bool {
+        let bytes = candidate.as_bytes();
+        if bytes.len() != 38 || bytes[0] != b'{' || bytes[37] != b'}' {
+            return false;
+        }
+        let inner = &bytes[1..37];
+        inner.iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+    }
+
+    if valid_guid(key_name.trim()) {
+        return Some(key_name.trim().to_ascii_uppercase());
+    }
+
+    let bytes = raw_command.as_bytes();
+    for start in 0..bytes.len() {
+        if bytes[start] != b'{' {
+            continue;
+        }
+        let end = start + 38;
+        if end > bytes.len() {
+            break;
+        }
+        if let Ok(candidate) = std::str::from_utf8(&bytes[start..end]) {
+            if valid_guid(candidate) {
+                return Some(candidate.to_ascii_uppercase());
+            }
+        }
+    }
+    None
+}
+
+fn portable_path_is_inside(child: &str, parent: &str) -> bool {
+    let child = child.trim_end_matches('\\');
+    let parent = parent.trim_end_matches('\\');
+    child.eq_ignore_ascii_case(parent)
+        || (child.len() > parent.len()
+            && child.as_bytes().get(parent.len()) == Some(&b'\\')
+            && child[..parent.len()].eq_ignore_ascii_case(parent))
+}
+
+fn portable_path_is_registered(
+    known_paths: &HashSet<String>,
+    executable: &Path,
+    folder: &Path,
+) -> bool {
+    let executable_key = executable.to_string_lossy().to_lowercase().replace('/', "\\");
+    let folder_key = folder.to_string_lossy().to_lowercase().replace('/', "\\");
+    known_paths.iter().any(|known| {
+        let known = known.trim_end_matches('\\');
+        portable_path_is_inside(&executable_key, known)
+            || portable_path_is_inside(&folder_key, known)
+            || portable_path_is_inside(known, &folder_key)
+    })
+}
+
+#[derive(Debug, Default)]
+struct PortableMetadata {
+    product_name: Option<String>,
+    company_name: Option<String>,
+    file_version: Option<String>,
+}
+
+fn query_version_string(data: &[u8], key: &str) -> Option<String> {
+    use windows_sys::Win32::Storage::FileSystem::VerQueryValueW;
+    let wide: Vec<u16> = key.encode_utf16().chain(Some(0)).collect();
+    let mut pointer: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut length = 0u32;
+    let ok = unsafe {
+        VerQueryValueW(
+            data.as_ptr() as *const std::ffi::c_void,
+            wide.as_ptr(),
+            &mut pointer,
+            &mut length,
+        )
+    };
+    if ok == 0 || pointer.is_null() || length == 0 {
+        return None;
+    }
+    let units = unsafe { std::slice::from_raw_parts(pointer as *const u16, length as usize) };
+    let end = units.iter().position(|unit| *unit == 0).unwrap_or(units.len());
+    let value = String::from_utf16_lossy(&units[..end]).trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn read_portable_metadata(path: &Path) -> Option<PortableMetadata> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    };
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let mut handle = 0u32;
+    let size = unsafe { GetFileVersionInfoSizeW(wide.as_ptr(), &mut handle) };
+    if size == 0 {
+        return None;
+    }
+    let mut data = vec![0u8; size as usize];
+    let ok = unsafe {
+        GetFileVersionInfoW(wide.as_ptr(), 0, size, data.as_mut_ptr() as *mut std::ffi::c_void)
+    };
+    if ok == 0 {
+        return None;
+    }
+
+    let mut translations: Vec<(u16, u16)> = Vec::new();
+    let mut pointer: *mut std::ffi::c_void = std::ptr::null_mut();
+    let mut length = 0u32;
+    let translation_key: Vec<u16> = "\\VarFileInfo\\Translation"
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    let translated = unsafe {
+        VerQueryValueW(
+            data.as_ptr() as *const std::ffi::c_void,
+            translation_key.as_ptr(),
+            &mut pointer,
+            &mut length,
+        )
+    };
+    if translated != 0 && !pointer.is_null() && length >= 4 {
+        let words = unsafe {
+            std::slice::from_raw_parts(pointer as *const u16, (length / 2) as usize)
+        };
+        for pair in words.chunks_exact(2).take(4) {
+            translations.push((pair[0], pair[1]));
+        }
+    }
+    for fallback in [(0x0409, 0x04B0), (0x0409, 0x04E4), (0x0000, 0x04B0)] {
+        if !translations.contains(&fallback) {
+            translations.push(fallback);
+        }
+    }
+
+    let mut metadata = PortableMetadata::default();
+    for (language, code_page) in translations {
+        let prefix = format!("\\StringFileInfo\\{language:04x}{code_page:04x}");
+        if metadata.product_name.is_none() {
+            metadata.product_name = query_version_string(&data, &format!("{prefix}\\ProductName"));
+        }
+        if metadata.company_name.is_none() {
+            metadata.company_name = query_version_string(&data, &format!("{prefix}\\CompanyName"));
+        }
+        if metadata.file_version.is_none() {
+            metadata.file_version = query_version_string(&data, &format!("{prefix}\\FileVersion"));
+        }
+        if metadata.product_name.is_some()
+            && metadata.company_name.is_some()
+            && metadata.file_version.is_some()
+        {
+            break;
+        }
+    }
+
+    Some(metadata)
+}
+
 /// Discovers standalone portable applications in bounded user directories.
 fn discover_portable_apps(
     known_apps: &mut Vec<InstalledApp>,
@@ -501,11 +745,17 @@ fn discover_portable_apps(
     let mut known_paths = HashSet::new();
     for app in known_apps.iter() {
         if let Some(ref loc) = app.install_location {
-            known_paths.insert(loc.to_lowercase().replace('/', "\\"));
+            let key = loc.trim_end_matches('\\').to_lowercase().replace('/', "\\");
+            if !key.is_empty() {
+                known_paths.insert(key);
+            }
         }
         if let Some(ref icon) = app.display_icon {
             let icon_clean = icon.split(',').next().unwrap_or(icon).trim().trim_matches('"');
-            known_paths.insert(icon_clean.to_lowercase().replace('/', "\\"));
+            let key = icon_clean.trim_end_matches('\\').to_lowercase().replace('/', "\\");
+            if !key.is_empty() {
+                known_paths.insert(key);
+            }
         }
     }
 
@@ -542,12 +792,8 @@ fn discover_portable_apps(
                                 .map(|ext| ext.eq_ignore_ascii_case("exe"))
                                 .unwrap_or(false)
                         {
-                            let sub_norm = sub_path.to_string_lossy().to_lowercase();
-                            let dir_norm = path.to_string_lossy().to_lowercase();
-
-                            let already_registered = known_paths.iter().any(|k| {
-                                sub_norm.contains(k) || dir_norm.contains(k) || k.contains(&dir_norm)
-                            });
+                            let already_registered =
+                                portable_path_is_registered(&known_paths, &sub_path, &path);
 
                             if !already_registered && is_pe_executable(&sub_path) {
                                 let folder_name = path
@@ -556,12 +802,14 @@ fn discover_portable_apps(
                                     .to_string_lossy()
                                     .to_string();
                                 let size = std::fs::metadata(&sub_path).map(|m| m.len()).ok();
+                                let metadata = read_portable_metadata(&sub_path).unwrap_or_default();
+                                let name = metadata.product_name.unwrap_or(folder_name);
 
                                 portable_candidates.push(InstalledApp {
                                     id: format!("portable|{}", hash_path(&sub_path)),
-                                    name: folder_name,
-                                    version: None,
-                                    publisher: None,
+                                    name,
+                                    version: metadata.file_version,
+                                    publisher: metadata.company_name,
                                     install_location: Some(path.to_string_lossy().to_string()),
                                     install_date: None,
                                     uninstall_string: None,
@@ -778,6 +1026,90 @@ fn dedupe(apps: Vec<InstalledApp>) -> Vec<InstalledApp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phase2_msi_product_code_detection() {
+        let code = "{12345678-ABCD-EF01-2345-6789ABCDEF01}";
+        let raw = format!("MsiExec.exe /I{code}");
+        assert_eq!(msi_product_code(&raw, "Products").as_deref(), Some(code));
+        assert_eq!(msi_product_code("", code).as_deref(), Some(code));
+        assert_eq!(msi_product_code("C:\\Apps\\uninst.exe", "MyProduct"), None);
+        assert_eq!(
+            msi_product_code("msiexec /x {NOT-A-GUID}", "NotAGuid"),
+            None
+        );
+        assert_eq!(
+            msi_product_code("msiexec /x {12345678-ABCD-EF01-2345-6789ABCDEF0}", "x"),
+            None
+        );
+    }
+
+    #[test]
+    fn phase2_portable_metadata_falls_back_safely() {
+        let current = std::env::current_exe().expect("current exe");
+        let metadata = read_portable_metadata(&current);
+        if let Some(metadata) = metadata {
+            for value in [
+                metadata.product_name,
+                metadata.company_name,
+                metadata.file_version,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                assert!(!value.trim().is_empty());
+            }
+        }
+        assert!(read_portable_metadata(Path::new("C:\\definitely-missing-cyron.exe")).is_none());
+    }
+
+    #[test]
+    fn phase2_portable_path_dedupe_is_not_substring() {
+        let mut known = HashSet::new();
+        known.insert(r"c:\program files\myapp".to_string());
+        assert!(portable_path_is_registered(
+            &known,
+            Path::new(r"C:\Program Files\MyApp\app.exe"),
+            Path::new(r"C:\Program Files\MyApp"),
+        ));
+        assert!(!portable_path_is_registered(
+            &known,
+            Path::new(r"C:\Users\Me\AppData\Local\Programs\MyAppExtended\app.exe"),
+            Path::new(r"C:\Users\Me\AppData\Local\Programs\MyAppExtended"),
+        ));
+        assert!(!portable_path_is_registered(
+            &known,
+            Path::new(r"C:\Program Files\MyAppExtended\app.exe"),
+            Path::new(r"C:\Program Files\MyAppExtended"),
+        ));
+        assert!(!portable_path_is_registered(
+            &known,
+            Path::new(r"C:\Program Files\MyAppExtra\app.exe"),
+            Path::new(r"C:\Program Files\MyAppExtra"),
+        ));
+    }
+
+    #[test]
+    fn phase2_discovery_inventory_contract_is_consistent() {
+        let inventory = discover_apps();
+        let mut ids = HashSet::new();
+        for app in &inventory.apps {
+            assert!(!app.name.trim().is_empty(), "every discovered app needs a name");
+            assert!(
+                matches!(app.source.as_str(), "win32" | "store" | "steam" | "portable"),
+                "unexpected app source {}",
+                app.source
+            );
+            assert!(ids.insert(app.id.clone()), "duplicate app id {}", app.id);
+            if app.source == "store" {
+                assert_eq!(app.uninstall_support, "store_managed");
+            }
+        }
+        assert!(
+            inventory.warnings.len() <= MAX_WARNINGS,
+            "warnings must stay bounded"
+        );
+    }
 
     fn raw(name: &str) -> RawApp {
         RawApp {
