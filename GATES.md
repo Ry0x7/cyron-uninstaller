@@ -526,7 +526,7 @@ These gates cover the read-only Performance page. Earlier uninstaller/cleanup ev
 - [x] G84: full regression and documentation after the performance changes
   CHECK: `npm run typecheck`, `npm test`, full Rust suite, `npm run docs:check`
   EXPECT: exit 0; all existing safety suites unchanged
-  EVIDENCE: typecheck exit 0; 98 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed, including 26 security and 5 cleanup-stress tests; `DOCS_CHECK: PASSED` over 77 Markdown files. CI is not yet green because this tree is uncommitted; local checks are recorded here. UNVERIFIED: elevated Diagnostics-Performance boot impact and a real WPR trace recording/opening.
+  EVIDENCE: typecheck exit 0; 98 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed, including 26 security and 5 cleanup-stress tests; `DOCS_CHECK: PASSED` over 77 Markdown files. GitHub Actions run [43930569278](https://github.com/Ry0x7/cyron-uninstaller/actions/runs/43930569278) passed both jobs on commit `d5e5afc`, including the cleanup and RC1 E2E fixtures. UNVERIFIED: elevated Diagnostics-Performance boot impact and a real WPR trace recording/opening.
 
 ## Not gated
 
