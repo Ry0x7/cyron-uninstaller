@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Cyron main window permissions",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-ask"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-theme",
+    "dialog:allow-open",
+    "dialog:allow-ask"
+  ]
 }

@@ -39,7 +39,7 @@ export function HunterMode({
     if (isActive) {
       setIsTargeting(true);
       setConfirmKill(false);
-      setActionMessage("Hover cursor over any desktop window or drag the crosshair icon to lock target (Space/Enter to lock, Esc to cancel)…");
+      setActionMessage(null);
     } else {
       setIsTargeting(false);
       setTarget(null);
@@ -135,7 +135,7 @@ export function HunterMode({
   const handleResumeTargeting = () => {
     setIsTargeting(true);
     setConfirmKill(false);
-    setActionMessage("Move cursor over any desktop window (Space/Enter to lock, Esc to cancel)…");
+    setActionMessage(null);
   };
 
   const handleTerminateProcess = async () => {
@@ -198,58 +198,57 @@ export function HunterMode({
   return (
     <>
       <div className={`hunter-floating-widget ${drawerOpen ? "hunter-floating-widget--hidden" : ""}`}>
-        {/* Hunter HUD Panel when target is acquired */}
         {target && (
-          <div className="hunter-hud">
-            <div className="hunter-hud__head">
+          <section className="hunter-hud" aria-label="Target window" aria-live="polite">
+            <header className="hunter-hud__head">
               <span className="hunter-hud__title">
                 <IconCrosshair size={15} />
-                Target Acquired
+                Target window
               </span>
               <button
                 type="button"
-                className="btn btn--sm btn--ghost"
+                className="icon-btn"
                 onClick={() => {
                   setTarget(null);
+                  setTargetApp(null);
                   handleResumeTargeting();
                 }}
-                title="Clear current target and resume scanning"
+                aria-label="Clear target and resume targeting"
+                title="Clear target and resume targeting"
               >
-                <IconClose size={13} />
+                <IconClose size={14} />
               </button>
-            </div>
+            </header>
 
             <div className="hunter-hud__body">
-              <div>
-                <div className="hunter-target-title" title={target.windowTitle || target.processName}>
-                  {target.windowTitle || target.processName}
-                </div>
-                <div className="hunter-target-meta">
-                  PID {target.pid} · {target.processName}
-                </div>
+              <div className="hunter-target-title" title={target.windowTitle || target.processName}>
+                {target.windowTitle || target.processName}
+              </div>
+              <div className="hunter-target-meta">
+                PID {target.pid} · {target.processName}
               </div>
 
               {target.processPath && (
-                <div style={{ wordBreak: "break-all", fontSize: 11, color: "var(--text-muted)" }}>
+                <div className="hunter-target-path" title={target.processPath}>
                   {target.processPath}
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <div className="hunter-badges">
                 {target.isCritical ? (
-                  <Badge tone="danger">Windows Critical Process</Badge>
+                  <Badge tone="danger">Protected by Windows</Badge>
                 ) : target.matchedAppName ? (
                   <Badge tone="accent">{target.matchedAppName}</Badge>
                 ) : (
-                  <Badge tone="neutral">Unregistered Application</Badge>
+                  <Badge tone="neutral">Unregistered application</Badge>
                 )}
-                {isTargeting && <Badge tone="caution">Targeting Active</Badge>}
+                {isTargeting && <Badge tone="caution">Targeting</Badge>}
               </div>
 
               {actionMessage && (
-                <div style={{ fontSize: 11, color: "var(--accent)" }}>
+                <p className="hunter-message" role="status">
                   {actionMessage}
-                </div>
+                </p>
               )}
             </div>
 
@@ -260,9 +259,9 @@ export function HunterMode({
                   variant="danger"
                   icon={<IconTrash size={13} />}
                   onClick={() => setWizardOpen(true)}
-                  style={{ width: "100%", justifyContent: "center" }}
+                  className="hunter-action--wide"
                 >
-                  Uninstall {targetApp.name}…
+                  Review uninstall for {targetApp.name}
                 </Button>
               ) : target.processPath ? (
                 <Button
@@ -270,33 +269,38 @@ export function HunterMode({
                   variant="secondary"
                   icon={<IconTrash size={13} />}
                   onClick={handleForcedRemovalOfTarget}
-                  style={{ width: "100%", justifyContent: "center" }}
+                  className="hunter-action--wide"
                 >
-                  Forced Removal of Application…
+                  Review forced removal
                 </Button>
               ) : null}
 
               {!target.isCritical && target.canTerminate && (
                 confirmKill ? (
-                  <div className="hunter-confirm-kill-box">
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      icon={<IconStop size={13} />}
-                      loading={terminating}
-                      onClick={handleTerminateProcess}
-                      style={{ width: "100%", justifyContent: "center" }}
-                    >
-                      Confirm Kill PID {target.pid}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setConfirmKill(false)}
-                      style={{ width: "100%", justifyContent: "center" }}
-                    >
-                      Cancel
-                    </Button>
+                  <div className="hunter-kill-confirm" role="alert">
+                    <p>
+                      End <strong>{target.processName}</strong> (PID {target.pid})? Unsaved work will be
+                      lost.
+                    </p>
+                    <div className="hunter-action-row">
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<IconStop size={13} />}
+                        loading={terminating}
+                        onClick={handleTerminateProcess}
+                      >
+                        End process
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setConfirmKill(false)}
+                        disabled={terminating}
+                      >
+                        Keep running
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <Button
@@ -304,50 +308,49 @@ export function HunterMode({
                     variant="danger"
                     icon={<IconStop size={13} />}
                     onClick={() => setConfirmKill(true)}
-                    style={{ width: "100%", justifyContent: "center" }}
+                    className="hunter-action--wide"
                   >
-                    Kill Process
+                    End process
                   </Button>
                 )
               )}
 
               {target.processPath && (
-                <div style={{ display: "flex", gap: 6 }}>
+                <div className="hunter-action-row">
                   <Button
                     size="sm"
                     variant="ghost"
                     icon={<IconFolder size={13} />}
                     onClick={handleRevealPath}
-                    style={{ flex: 1 }}
+                    className="hunter-action--grow"
                   >
-                    Open Folder
+                    Open folder
                   </Button>
                   <Button
                     size="sm"
                     variant="ghost"
                     icon={<IconCopy size={13} />}
                     onClick={handleCopyPath}
-                    title="Copy executable path"
                   >
-                    Copy
+                    Copy path
                   </Button>
                 </div>
               )}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Floating crosshair control during session */}
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="hunter-dock" role="region" aria-label="Hunter targeting controls">
           <button
             type="button"
-            className={`hunter-trigger-btn ${isTargeting ? "hunter-trigger-btn--active" : ""} ${isDragging ? "hunter-trigger-btn--dragging" : ""}`}
+            className={`hunter-lock ${isTargeting ? "hunter-lock--active" : ""} ${isDragging ? "hunter-lock--dragging" : ""}`}
+            aria-pressed={isTargeting}
             onPointerDown={(e) => {
               try {
                 e.currentTarget.setPointerCapture(e.pointerId);
                 setIsDragging(true);
                 setIsTargeting(true);
-                setActionMessage("Drag cursor over any desktop window, then release to lock target…");
+                setActionMessage(null);
               } catch {
                 // Ignore pointer capture errors
               }
@@ -372,24 +375,31 @@ export function HunterMode({
                 }
               }
             }}
-            title={isTargeting ? "Click to lock target window (or press Space/Enter)" : "Click to resume window targeting"}
+            title={
+              isTargeting
+                ? "Click to lock the current window (or press Space/Enter)"
+                : "Click to resume window targeting"
+            }
           >
             <IconCrosshair size={16} />
-            <span>{isTargeting ? "Lock Target" : "Resume Target"}</span>
+            <span>{isTargeting ? "Lock target" : "Resume"}</span>
           </button>
 
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={onExit}
-            title="Exit Hunter Mode (Esc)"
-          >
-            Exit (Esc)
+          <div className="hunter-dock__text">
+            <span className="hunter-dock__title">
+              {target ? "Target locked" : isTargeting ? "Move over any desktop window" : "Targeting paused"}
+            </span>
+            <span className="hunter-dock__hint">
+              {isTargeting ? "Space or Enter locks · Esc exits" : "Esc exits Hunter Mode"}
+            </span>
+          </div>
+
+          <Button size="sm" variant="ghost" onClick={onExit} title="Exit Hunter Mode (Esc)">
+            Exit
           </Button>
         </div>
       </div>
 
-      {/* Guided Uninstall Wizard if target app is selected for uninstall/forced removal */}
       {targetApp && (
         <UninstallWizard
           app={targetApp}

@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   IconChevronRight,
   IconCleaner,
+  IconDownload,
   IconDrive,
   IconExternal,
   IconFolder,
@@ -18,6 +19,7 @@ import {
   KeyValue,
   Panel,
   ProgressBar,
+  SectionHeader,
   Segmented,
   Skeleton,
   Stat,
@@ -88,10 +90,10 @@ const RAIL_TABS = [
 type RailTab = (typeof RAIL_TABS)[number]["value"];
 
 const MODES = [
-  { value: "map" as const, label: "Treemap" },
-  { value: "details" as const, label: "Explorer Table" },
+  { value: "map" as const, label: "Map" },
+  { value: "details" as const, label: "Files" },
   { value: "duplicates" as const, label: "Duplicates" },
-  { value: "storage" as const, label: "Storage" },
+  { value: "storage" as const, label: "By type" },
 ];
 
 type AnalyzerMode = (typeof MODES)[number]["value"];
@@ -174,10 +176,12 @@ export function Analyzer({
   initialPath,
   initialMode,
   onNavigateToCleaner,
+  embedded = false,
 }: {
   initialPath?: string | null;
   initialMode?: "map" | "details" | "duplicates" | "storage" | null;
   onNavigateToCleaner?: (targetId?: string) => void;
+  embedded?: boolean;
 } = {}) {
   const { settings } = useSettings();
   const volumes = useAsync(() => api.listVolumes(), []);
@@ -541,46 +545,58 @@ export function Analyzer({
       </Button>
     ) : (
       <>
+        <Button variant="primary" icon={<IconFolder size={15} />} onClick={() => void chooseFolder()}>
+          Choose folder
+        </Button>
         {result && (
-          <>
+          <div className="az-header-tools" role="group" aria-label="Scan results">
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => exportScanCsv(result)}
-              title="Export scan hierarchy as CSV"
-            >
-              Export CSV
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => exportScanJson(result)}
-              title="Export complete scan details as JSON"
-            >
-              Export JSON
-            </Button>
-            <Button
-              icon={<IconRefresh size={15} />}
+              icon={<IconRefresh size={14} />}
               onClick={() => void runScan(lastPath || result.rootPath)}
             >
               Rescan
             </Button>
-          </>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<IconDownload size={14} />}
+              onClick={() => exportScanCsv(result)}
+              title="Export scan hierarchy as CSV"
+            >
+              CSV
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<IconDownload size={14} />}
+              onClick={() => exportScanJson(result)}
+              title="Export complete scan details as JSON"
+            >
+              JSON
+            </Button>
+          </div>
         )}
-        <Button variant="primary" icon={<IconFolder size={15} />} onClick={() => void chooseFolder()}>
-          Choose folder
-        </Button>
       </>
     );
 
   return (
     <>
-      <ViewHeader
-        title="Disk Analyzer"
-        description="Map disk usage with a read-only scan. Review selected items separately before recycling or permanent deletion."
-        actions={headerActions}
-      />
-      <div className="view-body">
+      {embedded ? (
+        <SectionHeader
+          title="Disk space"
+          description="Map disk usage with a read-only scan. Review selected items separately before recycling or permanent deletion."
+          actions={headerActions}
+        />
+      ) : (
+        <ViewHeader
+          title="Disk space"
+          description="Map disk usage with a read-only scan. Review selected items separately before recycling or permanent deletion."
+          actions={headerActions}
+        />
+      )}
+      <div className={cx("view-body", embedded && "view-body--embedded")}>
         {error && (
           <Banner
             tone="danger"
@@ -1262,14 +1278,14 @@ function SelectionDetails({
       />
 
       {inspection && inspection.isRecognized && (
-        <div style={{ margin: "12px 0", padding: "10px", background: "var(--surface-sunken)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div className="az-cleanable">
+          <div className="az-cleanable__head">
             <Badge tone={inspection.risk === "protected" ? "caution" : inspection.risk === "safe" ? "safe" : "accent"}>
-              {inspection.risk === "protected" ? "Protected Directory" : "Cleanable Cache"}
+              {inspection.risk === "protected" ? "Protected folder" : "Cleanable cache"}
             </Badge>
-            {inspection.toolLabel && <span className="small muted mono">{inspection.toolLabel}</span>}
+            {inspection.toolLabel && <span className="small muted">{inspection.toolLabel}</span>}
           </div>
-          <p className="small muted" style={{ margin: "4px 0 8px" }}>{inspection.explanation}</p>
+          <p className="small muted">{inspection.explanation}</p>
           {inspection.isCleanable && (
             <Button
               size="sm"

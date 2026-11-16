@@ -13,6 +13,11 @@ risk labels, built for everyday users and developers alike.
 > process snapshot creation times to prevent PID recycling races, unconditionally protects Windows critical processes,
 > backs up registry subkeys into multi-type `.reg` files before deletion, and moves residuals to quarantine.
 
+The desktop interface has five primary destinations: **Home**, **Applications**, **Storage & Cleanup**,
+**Performance**, and **History & Recovery**. Settings lives in the sidebar footer. Hunter Mode is an
+action inside Applications rather than a separate page. The shared visual system is documented in
+[docs/DESIGN.md](docs/DESIGN.md).
+
 ---
 
 ## What Works in Cyron
@@ -56,10 +61,10 @@ risk labels, built for everyday users and developers alike.
 - **Settings Controls**: Independent toggles for Standard and Advanced/Destructive Explorer integration with 1-click status checking and repair.
 
 ### 5. Hunter Mode & Desktop Window Targeting
-- **Main Sidebar Placement**: Positioned directly below Uninstaller in the primary sidebar navigation as a global session action.
-- **Activation Confirmation**: Clicking Hunter Mode opens a compact confirmation modal explaining external window targeting, available actions, and exit controls before any cursor tracking begins.
-- **Session Lifecycle**: Cursor tracking and targeting resolution only run during an active confirmed session; HUD banner and floating crosshair triggers are strictly hidden when inactive.
-- **Active Sidebar Indicator**: Persistent active indicator badge in the sidebar with an inline exit control; supports instant `Esc` cancellation without leaving stale targets or background polling.
+- **Applications Action**: **Find by window** sits in the Applications header next to Refresh; Hunter Mode is not a separate navigation page.
+- **Activation Confirmation**: Clicking **Find by window** opens a compact confirmation dialog explaining external window targeting, available actions, and exit controls before any cursor tracking begins.
+- **Session Lifecycle**: Cursor tracking and targeting resolution only run during an active confirmed session; the HUD banner and floating crosshair are hidden when inactive.
+- **Active Indicator & Exit**: An active targeting indicator with an inline exit control is shown only during the session; `Esc` cancels immediately without leaving stale targets or background polling.
 
 ### 6. Performance Diagnostics & Startup Evidence
 - **Live Local Metrics**: Samples total CPU, physical memory and commit charge, Windows PDH physical-disk busy/queue counters, fixed-volume capacity, and per-process CPU, working set and I/O with a 700 ms measured window and a bounded 4,096-process cap.
@@ -77,7 +82,7 @@ risk labels, built for everyday users and developers alike.
 flowchart TD
     subgraph UI ["Frontend (React 19 + TypeScript)"]
         Nav[Sidebar Navigation]
-        Views[Overview / Uninstaller / Analyzer / Cleaner / Activity / Settings]
+        Views[Home / Applications / Storage & Cleanup / Performance / History & Recovery]
     end
 
     subgraph IPC ["Tauri v2 IPC Boundary (CamelCase JSON)"]
@@ -148,7 +153,7 @@ Every build is verified with automated test suites, stress harnesses, and end-to
 
 ```powershell
 npm run typecheck                                      # TypeScript type validation (0 errors)
-npm test                                               # 98 Vitest frontend tests
+npm test                                               # 100 Vitest frontend tests
 npm run build                                          # Production frontend bundle
 node scripts/verify-dist.mjs                           # Frontend bundle assertions (DIST_OK)
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
@@ -186,6 +191,7 @@ npm run verify:signatures                              # Authenticode signature 
 - [GATES.md](GATES.md): Verifiable acceptance criteria and test evidence.
 - [AGENTS.md](AGENTS.md): Architectural contracts, IPC rules, and developer guidelines.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Component interactions, IPC contract, and data flows.
+- [docs/DESIGN.md](docs/DESIGN.md): Design tokens, navigation, primitives, states and accessibility rules.
 - [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md): Detailed verification ledger and test counts.
 - [docs/SECURITY.md](docs/SECURITY.md): Threat model, security boundaries, and confirmation plan safety.
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): End-user walkthrough of Explorer integration, scanning, cleaning, and uninstallation.

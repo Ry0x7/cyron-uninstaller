@@ -5,12 +5,13 @@ import {
   Banner,
   Button,
   EmptyState,
-  Eyebrow,
   Panel,
   ProgressBar,
+  SectionHeader,
   Segmented,
   Stat,
   Toggle,
+  ViewHeader,
   cx,
 } from "../../components/ui";
 import {
@@ -421,12 +422,40 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
 
   return (
     <div ref={rootRef}>
-      <ViewHeaderBlock
-        refreshing={refreshing}
-        snapshot={snapshot}
-        onRefresh={() => void refresh(false)}
-        live={live}
-        onToggleLive={() => setLive((value) => !value)}
+      <ViewHeader
+        title="Performance"
+        description="See what is actually using this PC, what Windows measured at startup, and which reversible change the evidence supports. Cyron does not use RAM boosters or claim guaranteed speed gains."
+        meta={
+          snapshot ? (
+            <span className="perf-sample">
+              {snapshot.sampleMs} ms sample · {snapshot.processCount} processes ·{" "}
+              {snapshot.elevated ? "Administrator" : "Standard account"}
+            </span>
+          ) : undefined
+        }
+        actions={
+          <>
+            <button
+              type="button"
+              className="perf-live-toggle"
+              aria-pressed={live}
+              title="Measure every 10 seconds while this page is visible"
+              onClick={() => setLive((value) => !value)}
+            >
+              <span className={cx("perf-live-dot", !live && "perf-live-dot--paused")} aria-hidden="true" />
+              {live ? "Live updates" : "Paused"}
+            </button>
+            <Button
+              variant="secondary"
+              icon={<IconRefresh size={14} />}
+              loading={refreshing}
+              onClick={() => void refresh(false)}
+              disabled={!snapshot && refreshing}
+            >
+              Refresh
+            </Button>
+          </>
+        }
       />
 
       <div className="view-body perf">
@@ -468,16 +497,12 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
 
         {snapshot && (
           <>
-            <Panel
-              title="Why is my PC slow?"
-              subtitle="Choose the symptom. Cyron shows only the evidence it actually measured."
-              actions={
-                <span className="perf-sample mono">
-                  {snapshot.sampleMs} ms sample · {snapshot.processCount} processes ·{" "}
-                  {snapshot.elevated ? "elevated" : "standard user"}
-                </span>
-              }
-            >
+            <section className="perf-section">
+              <SectionHeader
+                title="Why is my PC slow?"
+                description="Choose the symptom. Cyron shows only the evidence it actually measured."
+              />
+              <Panel bodyClassName="perf-guide-panel">
               <div className="perf-guide" role="group" aria-label="Slowdown symptoms">
                 {guides.map((entry) => (
                   <button
@@ -493,7 +518,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
               </div>
               <div className="perf-guide__answer">
                 <div>
-                  <Eyebrow>Guided check</Eyebrow>
+                  <span className="perf-label">Guided check</span>
                   <h3>{selectedGuide.title}</h3>
                   <p>{selectedGuide.detail}</p>
                 </div>
@@ -517,10 +542,20 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   </span>
                 </div>
               </div>
-            </Panel>
+              </Panel>
+            </section>
 
-            <div className="perf-metrics">
-              <Panel className="perf-metric" title="Processor" subtitle={`${snapshot.cpu.logicalCores} logical processors`}>
+            <section className="perf-section">
+              <SectionHeader
+                title="Live sample"
+                description="One bounded reading. The figures move with what the PC is doing right now."
+              />
+              <Panel bodyClassName="perf-metrics">
+              <div className="perf-metric">
+                <div className="perf-metric__head">
+                  <span className="perf-metric__label">Processor</span>
+                  <span className="perf-metric__sub">{snapshot.cpu.logicalCores} logical processors</span>
+                </div>
                 <div className="perf-metric__value">
                   {formatPercent(snapshot.cpu.utilizationPercent / 100)}
                   <span>busy</span>
@@ -535,9 +570,13 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   <span>Kernel {formatPercent(snapshot.cpu.kernelPercent / 100)}</span>
                   <span>Idle {formatPercent(snapshot.cpu.idlePercent / 100)}</span>
                 </div>
-              </Panel>
+              </div>
 
-              <Panel className="perf-metric" title="Memory" subtitle={`${formatBytes(snapshot.memory.totalBytes)} physical`}>
+              <div className="perf-metric">
+                <div className="perf-metric__head">
+                  <span className="perf-metric__label">Memory</span>
+                  <span className="perf-metric__sub">{formatBytes(snapshot.memory.totalBytes)} physical</span>
+                </div>
                 <div className="perf-metric__value">
                   {formatPercent(snapshot.memory.usedPercent / 100)}
                   <span>in use</span>
@@ -551,9 +590,13 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   <span>{formatBytes(snapshot.memory.availableBytes)} available</span>
                   <span>Commit {formatPercent(snapshot.memory.commitPercent / 100)}</span>
                 </div>
-              </Panel>
+              </div>
 
-              <Panel className="perf-metric" title="Disk I/O" subtitle="Physical disk pressure">
+              <div className="perf-metric">
+                <div className="perf-metric__head">
+                  <span className="perf-metric__label">Disk I/O</span>
+                  <span className="perf-metric__sub">Physical disk pressure</span>
+                </div>
                 {snapshot.diskIo.status === "measured" ? (
                   <>
                     <div className="perf-metric__value">
@@ -576,9 +619,13 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                     <span>{snapshot.diskIo.note ?? "Physical-disk counters were unavailable."}</span>
                   </div>
                 )}
-              </Panel>
+              </div>
 
-              <Panel className="perf-metric" title="Storage" subtitle="Tightest fixed volume">
+              <div className="perf-metric">
+                <div className="perf-metric__head">
+                  <span className="perf-metric__label">Storage</span>
+                  <span className="perf-metric__sub">Tightest fixed volume</span>
+                </div>
                 {lowestVolume ? (
                   <>
                     <div className="perf-metric__value">
@@ -598,13 +645,14 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                 ) : (
                   <p className="perf-unavailable">No fixed volume with capacity was reported.</p>
                 )}
+              </div>
               </Panel>
-            </div>
+            </section>
 
-            <div className="perf-columns">
-              <Panel
+            <section className="perf-section">
+              <SectionHeader
                 title="What the evidence supports"
-                subtitle={
+                description={
                   visibleRecommendations.length === 0
                     ? "No supported recommendation for this symptom in the current sample."
                     : `${plural(visibleRecommendations.length, "recommendation")} with measured evidence`
@@ -620,7 +668,9 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                     Measure again
                   </Button>
                 }
-              >
+              />
+              <div className="perf-columns">
+              <Panel bodyClassName="perf-recommendations-panel">
                 {visibleRecommendations.length === 0 ? (
                   <EmptyState
                     compact
@@ -660,15 +710,15 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                         </dl>
                         <div className="perf-rec__contract">
                           <div>
-                            <Eyebrow>What may change</Eyebrow>
+                            <span className="perf-label">What may change</span>
                             <p>{recommendation.expectedEffect}</p>
                           </div>
                           <div>
-                            <Eyebrow>Risk</Eyebrow>
+                            <span className="perf-label">Risk</span>
                             <p>{recommendation.risk}</p>
                           </div>
                           <div>
-                            <Eyebrow>How to check</Eyebrow>
+                            <span className="perf-label">How to check</span>
                             <p>{recommendation.verification}</p>
                           </div>
                         </div>
@@ -714,35 +764,37 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   <span>Captured {snapshotFresh.toLowerCase()}.</span>
                 </div>
               </Panel>
-            </div>
+              </div>
+            </section>
 
-            <Panel
-              title="Processes"
-              subtitle="Live sample. Cyron never ends a process from this page."
-              actions={
-                <div className="perf-actions">
-                  <Segmented<ProcessSort>
-                    size="sm"
-                    ariaLabel="Sort processes"
-                    value={processSort}
-                    onChange={setProcessSort}
-                    options={[
-                      { value: "cpu", label: "CPU" },
-                      { value: "memory", label: "Memory" },
-                      { value: "io", label: "I/O" },
-                    ]}
-                  />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setShowAllProcesses((value) => !value)}
-                  >
-                    {showAllProcesses ? "Show top 12" : "Show all"}
-                  </Button>
-                </div>
-              }
-              flush
-            >
+            <section className="perf-section">
+              <SectionHeader
+                title="Processes"
+                description="Live sample. Cyron never ends a process from this page."
+                actions={
+                  <div className="perf-actions">
+                    <Segmented<ProcessSort>
+                      size="sm"
+                      ariaLabel="Sort processes"
+                      value={processSort}
+                      onChange={setProcessSort}
+                      options={[
+                        { value: "cpu", label: "CPU" },
+                        { value: "memory", label: "Memory" },
+                        { value: "io", label: "I/O" },
+                      ]}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setShowAllProcesses((value) => !value)}
+                    >
+                      {showAllProcesses ? "Show top 12" : "Show all"}
+                    </Button>
+                  </div>
+                }
+              />
+              <Panel bodyClassName="perf-table-panel">
               <div className="table-wrap">
                 <table className="table perf-table">
                   <caption className="sr-only">
@@ -754,7 +806,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                       <th scope="col" className="numeric">CPU</th>
                       <th scope="col" className="numeric">Working set</th>
                       <th scope="col" className="numeric">Read / write</th>
-                      <th scope="col" className="numeric">PID</th>
+                      <th scope="col" className="numeric perf-col-pid">PID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -785,7 +837,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                         <td className="numeric mono">
                           {formatBytes(process.ioReadBytesPerSec)}/s · {formatBytes(process.ioWriteBytesPerSec)}/s
                         </td>
-                        <td className="numeric mono">{process.pid}</td>
+                        <td className="numeric mono perf-col-pid">{process.pid}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -802,25 +854,27 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   and are not shown.
                 </p>
               )}
-            </Panel>
+              </Panel>
+            </section>
 
-            <Panel
-              title="Startup and scheduled tasks"
-              subtitle="Provenance first. Impact appears only when Windows recorded it."
-              actions={
-                <Segmented<StartupTab>
-                  size="sm"
-                  ariaLabel="Startup evidence type"
-                  value={startupTab}
-                  onChange={setStartupTab}
-                  options={[
-                    { value: "apps", label: "Startup apps", count: startup?.items.length },
-                    { value: "tasks", label: "Scheduled tasks", count: startup?.scheduledTasks.length },
-                  ]}
-                />
-              }
-              flush
-            >
+            <section className="perf-section">
+              <SectionHeader
+                title="Startup and scheduled tasks"
+                description="Provenance first. Impact appears only when Windows recorded it."
+                actions={
+                  <Segmented<StartupTab>
+                    size="sm"
+                    ariaLabel="Startup evidence type"
+                    value={startupTab}
+                    onChange={setStartupTab}
+                    options={[
+                      { value: "apps", label: "Startup apps", count: startup?.items.length },
+                      { value: "tasks", label: "Scheduled tasks", count: startup?.scheduledTasks.length },
+                    ]}
+                  />
+                }
+              />
+              <Panel bodyClassName="perf-table-panel">
               {startup?.eventLogStatus === "denied" && (
                 <div className="perf-startup-banner">
                   <Banner
@@ -880,9 +934,9 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                       <thead>
                         <tr>
                           <th scope="col">Entry</th>
-                          <th scope="col">Source</th>
+                          <th scope="col" className="perf-col-source">Source</th>
                           <th scope="col" className="numeric">Boot impact</th>
-                          <th scope="col" className="numeric">Live now</th>
+                          <th scope="col" className="numeric perf-col-live">Live now</th>
                           <th scope="col">State</th>
                           <th scope="col">Action</th>
                         </tr>
@@ -902,7 +956,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                                 </span>
                               </div>
                             </td>
-                            <td>
+                            <td className="perf-col-source">
                               <span className="perf-source">{item.location}</span>
                               <span className="perf-source__evidence">{evidenceSourceLabel(item.evidenceSource)}</span>
                             </td>
@@ -915,7 +969,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                                 </span>
                               )}
                             </td>
-                            <td className="numeric mono">
+                            <td className="numeric mono perf-col-live">
                               {item.currentCpuPercent > 0.05
                                 ? `${item.currentCpuPercent.toFixed(1)}% CPU`
                                 : item.currentWorkingSetBytes > 0
@@ -979,7 +1033,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                         <tr>
                           <th scope="col">Task</th>
                           <th scope="col">Trigger</th>
-                          <th scope="col">Author</th>
+                          <th scope="col" className="perf-col-author">Author</th>
                           <th scope="col">Action</th>
                           <th scope="col">State</th>
                         </tr>
@@ -1002,7 +1056,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                               <span>{scheduleTriggerLabel(task)}</span>
                               <span className="perf-source__evidence">{delayLabel(task)}</span>
                             </td>
-                            <td className="perf-source">{task.author || "Not declared"}</td>
+                            <td className="perf-source perf-col-author">{task.author || "Not declared"}</td>
                             <td>
                               <span className="perf-process__path" title={`${task.command} ${task.arguments}`}>
                                 {truncateMiddle(displayPath(task.command), 46)}
@@ -1030,7 +1084,8 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   </p>
                 </>
               )}
-            </Panel>
+              </Panel>
+            </section>
 
             <div className="perf-columns perf-columns--balanced">
               <Panel
@@ -1238,56 +1293,6 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
         )}
       </div>
     </div>
-  );
-}
-
-function ViewHeaderBlock({
-  refreshing,
-  snapshot,
-  onRefresh,
-  live,
-  onToggleLive,
-}: {
-  refreshing: boolean;
-  snapshot: PerformanceSnapshot | null;
-  onRefresh: () => void;
-  live: boolean;
-  onToggleLive: () => void;
-}) {
-  return (
-    <header className="view-header perf-header">
-      <div className="view-header__text">
-        <div className="view-header__title-row">
-          <h1>Performance</h1>
-          <span className="badge badge--neutral">Evidence first</span>
-        </div>
-        <p className="view-header__description">
-          See what is actually using this PC, what Windows measured at startup, and which reversible
-          change the evidence supports. No RAM boosters, registry cleaning or guaranteed-speed claims.
-        </p>
-      </div>
-      <div className="view-header__actions">
-        <button
-          type="button"
-          className="perf-live-toggle"
-          aria-pressed={live}
-          title="Measure every 10 seconds while this page is visible"
-          onClick={onToggleLive}
-        >
-          <span className={cx("perf-live-dot", !live && "perf-live-dot--paused")} aria-hidden="true" />
-          {live ? "Live" : "Paused"}
-        </button>
-        <Button
-          variant="secondary"
-          icon={<IconRefresh size={14} />}
-          loading={refreshing}
-          onClick={onRefresh}
-          disabled={!snapshot && refreshing}
-        >
-          Refresh
-        </Button>
-      </div>
-    </header>
   );
 }
 

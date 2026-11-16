@@ -7,6 +7,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -95,6 +97,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const resolved =
         settings.theme === "system" ? (media.matches ? "dark" : "light") : settings.theme;
       document.documentElement.dataset.theme = resolved;
+      // Keep the native title bar in the same palette as the app. Browsers and
+      // older WebView2 builds reject this; the web theme still applies.
+      if (isTauri()) {
+        getCurrentWindow()
+          .setTheme(resolved)
+          .catch(() => {});
+      }
     };
     apply();
     media.addEventListener("change", apply);

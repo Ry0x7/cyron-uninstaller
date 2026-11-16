@@ -199,6 +199,63 @@ export function ViewHeader({ title, description, actions, meta }: ViewHeaderProp
   );
 }
 
+interface SectionHeaderProps {
+  title: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+}
+
+/** A heading for a tool nested inside a primary destination. */
+export function SectionHeader({ title, description, actions }: SectionHeaderProps) {
+  return (
+    <header className="section-head">
+      <div className="section-head__text">
+        <h2>{title}</h2>
+        {description && <p>{description}</p>}
+      </div>
+      {actions && <div className="section-head__actions">{actions}</div>}
+    </header>
+  );
+}
+
+interface PageTabOption<T extends string> {
+  value: T;
+  label: string;
+  count?: number;
+}
+
+interface PageTabsProps<T extends string> {
+  options: PageTabOption<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  ariaLabel: string;
+}
+
+/** Top-level tabs inside one primary destination. */
+export function PageTabs<T extends string>({ options, value, onChange, ariaLabel }: PageTabsProps<T>) {
+  return (
+    <div className="page-tabs" role="tablist" aria-label={ariaLabel}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="tab"
+          className="page-tabs__item"
+          aria-selected={option.value === value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+          {option.count !== undefined && (
+            <span className="page-tabs__count" aria-hidden="true">
+              {option.count}
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ stats */
 
 interface StatProps {

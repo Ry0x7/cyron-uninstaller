@@ -3,18 +3,21 @@ import { api, errorMessage } from "../../lib/api";
 import {
   formatBytes,
   formatCount,
+  displayPath,
   formatDateTime,
+  operationTitle,
   plural,
   relativeTime,
 } from "../../lib/format";
 import { useAsync } from "../../lib/hooks";
-import type { HistoryEntry } from "../../lib/types";
+import type { HistoryEntry, ViewId } from "../../lib/types";
 import {
   Badge,
   Banner,
   Button,
   EmptyState,
   Panel,
+  SectionHeader,
   Skeleton,
   Stat,
   ViewHeader,
@@ -57,7 +60,7 @@ function describeEntry(entry: HistoryEntry): string {
   if (entry.detail) return entry.detail;
   if (entry.kind === "cleanup") {
     if (entry.status === "completed") {
-      return `${formatCount(entry.items)} files moved to quarantine · ${formatBytes(entry.bytes)} · restorable for 7 days`;
+      return `${plural(entry.items, "file")} moved to quarantine · ${formatBytes(entry.bytes)} · restorable for 7 days`;
     }
     if (entry.status === "cancelled") {
       return `Stopped early. Files moved before the stop stay in quarantine for 7 days`;
@@ -79,7 +82,13 @@ const STATUS_LABEL: Record<HistoryEntry["status"], string> = {
   failed: "Failed",
 };
 
-export function Activity() {
+export function Activity({
+  embedded = false,
+  onNavigate,
+}: {
+  embedded?: boolean;
+  onNavigate?: (view: ViewId) => void;
+} = {}) {
   const history = useAsync<HistoryEntry[]>(() => api.getHistory(), []);
   const [lastEntries, setLastEntries] = useState<HistoryEntry[] | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
@@ -176,25 +185,35 @@ export function Activity() {
   const stale = Boolean(history.error && entries.length > 0);
   const lastScan = entries[0];
 
+  const refreshButton = (
+    <Button
+      variant="secondary"
+      size="sm"
+      icon={<IconRefresh size={14} />}
+      loading={history.status === "loading" && history.data !== null}
+      onClick={refresh}
+    >
+      Refresh
+    </Button>
+  );
+
   return (
     <>
-      <ViewHeader
-        title="Activity"
-        description="Every scan and cleanup this app has recorded. Scans only read metadata; cleanup moves files into a restorable quarantine. The history stays on this machine."
-        actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<IconRefresh size={14} />}
-            loading={history.status === "loading" && history.data !== null}
-            onClick={refresh}
-          >
-            Refresh
-          </Button>
-        }
-      />
+      {embedded ? (
+        <SectionHeader
+          title="Recorded operations"
+          description="Scans only read metadata. Cleanup moves files into a restorable quarantine. This history stays on this machine."
+          actions={refreshButton}
+        />
+      ) : (
+        <ViewHeader
+          title="Activity"
+          description="Every scan and cleanup this app has recorded. Scans only read metadata; cleanup moves files into a restorable quarantine. The history stays on this machine."
+          actions={refreshButton}
+        />
+      )}
 
-      <div className="view-body">
+      <div className={embedded ? "view-body view-body--embedded" : "view-body"}>
         {history.error && (stale ? (
           <Banner
             tone="caution"
@@ -318,15 +337,24 @@ export function Activity() {
             <EmptyState
               icon={IconActivity}
               title="No operations recorded yet"
-              description="Run a disk scan from Disk Analyzer, or move a cache into quarantine from Cleaner. Cyron records the target, how much data was involved, the outcome and whether files can still be restored."
+              description="Run a disk scan or move a cache into quarantine from Storage & Cleanup. Cyron records the target, how much data was involved, the outcome and whether files can still be restored."
+              action={
+                onNavigate ? (
+                  <Button size="sm" onClick={() => onNavigate("cleaner")}>
+                    Open Storage &amp; Cleanup
+                  </Button>
+                ) : undefined
+              }
             />
           ) : (
             <div className="table-wrap">
-              <table className="table">
+              <table className="table act-table">
                 <thead>
                   <tr>
                     <th scope="col">Result</th>
-                    <th scope="col">Type</th>
+                    <th scope="col" className="act-type">
+                      Type
+                    </th>
                     <th scope="col">Operation</th>
                     <th scope="col" className="numeric">
                       Data
@@ -340,18 +368,20 @@ export function Activity() {
                   </tr>
                 </thead>
                 <tbody>
-                  {entries.map((entry) => (
+                  {entries.map((entry) => {
+                    const title = operationTitle(entry.title, kindLabel(entry.kind));
+                    return (
                     <tr key={entry.id}>
                       <td>
                         <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
                       </td>
-                      <td>
+                      <td className="act-type">
                         <KindBadge kind={entry.kind} />
                       </td>
                       <td className="act-op">
                         <div className="cell-name">
-                          <span className="cell-name__title" title={entry.title}>
-                            {entry.title}
+                          <span className="cell-name__title" title={displayPath(entry.title)}>
+                            {title}
                           </span>
                           <span className="cell-name__meta" title={describeEntry(entry)}>
                             {describeEntry(entry)}
@@ -367,7 +397,8 @@ export function Activity() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

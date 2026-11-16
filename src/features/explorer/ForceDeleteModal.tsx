@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../lib/api";
-import { formatBytes, formatCount } from "../../lib/format";
+import { displayPath, formatBytes, formatCount } from "../../lib/format";
 import type { ForceDeletePlanPreview, ForceDeleteResult } from "../../lib/types";
 import { Badge, Banner, Button, Modal, Spinner } from "../../components/ui";
-import { IconRefresh, IconTrash } from "../../components/Icons";
+import { IconRefresh, IconShield, IconTrash } from "../../components/Icons";
 import "./explorerModals.css";
 
 interface ForceDeleteModalProps {
@@ -41,10 +41,10 @@ export function ForceDeleteModal({
     setExecutionError(null);
     setConfirmPermanent(false);
     try {
-      const p = await api.prepareForceDeletePlan(path);
-      setPlan(p);
-    } catch (err) {
-      setError(errorMessage(err));
+      const prepared = await api.prepareForceDeletePlan(path);
+      setPlan(prepared);
+    } catch (caught) {
+      setError(errorMessage(caught));
     } finally {
       setLoading(false);
     }
@@ -66,18 +66,17 @@ export function ForceDeleteModal({
     setTerminatingPid(pid);
     setProcessMsg(null);
     try {
-      const res = await api.terminateForceDeleteLockingProcess(plan.planId, pid, force);
-      if (res.success) {
-        setProcessMsg(`Process ${pid} (${res.name}) closed successfully.`);
-        // Reload plan to refresh locking process list and inspection
-        if (targetPath) {
-          await loadPlan(targetPath);
-        }
+      const response = await api.terminateForceDeleteLockingProcess(plan.planId, pid, force);
+      if (response.success) {
+        setProcessMsg(`Process ${pid} (${response.name}) closed.`);
+        if (targetPath) await loadPlan(targetPath);
       } else {
-        setProcessMsg(`Could not terminate process ${pid}: ${res.error ?? "Access denied or process already exited"}`);
+        setProcessMsg(
+          `Could not close process ${pid}: ${response.error ?? "access denied or process already exited"}`,
+        );
       }
-    } catch (err) {
-      setProcessMsg(`Error: ${errorMessage(err)}`);
+    } catch (caught) {
+      setProcessMsg(`Could not close the process. ${errorMessage(caught)}`);
     } finally {
       setTerminatingPid(null);
     }
@@ -90,37 +89,42 @@ export function ForceDeleteModal({
     setExecuting(true);
     setExecutionError(null);
     try {
-      const res = await api.executeForceDeletePlan(plan.planId, mode);
-      setResult(res);
-      onSuccess?.(res);
-    } catch (err) {
-      setExecutionError(errorMessage(err));
+      const response = await api.executeForceDeletePlan(plan.planId, mode);
+      setResult(response);
+      onSuccess?.(response);
+    } catch (caught) {
+      setExecutionError(errorMessage(caught));
     } finally {
       setExecuting(false);
     }
   };
 
   const inspection = plan?.inspection;
+  const lockedCount = plan?.lockingProcesses.length ?? 0;
 
   return (
     <Modal
       open={open}
       title={
         <>
-          <IconTrash size={16} />
-          Force Delete Review
+          <IconTrash size={18} />
+          Review deletion
         </>
       }
-      subtitle={targetPath ? "Inspect target object, resolve file locks, and choose recovery mode." : undefined}
+      subtitle={
+        targetPath
+          ? "Check the exact target, resolve any process locks, then choose how it is removed."
+          : undefined
+      }
       onClose={onClose}
-      maxWidth={580}
+      maxWidth={600}
       footer={
         result ? (
           <Button variant="primary" onClick={onClose}>
             Done
           </Button>
         ) : (
-          <div className="row" style={{ gap: 8, justifyContent: "flex-end", width: "100%" }}>
+          <>
             <Button variant="ghost" onClick={onClose} disabled={executing}>
               Cancel
             </Button>
@@ -130,27 +134,25 @@ export function ForceDeleteModal({
                 icon={<IconTrash size={14} />}
                 loading={executing}
                 disabled={mode === "permanent" && !confirmPermanent}
-                onClick={handleExecute}
+                onClick={() => void handleExecute()}
               >
-                {mode === "quarantine" ? "Quarantine Target (7-Day)" : "Permanently Delete Target"}
+                {mode === "quarantine" ? "Move to quarantine" : "Delete permanently"}
               </Button>
             )}
-          </div>
+          </>
         )
       }
     >
       {loading && (
-        <div style={{ textAlign: "center", padding: 32 }}>
-          <Spinner size={24} />
-          <p style={{ marginTop: 12, color: "var(--text-muted)", fontSize: 13 }}>
-            Inspecting filesystem target and scanning for file locks…
-          </p>
+        <div className="exp-loading">
+          <Spinner size={22} />
+          <p>Inspecting the target and checking for file locks…</p>
         </div>
       )}
 
       {error && (
         <Banner tone="danger">
-          <strong>Refused:</strong> {error}
+          <strong>Cyron refused this target.</strong> {error}
         </Banner>
       )}
 
@@ -159,37 +161,41 @@ export function ForceDeleteModal({
           <Banner tone={result.warnings.length > 0 ? "caution" : "safe"}>
             <strong>{result.message}</strong>
           </Banner>
-          <div className="exp-meta-grid" style={{ marginTop: 8 }}>
+
+          <dl className="exp-meta-grid">
             <div className="exp-meta-item">
-              <span className="exp-meta-label">Deleted Files</span>
-              <span className="exp-meta-val">{formatCount(result.deletedFiles)}</span>
+              <dt className="exp-meta-label">Files removed</dt>
+              <dd className="exp-meta-val">{formatCount(result.deletedFiles)}</dd>
             </div>
             <div className="exp-meta-item">
-              <span className="exp-meta-label">Deleted Folders</span>
-              <span className="exp-meta-val">{formatCount(result.deletedDirs)}</span>
+              <dt className="exp-meta-label">Folders removed</dt>
+              <dd className="exp-meta-val">{formatCount(result.deletedDirs)}</dd>
             </div>
             <div className="exp-meta-item">
-              <span className="exp-meta-label">Freed Storage</span>
-              <span className="exp-meta-val">{formatBytes(result.freedBytes)}</span>
+              <dt className="exp-meta-label">Space</dt>
+              <dd className="exp-meta-val">{formatBytes(result.freedBytes)}</dd>
             </div>
             <div className="exp-meta-item">
-              <span className="exp-meta-label">Mode</span>
-              <span className="exp-meta-val">
-                {result.mode === "quarantine" ? "7-Day Quarantine" : "Permanent Deletion"}
-              </span>
+              <dt className="exp-meta-label">Mode</dt>
+              <dd className="exp-meta-val">
+                {result.mode === "quarantine" ? "Quarantine" : "Permanent deletion"}
+              </dd>
             </div>
-          </div>
+          </dl>
+
           {result.quarantineBatchId && (
-            <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              Quarantine Batch ID: <code>{result.quarantineBatchId}</code> (Restorable from Cleaner &gt; Quarantine).
+            <p className="exp-note">
+              Batch <span className="mono">{result.quarantineBatchId}</span> can be restored from
+              History &amp; Recovery → Recovery.
             </p>
           )}
+
           {result.warnings.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--caution)" }}>Warnings:</span>
+            <div>
+              <h3 className="exp-section-title">Warnings</h3>
               <ul className="exp-reasons-list">
-                {result.warnings.map((w, idx) => (
-                  <li key={idx}>{w}</li>
+                {result.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
                 ))}
               </ul>
             </div>
@@ -199,82 +205,83 @@ export function ForceDeleteModal({
 
       {!loading && !result && inspection && (
         <>
-          {/* Target Overview Card */}
-          <div className="exp-modal-card">
-            <div className="exp-target-path">{inspection.path}</div>
+          <section className="exp-modal-card" aria-labelledby="exp-force-target">
+            <div className="exp-section-head">
+              <h3 className="exp-section-title" id="exp-force-target">
+                Target
+              </h3>
+              <Badge tone={inspection.isSystem ? "danger" : "neutral"}>
+                {inspection.isDirectory ? "Folder" : "File"}
+              </Badge>
+            </div>
+            <div className="exp-target-path">{displayPath(inspection.path)}</div>
             {inspection.canonicalPath !== inspection.path && (
-              <div style={{ fontSize: 10, color: "var(--text-muted)" }}>
-                Canonical: {inspection.canonicalPath}
-              </div>
+              <p className="exp-note">
+                Resolved path: <span className="mono">{displayPath(inspection.canonicalPath)}</span>
+              </p>
             )}
 
-            <div className="exp-meta-grid" style={{ marginTop: 4 }}>
+            <dl className="exp-meta-grid">
               <div className="exp-meta-item">
-                <span className="exp-meta-label">Type</span>
-                <span className="exp-meta-val">
-                  {inspection.isDirectory ? "Folder" : "File"}
-                </span>
-              </div>
-              <div className="exp-meta-item">
-                <span className="exp-meta-label">Size</span>
-                <span className="exp-meta-val">{formatBytes(inspection.sizeBytes)}</span>
+                <dt className="exp-meta-label">Size</dt>
+                <dd className="exp-meta-val">{formatBytes(inspection.sizeBytes)}</dd>
               </div>
               {inspection.isDirectory && (
                 <>
                   <div className="exp-meta-item">
-                    <span className="exp-meta-label">Files</span>
-                    <span className="exp-meta-val">{formatCount(inspection.fileCount)}</span>
+                    <dt className="exp-meta-label">Files</dt>
+                    <dd className="exp-meta-val">{formatCount(inspection.fileCount)}</dd>
                   </div>
                   <div className="exp-meta-item">
-                    <span className="exp-meta-label">Subfolders</span>
-                    <span className="exp-meta-val">{formatCount(inspection.dirCount)}</span>
+                    <dt className="exp-meta-label">Subfolders</dt>
+                    <dd className="exp-meta-val">{formatCount(inspection.dirCount)}</dd>
                   </div>
                 </>
               )}
               {inspection.owner && (
                 <div className="exp-meta-item">
-                  <span className="exp-meta-label">Owner</span>
-                  <span className="exp-meta-val">{inspection.owner}</span>
+                  <dt className="exp-meta-label">Owner</dt>
+                  <dd className="exp-meta-val">{inspection.owner}</dd>
                 </div>
               )}
-            </div>
+            </dl>
 
-            <div className="exp-badges" style={{ marginTop: 6 }}>
-              {inspection.isReadonly && <Badge tone="caution">Read-Only Attribute</Badge>}
+            <div className="exp-badges">
+              {inspection.isReadonly && <Badge tone="caution">Read-only</Badge>}
               {inspection.isHidden && <Badge tone="neutral">Hidden</Badge>}
-              {inspection.isSystem && <Badge tone="danger">System Flagged</Badge>}
-              {inspection.isReparsePoint && <Badge tone="caution">Reparse Point / Symlink</Badge>}
+              {inspection.isSystem && <Badge tone="danger">System</Badge>}
+              {inspection.isReparsePoint && <Badge tone="caution">Reparse point</Badge>}
               {!inspection.isReadonly && !inspection.isSystem && (
-                <Badge tone="safe">Normal Attributes</Badge>
+                <Badge tone="safe">Normal attributes</Badge>
               )}
             </div>
 
             {inspection.reasonsForFailure.length > 0 && (
-              <div style={{ marginTop: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "var(--caution)" }}>
-                  Why ordinary deletion may fail:
-                </span>
+              <div>
+                <h3 className="exp-section-title">Why ordinary deletion may fail</h3>
                 <ul className="exp-reasons-list">
-                  {inspection.reasonsForFailure.map((r, i) => (
-                    <li key={i}>{r}</li>
+                  {inspection.reasonsForFailure.map((reason) => (
+                    <li key={reason}>{reason}</li>
                   ))}
                 </ul>
               </div>
             )}
-          </div>
+          </section>
 
-          {/* Locking Processes */}
-          {plan?.lockingProcesses && plan.lockingProcesses.length > 0 && (
-            <div className="exp-modal-card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--danger)" }}>
-                  Locked by {plan.lockingProcesses.length} Running Process{plan.lockingProcesses.length === 1 ? "" : "es"}:
-                </span>
+          {lockedCount > 0 && (
+            <section className="exp-modal-card" aria-labelledby="exp-force-locks">
+              <div className="exp-section-head">
+                <div>
+                  <h3 className="exp-section-title" id="exp-force-locks">
+                    Locked by {lockedCount} {lockedCount === 1 ? "process" : "processes"}
+                  </h3>
+                  <p className="exp-note">Close the app first. Force termination is a last resort.</p>
+                </div>
                 <Button
                   size="sm"
                   variant="ghost"
-                  icon={<IconRefresh size={12} />}
-                  onClick={() => targetPath && loadPlan(targetPath)}
+                  icon={<IconRefresh size={13} />}
+                  onClick={() => targetPath && void loadPlan(targetPath)}
                 >
                   Re-check
                 </Button>
@@ -283,108 +290,110 @@ export function ForceDeleteModal({
               {processMsg && <Banner tone="info">{processMsg}</Banner>}
 
               <div className="exp-proc-list">
-                {plan.lockingProcesses.map((proc) => (
-                  <div className="exp-proc-item" key={proc.pid}>
+                {plan?.lockingProcesses.map((process) => (
+                  <div className="exp-proc-item" key={process.pid}>
                     <div className="exp-proc-info">
                       <span className="exp-proc-title">
-                        {proc.name} (PID {proc.pid})
+                        {process.name}
+                        <span className="exp-proc-pid">PID {process.pid}</span>
+                        {process.isCritical && (
+                          <Badge tone="danger">
+                            <IconShield size={10} /> Windows critical
+                          </Badge>
+                        )}
                       </span>
-                      {proc.windowTitle && (
-                        <span className="exp-proc-meta">Window: &ldquo;{proc.windowTitle}&rdquo;</span>
+                      {process.windowTitle && (
+                        <span className="exp-proc-meta">Window: “{process.windowTitle}”</span>
                       )}
-                      {proc.path && <span className="exp-proc-meta">{proc.path}</span>}
+                      {process.path && (
+                        <span className="exp-proc-path">{displayPath(process.path)}</span>
+                      )}
                     </div>
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <div className="exp-proc-actions">
                       <Button
                         size="sm"
-                        variant="secondary"
-                        disabled={proc.isCritical || terminatingPid === proc.pid}
-                        loading={terminatingPid === proc.pid}
-                        onClick={() => handleTerminateLock(proc.pid, false)}
-                        title="Attempt graceful closure (WM_CLOSE)"
+                        disabled={process.isCritical || terminatingPid === process.pid}
+                        loading={terminatingPid === process.pid}
+                        onClick={() => void handleTerminateLock(process.pid, false)}
+                        title="Ask the app to close its window"
                       >
-                        Close
+                        Close app
                       </Button>
                       <Button
                         size="sm"
                         variant="danger"
-                        disabled={proc.isCritical || terminatingPid === proc.pid}
-                        loading={terminatingPid === proc.pid}
-                        onClick={() => handleTerminateLock(proc.pid, true)}
-                        title="Force terminate process"
+                        disabled={process.isCritical || terminatingPid === process.pid}
+                        loading={terminatingPid === process.pid}
+                        onClick={() => void handleTerminateLock(process.pid, true)}
+                        title="Terminate the process immediately"
                       >
-                        Kill
+                        Force close
                       </Button>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          {/* Deletion Mode Choice */}
-          <div className="exp-delete-modes">
-            <label
-              className={`exp-mode-option ${mode === "quarantine" ? "exp-mode-option--selected" : ""}`}
-              onClick={() => setMode("quarantine")}
-            >
+          <fieldset className="exp-delete-modes">
+            <legend className="exp-section-title">Removal method</legend>
+
+            <label className={`exp-mode-option${mode === "quarantine" ? " is-selected" : ""}`}>
               <input
                 type="radio"
                 name="deleteMode"
                 checked={mode === "quarantine"}
                 onChange={() => setMode("quarantine")}
-                style={{ marginTop: 2 }}
               />
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 12.5, color: "var(--text-strong)" }}>
-                  Recoverable Quarantine (Recommended)
-                </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                  Moves the target into Cyron&apos;s 7-day quarantine directory. Restore it from Cleaner &gt;
-                  Quarantine if needed.
-                </div>
-              </div>
+              <span>
+                <strong>Move to quarantine</strong>
+                <span className="exp-mode-detail">
+                  Recoverable for seven days from History &amp; Recovery. Recommended.
+                </span>
+              </span>
             </label>
 
             <label
-              className={`exp-mode-option ${mode === "permanent" ? "exp-mode-option--selected-danger" : ""}`}
-              onClick={() => setMode("permanent")}
+              className={`exp-mode-option exp-mode-option--danger${
+                mode === "permanent" ? " is-selected" : ""
+              }`}
             >
               <input
                 type="radio"
                 name="deleteMode"
                 checked={mode === "permanent"}
                 onChange={() => setMode("permanent")}
-                style={{ marginTop: 2 }}
               />
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 12.5, color: "var(--danger)" }}>
-                  Permanent Deletion (Irreversible)
-                </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                  Clears read-only attributes, unlinks files, and deletes directories permanently. This cannot be
-                  undone.
-                </div>
-              </div>
+              <span>
+                <strong>Delete permanently</strong>
+                <span className="exp-mode-detail">
+                  Clears read-only attributes and unlinks the target. This cannot be undone.
+                </span>
+              </span>
             </label>
-          </div>
+          </fieldset>
 
           {mode === "permanent" && (
             <label className="exp-checkbox-label">
               <input
                 type="checkbox"
                 checked={confirmPermanent}
-                onChange={(e) => setConfirmPermanent(e.target.checked)}
+                onChange={(event) => setConfirmPermanent(event.target.checked)}
               />
               <span>
-                I confirm I want to permanently delete {inspection.isDirectory ? `${inspection.fileCount} files in this folder` : "this file"} without recovery.
+                I understand this permanently deletes{" "}
+                {inspection.isDirectory
+                  ? `${formatCount(inspection.fileCount)} files in this folder`
+                  : "this file"}{" "}
+                without recovery.
               </span>
             </label>
           )}
 
           {executionError && (
             <Banner tone="danger">
-              <strong>Execution Error:</strong> {executionError}
+              <strong>Deletion did not finish.</strong> {executionError}
             </Banner>
           )}
         </>

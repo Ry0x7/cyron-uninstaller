@@ -40,6 +40,7 @@ import {
   formatCount,
   formatDate,
   formatDateTime,
+  friendlyError,
   plural,
   truncateMiddle,
 } from "../../lib/format";
@@ -83,7 +84,7 @@ export function DeveloperStorage({
   readOnly: boolean | null;
   scanDrives: string[];
   cacheInventory: CacheInventory | null;
-  onOpenQuarantine: () => void;
+  onOpenQuarantine?: () => void;
 }) {
   const { settings, setProjectRoots } = useSettings();
   const [scan, setScan] = useState<DeveloperStorageScan | null>(null);
@@ -142,6 +143,12 @@ export function DeveloperStorage({
   }, []);
 
   const artifacts = useMemo(() => flattenArtifacts(scan), [scan]);
+  // The empty state already explains an unrecognised root; do not also show
+  // it as a caution banner.
+  const scanWarnings = useMemo(
+    () => (scan?.warnings ?? []).filter((warning) => !/no projects were recognised/i.test(warning)),
+    [scan],
+  );
   const visibleProjects = useMemo(
     () => (scan ? filterProjects(scan.projects, query, activity) : []),
     [scan, query, activity],
@@ -365,7 +372,11 @@ export function DeveloperStorage({
           <Panel title="Measured developer storage" subtitle={`Last scan ${formatDateTime(scan.scannedAt)}`}>
             <div className="cl-summary__grid">
               <Stat label="Projects" value={formatCount(scan.totals.projectCount)} meta={`${formatCount(scan.totals.activeProjects)} active · ${formatCount(scan.totals.oldProjects)} old`} size="lg" />
-              <Stat label="Regenerable artifacts" value={formatBytes(scan.totals.artifactBytes)} meta={`${formatCount(scan.totals.artifactCount)} folders`} />
+              <Stat
+                label="Regenerable artifacts"
+                value={formatBytes(scan.totals.artifactBytes)}
+                meta={plural(scan.totals.artifactCount, "folder")}
+              />
               <Stat label="On disk" value={formatBytes(scan.totals.artifactAllocated)} meta="physical estimate before quarantine" />
               <Stat label="Protected data" value={formatBytes(scan.totals.protectedBytes)} meta="Git, credentials, models · measured only" />
             </div>
@@ -376,12 +387,12 @@ export function DeveloperStorage({
             </p>
           </Panel>
 
-          {scan.warnings.length > 0 && (
+          {scanWarnings.length > 0 && (
             <Banner tone="caution">
-              <strong>{plural(scan.warnings.length, "scan warning")}.</strong>
+              <strong>{plural(scanWarnings.length, "scan warning")}.</strong>
               <ul className="cl-warning-list">
-                {scan.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
+                {scanWarnings.map((warning) => (
+                  <li key={warning}>{friendlyError(warning)}</li>
                 ))}
               </ul>
             </Banner>
@@ -593,7 +604,7 @@ export function DeveloperStorage({
           report ? (
             <div className="cl-drawer-foot">
               <Button onClick={closePreview}>Done</Button>
-              {report.quarantined > 0 && (
+              {report.quarantined > 0 && onOpenQuarantine && (
                 <Button
                   variant="primary"
                   onClick={() => {
@@ -601,7 +612,7 @@ export function DeveloperStorage({
                     onOpenQuarantine();
                   }}
                 >
-                  Open quarantine
+                  Open recovery
                 </Button>
               )}
             </div>
@@ -655,8 +666,8 @@ export function DeveloperStorage({
             {verifying && <Banner tone="info">Re-scanning the selected artifacts and quarantine…</Banner>}
             {verifyError && (
               <Banner tone="caution">
-                <strong>Cleanup finished, but verification failed.</strong> {verifyError} Use the Quarantine tab
-                to inspect recoverable files.
+                <strong>Cleanup finished, but verification failed.</strong> {verifyError} Use History &
+                Recovery to inspect recoverable files.
               </Banner>
             )}
             {verification && (
@@ -683,7 +694,7 @@ export function DeveloperStorage({
                 {verification.restorableRunIds.length > 0 && (
                   <p className="small muted">
                     Recoverable quarantine batch{verification.restorableRunIds.length === 1 ? "" : "es"}:{" "}
-                    {verification.restorableRunIds.join(", ")}. Restore from the Quarantine tab.
+                    {verification.restorableRunIds.join(", ")}. Restore from History & Recovery.
                   </p>
                 )}
               </div>
@@ -725,8 +736,8 @@ export function DeveloperStorage({
           <div className="cl-dev-preview">
             {readOnly !== false && (
               <Banner tone="caution">
-                <strong>Read-only mode is on.</strong> Reviewing is allowed. Enable cleaning in the Cleaner
-                banner above before moving files.
+                <strong>Read-only mode is on.</strong> Reviewing is allowed. Enable cleaning in the banner above
+                before moving files.
               </Banner>
             )}
             <Banner tone="safe">
@@ -754,7 +765,7 @@ export function DeveloperStorage({
                 <strong>Preview notes.</strong>
                 <ul className="cl-warning-list">
                   {preview.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
+                    <li key={warning}>{friendlyError(warning)}</li>
                   ))}
                 </ul>
               </Banner>
@@ -784,7 +795,7 @@ export function DeveloperStorage({
               <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
               <span>
                 I understand these files move to Cyron's quarantine, not the Recycle Bin. I can restore them
-                from Quarantine; purging is permanent.
+                from History & Recovery; purging is permanent.
               </span>
             </label>
           </div>

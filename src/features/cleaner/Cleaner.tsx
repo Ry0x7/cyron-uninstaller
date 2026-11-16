@@ -12,6 +12,7 @@ import {
   ProgressBar,
   RiskBadge,
   SearchField,
+  SectionHeader,
   Segmented,
   Select,
   Skeleton,
@@ -19,7 +20,6 @@ import {
   ViewHeader,
 } from "../../components/ui";
 import {
-  IconCheck,
   IconChevronRight,
   IconCleaner,
   IconInfo,
@@ -41,6 +41,7 @@ import {
   formatCount,
   formatDateTime,
   formatPercent,
+  friendlyError,
   plural,
   relativeTime,
   truncateMiddle,
@@ -51,11 +52,9 @@ import {
   CLEANUP_EVENT,
   type CacheInventory,
   type CacheTarget,
-  type CleanupLogEntry,
   type CleanupPreview,
   type CleanupProgress,
   type CleanupReport,
-  type QuarantineBatch,
   type Risk,
   type VolumeInfo,
 } from "../../lib/types";
@@ -65,8 +64,7 @@ import "./cleaner.css";
 
 type RiskFilter = "all" | Risk;
 type Status = "loading" | "ready" | "error";
-type Tab = "cleanup" | "projects" | "quarantine" | "history";
-type Pending = { kind: "restore" | "purge"; batch: QuarantineBatch };
+type Tab = "cleanup" | "projects";
 
 const CATEGORY_LABEL: Record<string, string> = {
   ai: "AI tools",
@@ -98,11 +96,15 @@ function groupLabel(key: string): string {
   return CLEANUP_GROUPS.find((group) => group.key === key)?.label ?? key;
 }
 
-function batchTotal(batches: QuarantineBatch[] | null): number {
-  return (batches ?? []).reduce((total, batch) => total + batch.bytes, 0);
-}
-
-export function Cleaner({ initialTargetId }: { initialTargetId?: string | null } = {}) {
+export function Cleaner({
+  initialTargetId,
+  embedded = false,
+  onOpenRecovery,
+}: {
+  initialTargetId?: string | null;
+  embedded?: boolean;
+  onOpenRecovery?: () => void;
+} = {}) {
   const { settings } = useSettings();
   const exclusions = settings.exclusions;
   const [inventory, setInventory] = useState<CacheInventory | null>(null);
@@ -143,15 +145,6 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
   const [progress, setProgress] = useState<CleanupProgress | null>(null);
   const [report, setReport] = useState<CleanupReport | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-
-  const [quarantine, setQuarantine] = useState<QuarantineBatch[] | null>(null);
-  const [quarantineError, setQuarantineError] = useState<string | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [busyBatch, setBusyBatch] = useState<string | null>(null);
-  const [sideNote, setSideNote] = useState<string | null>(null);
-
-  const [log, setLog] = useState<CleanupLogEntry[] | null>(null);
-  const [logError, setLogError] = useState<string | null>(null);
 
   const mounted = useRef(true);
   const request = useRef(0);
@@ -202,37 +195,6 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
     }
   }, []);
 
-  const loadQuarantine = useCallback(async () => {
-    try {
-      const batches = await api.listQuarantine();
-      if (!mounted.current) return;
-      setQuarantine(batches);
-      setQuarantineError(null);
-    } catch (caught) {
-      if (!mounted.current) return;
-      setQuarantineError(errorMessage(caught));
-    }
-  }, []);
-
-  // The Quarantine tab is a live view. Refresh it whenever it is opened, so a
-  // run from Projects or another view cannot leave a stale "empty" message.
-  const openQuarantine = useCallback(() => {
-    setTab("quarantine");
-    void loadQuarantine();
-  }, [loadQuarantine]);
-
-  const loadLog = useCallback(async () => {
-    try {
-      const entries = await api.getCleanupLog();
-      if (!mounted.current) return;
-      setLog(entries);
-      setLogError(null);
-    } catch (caught) {
-      if (!mounted.current) return;
-      setLogError(errorMessage(caught));
-    }
-  }, []);
-
   useEffect(() => {
     void api.listVolumes().then((found) => {
       if (!mounted.current) return;
@@ -249,9 +211,7 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
       }
     });
     void loadMode();
-    void loadQuarantine();
-    void loadLog();
-  }, [load, loadMode, loadQuarantine, loadLog]);
+  }, [load, loadMode]);
 
   const toggleScanDrive = (letter: string) => {
     const next = scanDrives.includes(letter)
@@ -464,8 +424,6 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
       setSelected(new Set());
       invalidateCaches();
       void load(true);
-      void loadQuarantine();
-      void loadLog();
       void loadMode();
     } catch (caught) {
       if (mounted.current && previewRequest.current === ticket) {
@@ -479,43 +437,10 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
     }
   };
 
-  const confirmPending = async () => {
-    if (!pending) return;
-    const { kind, batch } = pending;
-    setBusyBatch(batch.runId);
-    setSideNote(null);
-    try {
-      if (kind === "restore") {
-        const result = await api.restoreQuarantine(batch.runId);
-        if (!mounted.current) return;
-        const firstError = result.failed > 0 && result.errors.length > 0 ? ` ${result.errors[0]}` : "";
-        setSideNote(
-          `Restored ${plural(result.restored, "file")}${result.skipped ? `, ${plural(result.skipped, "skipped")}` : ""}${result.failed ? `, ${plural(result.failed, "failed")}` : ""}.${firstError}`,
-        );
-      } else {
-        const result = await api.purgeQuarantine(batch.runId);
-        if (!mounted.current) return;
-        setSideNote(
-          `Removed ${plural(result.removedFiles, "quarantined file")} and freed ${formatBytes(result.freedBytes)}.`,
-        );
-      }
-      setPending(null);
-      await loadQuarantine();
-      await loadLog();
-      invalidateCaches();
-      void load(true);
-    } catch (caught) {
-      if (mounted.current) setSideNote(errorMessage(caught));
-    } finally {
-      if (mounted.current) setBusyBatch(null);
-    }
-  };
-
   const lastChecked = inventory
     ? `${error ? "Last successful check" : "Checked"} ${relativeTime(inventory.scannedAt)}${error ? " · stale" : ""}`
     : "not yet";
   const warnings = inventory?.warnings ?? [];
-  const batches = quarantine ?? [];
   const confirmReady =
     preview !== null &&
     canConfirmCleanup({
@@ -531,63 +456,69 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
       ? Math.min(1, progress.files / progress.totalFiles)
       : undefined;
 
+  const headerActions = (
+    <>
+      <span className={`small faint${error && inventory ? " cl-stale" : ""}`}>{lastChecked}</span>
+      <Button
+        size="sm"
+        icon={<IconRefresh size={14} />}
+        loading={refreshing}
+        disabled={scanDrives.length === 0}
+        onClick={() => void load(true)}
+      >
+        Scan selected drives
+      </Button>
+    </>
+  );
+
+  const modeBadge = (
+    <Badge tone={readOnly === true ? "neutral" : "accent"}>
+      {readOnly === true ? "Read-only mode" : "Cleaning enabled"}
+    </Badge>
+  );
+
   return (
     <>
-      <ViewHeader
-        title="Cleaner"
-        description="Review what each cache costs, then move it to a recoverable quarantine. Nothing is deleted without a preview, and protected data is never included."
-        meta={
-          <Badge tone={readOnly === true ? "neutral" : "accent"}>
-            {readOnly === true ? "Read-only mode" : "Cleaning enabled"}
-          </Badge>
-        }
-        actions={
-          <>
-            <span className={`small faint${error && inventory ? " cl-stale" : ""}`}>
-              {lastChecked}
-            </span>
-            <Button
-              size="sm"
-              icon={<IconRefresh size={14} />}
-              loading={refreshing}
-              disabled={scanDrives.length === 0}
-              onClick={() => void load(true)}
-            >
-              Scan selected drives
-            </Button>
-          </>
-        }
-      />
+      {tab === "cleanup" &&
+        (embedded ? (
+          <SectionHeader
+            title="Caches & leftovers"
+            description="Review measured caches and regenerable files. Cleanup moves files to quarantine after a preview; protected data is never included."
+            actions={headerActions}
+          />
+        ) : (
+          <ViewHeader
+            title="Cleanup"
+            description="Review what each cache costs, then move it to a recoverable quarantine. Nothing is deleted without a preview, and protected data is never included."
+            meta={modeBadge}
+            actions={headerActions}
+          />
+        ))}
 
-      <div className="view-body">
+      <div className={embedded ? "view-body view-body--embedded" : "view-body"}>
         {modeError && (
           <Banner tone="danger">
             <strong>Cleanup mode is unknown.</strong> {modeError}
           </Banner>
         )}
 
-        {readOnly === true && (
-          <Banner
-            tone="accent"
-            actions={
+        <Banner
+          tone={readOnly === true ? "accent" : "info"}
+          actions={
+            readOnly === true ? (
               <Button size="sm" variant="primary" loading={modeBusy} onClick={() => void enableCleaning()}>
                 Enable cleaning
               </Button>
-            }
-          >
-            <strong>Read-only mode is on.</strong> Cyron measures and previews only until you enable
-            cleaning. Enabling it also requires an explicit confirmation for every run.
-          </Banner>
-        )}
-
-        <Banner tone="info">
-          <strong>Files are moved, not deleted.</strong> Each confirmed cleanup moves the selected
-          files into Cyron's quarantine, so you can restore them; purge a batch when you are sure.
-          Protected data — model weights, histories, settings, credentials, Docker/WSL data and
-          browser profiles — is never offered.
+            ) : undefined
+          }
+        >
+          <strong>{readOnly === true ? "Read-only mode is on." : "Files move to quarantine, not deletion."}</strong>{" "}
+          {readOnly === true
+            ? "Cyron measures and previews only until you enable cleaning. Every run still needs an explicit confirmation."
+            : "Each confirmed cleanup moves the selected files into Cyron's quarantine for seven days. Purging a batch is permanent; protected data is never offered."}
         </Banner>
 
-        {error && (
+        {tab === "cleanup" && error && (
           <Banner
             tone="danger"
             actions={
@@ -600,15 +531,18 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
           </Banner>
         )}
 
-        {warnings.length > 0 && (
+        {tab === "cleanup" && warnings.length > 0 && (
           <Banner tone="caution">
             <strong>{warnings.length === 1 ? "One location" : `${warnings.length} locations`}</strong>{" "}
             could not be measured completely. Sizes below are what Windows allowed Cyron to read.
-            <ul className="cl-warning-list">
-              {warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
+            <details className="cl-warning-details">
+              <summary>Review the blocked folders</summary>
+              <ul className="cl-warning-list">
+                {warnings.map((warning) => (
+                  <li key={warning}>{friendlyError(warning)}</li>
+                ))}
+              </ul>
+            </details>
           </Banner>
         )}
 
@@ -647,14 +581,11 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
             value={tab}
             onChange={(next) => {
               if (next === "projects") setProjectsVisited(true);
-              if (next === "quarantine") void loadQuarantine();
               setTab(next);
             }}
             options={[
-              { value: "cleanup", label: "Cleanup" },
+              { value: "cleanup", label: "Cache cleanup" },
               { value: "projects", label: "Projects" },
-              { value: "quarantine", label: "Quarantine", count: batches.length },
-              { value: "history", label: "History", count: log?.length },
             ]}
           />
         </div>
@@ -665,85 +596,9 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
               readOnly={readOnly}
               scanDrives={scanDrives}
               cacheInventory={inventory}
-              onOpenQuarantine={openQuarantine}
+              onOpenQuarantine={onOpenRecovery ? () => onOpenRecovery() : undefined}
             />
           </div>
-        )}
-
-        {tab === "quarantine" && (
-          <QuarantinePanel
-            batches={batches}
-            loading={quarantine === null && !quarantineError}
-            error={quarantineError}
-            pending={pending}
-            busy={busyBatch}
-            note={sideNote}
-            onAsk={(kind, batch) => {
-              setSideNote(null);
-              setPending({ kind, batch });
-            }}
-            onCancel={() => setPending(null)}
-            onConfirm={() => void confirmPending()}
-            onRetry={() => void loadQuarantine()}
-          />
-        )}
-
-        {tab === "history" && (
-          <Panel
-            title="Cleanup history"
-            subtitle="One line per run, kept on this PC. Per-file detail stays in the quarantine manifest."
-            actions={
-              <Button size="sm" icon={<IconRefresh size={14} />} onClick={() => void loadLog()}>
-                Refresh
-              </Button>
-            }
-          >
-            {logError && (
-              <Banner tone="danger">
-                <strong>Could not read the cleanup log.</strong> {logError}
-              </Banner>
-            )}
-            {log === null && !logError ? (
-              <div className="cl-skeleton">
-                {[0, 1, 2].map((index) => (
-                  <div className="cl-skeleton__row" key={index}>
-                    <Skeleton width={140} height={11} />
-                    <Skeleton width="40%" height={10} />
-                    <Skeleton width={64} height={10} />
-                  </div>
-                ))}
-              </div>
-            ) : (log?.length ?? 0) === 0 ? (
-              <EmptyState
-                compact
-                icon={IconCleaner}
-                title="No cleanup runs yet"
-                description="Confirmed cleanups appear here with the bytes moved and the per-item outcome."
-              />
-            ) : (
-              <ul className="cl-log">
-                {log?.map((entry) => (
-                  <li className="cl-log__row" key={entry.id}>
-                    <span className="cl-log__when">{formatDateTime(entry.at)}</span>
-                    <span className="cl-log__title">{entry.title}</span>
-                    <span className="cl-log__detail">{entry.detail}</span>
-                    <span className="cl-log__bytes">{formatBytes(entry.bytes)}</span>
-                    <Badge
-                      tone={
-                        entry.status === "completed"
-                          ? "safe"
-                          : entry.status === "cancelled"
-                            ? "caution"
-                            : "danger"
-                      }
-                    >
-                      {entry.status}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Panel>
         )}
 
         {tab === "cleanup" && status === "loading" && !inventory ? (
@@ -1017,7 +872,8 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
                                   </span>
                                   <span className="cl-row__size">{formatBytes(target.size)}</span>
                                   <span className="cl-row__files">
-                                    {formatCount(target.fileCount)} <small>files</small>
+                                    {formatCount(target.fileCount)}{" "}
+                                    <small>{target.fileCount === 1 ? "file" : "files"}</small>
                                   </span>
                                   <span className="cl-row__risk">
                                     <RiskBadge risk={target.risk} />
@@ -1154,15 +1010,17 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
           report ? (
             <div className="cl-drawer-foot">
               <Button onClick={closePreview}>Done</Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  closePreview();
-                  setTab("quarantine");
-                }}
-              >
-                Open quarantine
-              </Button>
+              {onOpenRecovery && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    closePreview();
+                    onOpenRecovery();
+                  }}
+                >
+                  Open recovery
+                </Button>
+              )}
             </div>
           ) : (
             <div className="cl-drawer-foot">
@@ -1202,7 +1060,7 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
             <Banner tone="safe">
               <strong>{formatBytes(preview.bytes)}</strong> in{" "}
               <strong>{plural(preview.fileCount, "file")}</strong> will move to quarantine. Files can
-              be restored from the Quarantine tab; purging a batch is permanent.
+              be restored from History & Recovery; purging a batch is permanent.
             </Banner>
 
             {(readOnly === true || preview.readOnly) && (
@@ -1302,7 +1160,7 @@ export function Cleaner({ initialTargetId }: { initialTargetId?: string | null }
               <Banner tone="caution">
                 <ul className="cl-warning-list">
                   {preview.warnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
+                    <li key={warning}>{friendlyError(warning)}</li>
                   ))}
                 </ul>
               </Banner>
@@ -1439,145 +1297,6 @@ function CleanupResult({
         )}
       </section>
     </div>
-  );
-}
-
-function QuarantinePanel({
-  batches,
-  loading,
-  error,
-  pending,
-  busy,
-  note,
-  onAsk,
-  onCancel,
-  onConfirm,
-  onRetry,
-}: {
-  batches: QuarantineBatch[];
-  loading: boolean;
-  error: string | null;
-  pending: Pending | null;
-  busy: string | null;
-  note: string | null;
-  onAsk: (kind: "restore" | "purge", batch: QuarantineBatch) => void;
-  onCancel: () => void;
-  onConfirm: () => void;
-  onRetry: () => void;
-}) {
-  return (
-    <Panel
-      title="Quarantine"
-      subtitle="Files moved out of caches stay here until you restore or purge them."
-      actions={
-        <Button size="sm" icon={<IconRefresh size={14} />} onClick={onRetry}>
-          Refresh
-        </Button>
-      }
-    >
-      {note && <Banner tone="info">{note}</Banner>}
-      {error && (
-        <Banner tone="danger">
-          <strong>Could not read the quarantine.</strong> {error}
-        </Banner>
-      )}
-
-      {pending && (
-        <Banner
-          tone={pending.kind === "purge" ? "danger" : "caution"}
-          actions={
-            <>
-              <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy !== null}>
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                variant={pending.kind === "purge" ? "danger" : "primary"}
-                loading={busy === pending.batch.runId}
-                onClick={onConfirm}
-              >
-                {pending.kind === "purge" ? "Delete permanently" : "Restore files"}
-              </Button>
-            </>
-          }
-        >
-          {pending.kind === "purge" ? (
-            <>
-              <strong>Permanently delete this batch?</strong> {plural(pending.batch.fileCount, "file")} (
-              {formatBytes(pending.batch.bytes)}) will be unrecoverable.
-            </>
-          ) : (
-            <>
-              <strong>Restore this batch?</strong> {plural(pending.batch.fileCount, "file")}{" "}
-              {pending.batch.fileCount === 1
-                ? "will go back to its original path."
-                : "will go back to their original paths."}{" "}
-              Existing files are never overwritten.
-            </>
-          )}
-        </Banner>
-      )}
-
-      {loading ? (
-        <div className="cl-skeleton">
-          {[0, 1].map((index) => (
-            <div className="cl-skeleton__row" key={index}>
-              <Skeleton width={150} height={11} />
-              <Skeleton width="34%" height={10} />
-              <Skeleton width={80} height={10} />
-            </div>
-          ))}
-        </div>
-      ) : batches.length === 0 ? (
-        <EmptyState
-          compact
-          icon={IconCheck}
-          title="Quarantine is empty"
-          description="Confirmed cleanups appear here with their recoverable files, size and expiry."
-        />
-      ) : (
-        <>
-          <p className="cl-muted">
-            {plural(batches.length, "batch", "batches")} · {formatBytes(batchTotal(batches))}{" "}
-            recoverable right now.
-          </p>
-          <ul className="cl-batches">
-            {batches.map((batch) => (
-              <li className="cl-batch" key={batch.runId}>
-                <div className="cl-batch__main">
-                  <span className="cl-batch__title">
-                    {batch.fileCount === 1 ? "1 file" : `${formatCount(batch.fileCount)} files`} ·{" "}
-                    {formatBytes(batch.bytes)}
-                  </span>
-                  <span className="cl-batch__path">{batch.dir}</span>
-                  <span className="cl-batch__meta">
-                    Created {formatDateTime(batch.createdAt)} · expires{" "}
-                    {formatDateTime(batch.expiresAt)}
-                  </span>
-                </div>
-                <div className="cl-batch__actions">
-                  <Button
-                    size="sm"
-                    onClick={() => onAsk("restore", batch)}
-                    disabled={busy !== null}
-                  >
-                    Restore
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={() => onAsk("purge", batch)}
-                    disabled={busy !== null}
-                  >
-                    Purge
-                  </Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </Panel>
   );
 }
 

@@ -2,24 +2,16 @@ import { memo, useCallback, useEffect, useMemo, useState, type ComponentType, ty
 import { api } from "./lib/api";
 import { IconButton, cx } from "./components/ui";
 import {
-  IconActivity,
-  IconAnalyzer,
   IconApps,
-  IconCleaner,
-  IconCrosshair,
   IconGauge,
-  IconMonitor,
-  IconMoon,
-  IconOverview,
+  IconHistory,
+  IconHome,
   IconPanel,
   IconSettings,
-  IconShield,
-  IconSun,
+  IconStorage,
   type IconProps,
 } from "./components/Icons";
-import { Activity } from "./features/activity/Activity";
-import { Analyzer } from "./features/analyzer/Analyzer";
-import { Cleaner } from "./features/cleaner/Cleaner";
+import { HistoryRecovery } from "./features/history/HistoryRecovery";
 import { HunterMode } from "./features/hunter/HunterMode";
 import { HunterConfirmationModal } from "./features/hunter/HunterConfirmationModal";
 import { ForceDeleteModal } from "./features/explorer/ForceDeleteModal";
@@ -28,37 +20,73 @@ import { KillProcessModal } from "./features/explorer/KillProcessModal";
 import { Overview } from "./features/overview/Overview";
 import { Performance } from "./features/performance/Performance";
 import { Settings } from "./features/settings/Settings";
+import { StorageCleanup } from "./features/storage/StorageCleanup";
 import { Uninstaller } from "./features/uninstaller/Uninstaller";
 import { loadInstalledApps } from "./lib/api";
-import { useSettings, type ThemePreference } from "./lib/settings";
 import type { InstalledApp, StartupRoute, ViewId } from "./lib/types";
 
 const COLLAPSE_KEY = "cyron.sidebar.collapsed";
 
+type Destination = "home" | "applications" | "storage" | "performance" | "history" | "settings";
+type NavDestination = Exclude<Destination, "settings">;
+
 interface NavEntry {
-  id: ViewId;
+  id: NavDestination;
   label: string;
   icon: ComponentType<IconProps>;
 }
 
 const PRIMARY_NAV: NavEntry[] = [
-  { id: "overview", label: "Overview", icon: IconOverview },
-  { id: "uninstaller", label: "Uninstaller", icon: IconApps },
-  { id: "analyzer", label: "Disk Analyzer", icon: IconAnalyzer },
+  { id: "home", label: "Home", icon: IconHome },
+  { id: "applications", label: "Applications", icon: IconApps },
+  { id: "storage", label: "Storage & Cleanup", icon: IconStorage },
   { id: "performance", label: "Performance", icon: IconGauge },
-  { id: "cleaner", label: "Cleaner", icon: IconCleaner },
-  { id: "activity", label: "Activity", icon: IconActivity },
+  { id: "history", label: "History & Recovery", icon: IconHistory },
 ];
 
-function viewLabel(view: ViewId): string {
-  return PRIMARY_NAV.find((entry) => entry.id === view)?.label ?? "Settings";
+const TITLES: Record<Destination, string> = {
+  home: "Home",
+  applications: "Applications",
+  storage: "Storage & Cleanup",
+  performance: "Performance",
+  history: "History & Recovery",
+  settings: "Settings",
+};
+
+function destinationForView(view: ViewId): Destination {
+  switch (view) {
+    case "overview":
+      return "home";
+    case "uninstaller":
+      return "applications";
+    case "cleaner":
+    case "analyzer":
+      return "storage";
+    case "performance":
+      return "performance";
+    case "activity":
+      return "history";
+    case "settings":
+      return "settings";
+  }
 }
 
-const THEMES: { value: ThemePreference; label: string; icon: ComponentType<IconProps> }[] = [
-  { value: "system", label: "System theme", icon: IconMonitor },
-  { value: "light", label: "Light theme", icon: IconSun },
-  { value: "dark", label: "Dark theme", icon: IconMoon },
-];
+function defaultView(destination: Destination): ViewId {
+  switch (destination) {
+    case "home":
+      return "overview";
+    case "applications":
+      return "uninstaller";
+    case "storage":
+      return "cleaner";
+    case "performance":
+      return "performance";
+    case "history":
+      return "activity";
+    case "settings":
+      return "settings";
+  }
+}
 
 function readCollapsed(): boolean {
   try {
@@ -75,154 +103,79 @@ function BrandMark() {
         d="M20.1 14.4A8.4 8.4 0 1 1 16.6 5"
         fill="none"
         stroke="currentColor"
-        strokeWidth="2.6"
+        strokeWidth="2.4"
         strokeLinecap="round"
       />
-      <circle cx="12" cy="12" r="2.3" fill="currentColor" />
+      <circle cx="12" cy="12" r="2.2" fill="currentColor" />
     </svg>
   );
 }
 
 function Sidebar({
-  view,
+  destination,
   collapsed,
-  isHunterActive,
   onNavigate,
-  onStartHunter,
-  onExitHunter,
   onToggleCollapsed,
 }: {
-  view: ViewId;
+  destination: Destination;
   collapsed: boolean;
-  isHunterActive: boolean;
-  onNavigate: (view: ViewId) => void;
-  onStartHunter: () => void;
-  onExitHunter: () => void;
+  onNavigate: (destination: Destination) => void;
   onToggleCollapsed: () => void;
 }) {
-  const { settings, setTheme } = useSettings();
-
   return (
     <aside className="sidebar" aria-label="Cyron sections">
       <button
         type="button"
         className="sidebar__brand"
-        onClick={() => onNavigate("overview")}
-        aria-label="Cyron overview"
-        style={{
-          background: "transparent",
-          border: 0,
-          textAlign: "left",
-          width: "100%",
-          cursor: "pointer",
-        }}
+        onClick={() => onNavigate("home")}
+        aria-label="Cyron home"
       >
         <span className="brand-mark">
           <BrandMark />
         </span>
         <span className="brand-text">
           <span className="brand-name">Cyron</span>
-          <span className="brand-sub">Review-first cleaning</span>
         </span>
       </button>
 
       <nav className="sidebar__nav" aria-label="Primary">
         {PRIMARY_NAV.map((entry) => {
           const Icon = entry.icon;
-          const active = view === entry.id;
+          const active = destination === entry.id;
           return (
-            <div key={entry.id} style={{ display: "contents" }}>
-              <button
-                type="button"
-                className="nav__item"
-                aria-current={active ? "page" : undefined}
-                title={entry.label}
-                onClick={() => onNavigate(entry.id)}
-              >
-                <span className="nav__icon">
-                  <Icon size={17} />
-                </span>
-                <span className="nav__label">{entry.label}</span>
-              </button>
-              {entry.id === "uninstaller" && (
-                <button
-                  type="button"
-                  className={cx("nav__item", isHunterActive && "nav__item--active-hunter")}
-                  aria-pressed={isHunterActive}
-                  title={isHunterActive ? "Exit Hunter Mode (Esc)" : "Hunter Mode (Window & Process Targeting)"}
-                  onClick={isHunterActive ? onExitHunter : onStartHunter}
-                >
-                  <span className="nav__icon">
-                    <IconCrosshair size={17} />
-                  </span>
-                  <span
-                    className="nav__label"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      width: "100%",
-                    }}
-                  >
-                    <span>{isHunterActive ? "Exit Hunter" : "Hunter Mode"}</span>
-                    {isHunterActive && (
-                      <span
-                        className="badge badge--accent"
-                        style={{ fontSize: 9.5, padding: "1px 5px", lineHeight: "12px" }}
-                      >
-                        Active
-                      </span>
-                    )}
-                  </span>
-                </button>
-              )}
-            </div>
+            <button
+              key={entry.id}
+              type="button"
+              className={cx("nav__item", active && "nav__item--active")}
+              aria-current={active ? "page" : undefined}
+              title={collapsed ? entry.label : undefined}
+              onClick={() => onNavigate(entry.id)}
+            >
+              <span className="nav__icon">
+                <Icon size={18} />
+              </span>
+              <span className="nav__label">{entry.label}</span>
+            </button>
           );
         })}
       </nav>
 
       <div className="sidebar__foot">
-        <div className="sidebar__note">
-          <IconShield size={14} />
-          <span>
-            <strong>Review first</strong>
-Preview, then 7-day quarantine.
-          </span>
-        </div>
-
         <button
           type="button"
-          className="nav__item"
-          aria-current={view === "settings" ? "page" : undefined}
-          title="Settings"
+          className={cx("nav__item", destination === "settings" && "nav__item--active")}
+          aria-current={destination === "settings" ? "page" : undefined}
+          title={collapsed ? "Settings" : undefined}
           onClick={() => onNavigate("settings")}
         >
           <span className="nav__icon">
-            <IconSettings size={17} />
+            <IconSettings size={18} />
           </span>
           <span className="nav__label">Settings</span>
         </button>
 
         <div className="sidebar__tools">
-          <div className="theme-switch" role="group" aria-label="Theme">
-            {THEMES.map((theme) => {
-              const Icon = theme.icon;
-              const active = settings.theme === theme.value;
-              return (
-                <button
-                  key={theme.value}
-                  type="button"
-                  className="theme-switch__item"
-                  aria-pressed={active}
-                  aria-label={theme.label}
-                  title={theme.label}
-                  onClick={() => setTheme(theme.value)}
-                >
-                  <Icon size={13} />
-                </button>
-              );
-            })}
-          </div>
+          <span className="sidebar__version">v0.1.0</span>
           <IconButton
             label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="collapse-btn"
@@ -238,7 +191,7 @@ Preview, then 7-day quarantine.
 }
 
 interface ViewSlotProps {
-  id: ViewId;
+  id: Destination;
   active: boolean;
   label: string;
   children: ReactNode;
@@ -246,11 +199,7 @@ interface ViewSlotProps {
 
 const ViewSlot = memo(function ViewSlot({ active, label, children }: ViewSlotProps) {
   return (
-    <section
-      className="view-slot"
-      hidden={!active}
-      aria-label={label}
-    >
+    <section className="view-slot" hidden={!active} aria-label={label}>
       {children}
     </section>
   );
@@ -259,28 +208,30 @@ const ViewSlot = memo(function ViewSlot({ active, label, children }: ViewSlotPro
 export default function App() {
   const [view, setView] = useState<ViewId>("overview");
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const [visited, setVisited] = useState<ViewId[]>(["overview"]);
+  const [visited, setVisited] = useState<Destination[]>(["home"]);
   const [startupRoute, setStartupRoute] = useState<StartupRoute | null>(null);
   const [cleanerTargetId, setCleanerTargetId] = useState<string | null>(null);
+  const [recoveryRequest, setRecoveryRequest] = useState(0);
   const [apps, setApps] = useState<InstalledApp[]>([]);
 
-  // Hunter Mode centralized session state
   const [isHunterActive, setIsHunterActive] = useState(false);
   const [hunterConfirmOpen, setHunterConfirmOpen] = useState(false);
 
-  // Explorer destructive actions modals state
   const [forceDeleteTarget, setForceDeleteTarget] = useState<string | null>(null);
   const [findLocksTarget, setFindLocksTarget] = useState<string | null>(null);
   const [killProcessTarget, setKillProcessTarget] = useState<string | null>(null);
 
   useEffect(() => {
-    loadInstalledApps().then((inv) => {
-      if (inv?.apps) setApps(inv.apps);
-    }).catch(() => {});
+    loadInstalledApps()
+      .then((inventory) => {
+        if (inventory?.apps) setApps(inventory.apps);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
-    document.title = view === "overview" ? "Cyron" : `${viewLabel(view)} · Cyron`;
+    const destination = destinationForView(view);
+    document.title = destination === "home" ? "Cyron" : `${TITLES[destination]} · Cyron`;
   }, [view]);
 
   useEffect(() => {
@@ -293,11 +244,28 @@ export default function App() {
 
   const navigate = useCallback((next: ViewId) => {
     setView(next);
-    setVisited((current) => (current.includes(next) ? current : [...current, next]));
+    const destination = destinationForView(next);
+    setVisited((current) => (current.includes(destination) ? current : [...current, destination]));
   }, []);
 
+  const navigateDestination = useCallback(
+    (destination: Destination) => {
+      if (destination === "storage") {
+        navigate(view === "analyzer" ? "analyzer" : "cleaner");
+        return;
+      }
+      if (destination === "settings") {
+        navigate("settings");
+        return;
+      }
+      navigate(defaultView(destination));
+    },
+    [navigate, view],
+  );
+
   useEffect(() => {
-    api.getStartupRoute()
+    api
+      .getStartupRoute()
       .then((route) => {
         if (route) {
           setStartupRoute(route);
@@ -324,47 +292,76 @@ export default function App() {
   );
 
   const overviewView = useMemo(() => <Overview onNavigate={navigate} />, [navigate]);
-  const uninstallerInitialAppId = startupRoute?.view === "uninstaller" ? startupRoute.targetAppId : undefined;
-  const uninstallerInitialQuery = startupRoute?.view === "uninstaller" ? startupRoute.path : undefined;
+  const uninstallerInitialAppId =
+    startupRoute?.view === "uninstaller" ? startupRoute.targetAppId : undefined;
+  const uninstallerInitialQuery =
+    startupRoute?.view === "uninstaller" ? startupRoute.path : undefined;
   const uninstallerView = useMemo(
-    () => <Uninstaller initialAppId={uninstallerInitialAppId} initialQuery={uninstallerInitialQuery} />,
+    () => (
+      <Uninstaller
+        initialAppId={uninstallerInitialAppId}
+        initialQuery={uninstallerInitialQuery}
+        onFindWindow={() => setHunterConfirmOpen(true)}
+      />
+    ),
     [uninstallerInitialAppId, uninstallerInitialQuery],
   );
+
   const analyzerInitialPath = startupRoute?.view === "analyzer" ? startupRoute.path : undefined;
   const analyzerInitialMode =
     startupRoute?.view === "analyzer" &&
-    (startupRoute.subview === "map" || startupRoute.subview === "duplicates" || startupRoute.subview === "storage")
+    (startupRoute.subview === "map" ||
+      startupRoute.subview === "duplicates" ||
+      startupRoute.subview === "storage")
       ? startupRoute.subview
       : undefined;
-  const analyzerView = useMemo(
+
+  const storageView = useMemo(
     () => (
-      <Analyzer
-        initialPath={analyzerInitialPath}
-        initialMode={analyzerInitialMode}
+      <StorageCleanup
+        mode={view === "analyzer" ? "disk" : "cleanup"}
+        onModeChange={(mode) => navigate(mode === "disk" ? "analyzer" : "cleaner")}
+        initialAnalyzerPath={analyzerInitialPath ?? undefined}
+        initialAnalyzerMode={analyzerInitialMode}
+        cleanerTargetId={cleanerTargetId ?? undefined}
         onNavigateToCleaner={navigateToCleanerWithTarget}
+        onOpenRecovery={() => {
+          setRecoveryRequest((value) => value + 1);
+          navigate("activity");
+        }}
       />
     ),
-    [analyzerInitialPath, analyzerInitialMode, navigateToCleanerWithTarget],
+    [
+      view,
+      navigate,
+      analyzerInitialPath,
+      analyzerInitialMode,
+      cleanerTargetId,
+      navigateToCleanerWithTarget,
+    ],
   );
+
   const performanceView = useMemo(() => <Performance onNavigate={navigate} />, [navigate]);
-  const cleanerView = useMemo(() => <Cleaner initialTargetId={cleanerTargetId} />, [cleanerTargetId]);
-  const activityView = useMemo(() => <Activity />, []);
+  const historyView = useMemo(
+    () => <HistoryRecovery onNavigate={navigate} recoveryRequest={recoveryRequest} />,
+    [navigate, recoveryRequest],
+  );
   const settingsView = useMemo(() => <Settings />, []);
 
-  const getViewElement = (id: ViewId): ReactNode => {
-    switch (id) {
-      case "overview":
+  const activeDestination = destinationForView(view);
+
+  const getViewElement = (destination: Destination): ReactNode => {
+    switch (destination) {
+      case "home":
         return overviewView;
-      case "uninstaller":
+      case "applications":
         return uninstallerView;
-      case "analyzer":
-        return analyzerView;
+      case "storage":
+        return storageView;
       case "performance":
         return performanceView;
-      case "cleaner":
-        return cleanerView;
-      case "activity":
-        return activityView;
+      case "history":
+        return historyView;
       case "settings":
         return settingsView;
     }
@@ -373,35 +370,30 @@ export default function App() {
   return (
     <div className="app" data-collapsed={collapsed}>
       <Sidebar
-        view={view}
+        destination={activeDestination}
         collapsed={collapsed}
-        isHunterActive={isHunterActive}
-        onNavigate={navigate}
-        onStartHunter={() => setHunterConfirmOpen(true)}
-        onExitHunter={() => setIsHunterActive(false)}
+        onNavigate={navigateDestination}
         onToggleCollapsed={() => setCollapsed((value) => !value)}
       />
       <main className="main" id="main-content" aria-label="Cyron content">
-        {visited.map((id) => (
+        {visited.map((destination) => (
           <ViewSlot
-            key={id}
-            id={id}
-            active={view === id}
-            label={viewLabel(id)}
+            key={destination}
+            id={destination}
+            active={activeDestination === destination}
+            label={TITLES[destination]}
           >
-            {getViewElement(id)}
+            {getViewElement(destination)}
           </ViewSlot>
         ))}
       </main>
 
-      {/* Global Hunter Mode session overlay */}
       <HunterMode
         isActive={isHunterActive}
         onExit={() => setIsHunterActive(false)}
         installedApps={apps}
       />
 
-      {/* Hunter Mode confirmation dialog */}
       <HunterConfirmationModal
         open={hunterConfirmOpen}
         onConfirm={() => {
@@ -411,7 +403,6 @@ export default function App() {
         onCancel={() => setHunterConfirmOpen(false)}
       />
 
-      {/* Explorer Destructive Action Review Dialogs */}
       <ForceDeleteModal
         open={Boolean(forceDeleteTarget)}
         targetPath={forceDeleteTarget}

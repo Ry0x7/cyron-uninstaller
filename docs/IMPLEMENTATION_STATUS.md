@@ -1,6 +1,6 @@
 # Cyron — Implementation Status
 
-Last updated: 2026-11-17 (performance diagnostics and startup evidence, implementation ledger)
+Last updated: 2026-11-17 (design-system rebuild; performance diagnostics and startup evidence, implementation ledger)
 
 ## Summary
 
@@ -22,6 +22,7 @@ Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x6
 - Standardized Windows PE VERSIONINFO, WiX MSI properties, and NSIS installer headers (`WINDOWS_METADATA_OK`).
 - Local Chryypt Organization self-signed signing pipeline. Cryptographic integrity is separate from public trust: the published `v0.1.0` installer and current local release artifacts are `NotSigned`, and the certificate is self-signed.
 - Evidence-bound performance diagnostics: live CPU, memory, PDH disk, process, startup and scheduled-task evidence; reversible startup toggles behind a native confirmation; local before/after baselines; optional administrator-only WPR trace; no placebo tuning.
+- Five-destination Windows-native interface (Home, Applications, Storage & Cleanup, Performance, History & Recovery) with Settings in the sidebar footer, a shared token/primitive system, keyboard-visible focus, dialog focus trapping and reduced-motion support.
 - Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`).
 
 Historical narratives and early acceptance logs for Phases 1–3 are preserved in [docs/archive/PHASE_HISTORY.md](archive/PHASE_HISTORY.md).
@@ -129,13 +130,23 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | Constraints & Defaults | Done | No RAM booster, standby-memory clearing, registry cleaning, service disabling, Prefetch deletion, page-file change, Defender/update disabling or driver tweak. Manual Refresh bypasses the 120-second startup-evidence cache; live sampling keeps it. |
 | Native Desktop Workflow | Done | Windows UI Automation against the native Tauri debug app: captured live metrics, switched guides, reviewed startup/task rows, completed a disposable startup disable/enable round trip through the Win32 confirmation dialog, recorded/compared two baselines, and confirmed the trace is disabled unelevated. See [the receipt](evidence/2026-11-17-performance-diagnostics.md). |
 
+### 8. Interface and Design System
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Five-destination navigation | Done | `App.tsx` exposes Home, Applications, Storage & Cleanup, Performance and History & Recovery; Settings lives in the sidebar footer. Hunter Mode is **Find by window** inside Applications. Native review opened every destination with no dead or duplicate item. |
+| Shared token and primitive system | Done | `tokens.css` defines one neutral family, one blue accent, one type/radius/shadow scale and light/dark surfaces. `components/ui.tsx` supplies the page, tab, panel, control, state and dialog primitives. Feature CSS consumes tokens; `docs/DESIGN.md` records the rules. |
+| Clear information architecture | Done | Storage & Cleanup has Cleanup (Cache cleanup, Projects) and Disk space (Map, Files, Duplicates, By type). History & Recovery has Activity and Recovery. The Cleanup section header, scan scope and cache warnings are scoped to Cache cleanup only. |
+| Responsive native layouts | Done | Reviewed at 1320x860 and 1000x680. At 1000 px the page probe reported 0 horizontal overflow for Applications, Storage and History; the Activity table measured 646/646 px; secondary table columns hide intentionally. |
+| Accessible interaction | Done | Tab order, Enter activation, 2px `:focus-visible` rings, `aria-current`, dialog focus trap and Escape return, 32 px controls, labelled icon-only actions and reduced-motion handling were exercised. Sampled token contrast was 4.57:1–16.14:1. |
+| Native visual verification | Done | Selected 1320x860, 1000x680, light/dark and dialog captures are committed in [the design receipt](evidence/2026-11-17-design-system.md). The native audit found and fixed a stale Cleanup header on Projects, a wrapped Recovery badge, an overflowing Activity table and a `\\?\` display prefix in the deletion review. |
+
 ## Known Limitations & Design Boundaries
 
 1. **Store / MSIX Lifecycle:** Current-user packages are removed natively through `PackageManager::RemovePackageAsync` behind a single-use plan. Cyron does not call `RemoveForAllUsers`, deprovision, elevate automatically or launch `winget`/PowerShell. Machine-wide and provisioned packages require Windows Settings or an administrator-managed tool. A real package removal through the desktop UI is UNVERIFIED as of 2026-11-16.
 2. **Portable Applications:** Standalone portable executables in `%LOCALAPPDATA%\Programs` are discovered through explainable heuristics. They lack registry uninstaller commands; Cyron provides residual scanning, folder measurement, and Explorer navigation.
 3. **MFT Scanner Elevation:** Accessing raw volume handles (`\\.\X:`) requires administrator elevation. When unelevated, Cyron reports the reason and falls back seamlessly to the streaming directory walk.
 4. **MFT vs Walk Counting Difference:** The MFT reader counts physical NTFS records; the streaming directory walk counts accessible filesystem paths (deduplicating up to 1,000,000 hard-link IDs). Volume totals from the two methods differ by design (see [docs/BENCHMARKS.md](BENCHMARKS.md)).
-5. **Debug Desktop Build:** The debug build executable (`src-tauri/target/debug/cyron.exe`) targets Tauri's `devUrl` and requires the Vite dev server (`npm run dev`). Production release builds embed frontend assets directly and run standalone.
+5. **Desktop Build Modes:** `npm run dev:desktop` uses the Vite dev server. `npm run build:desktop` builds a debug executable with embedded production assets and runs standalone; this is the executable used for the Phase 5 native review. Release bundles embed assets as well.
 6. **Platform Scope:** Cyron targets Windows 10/11 x64 exclusively. Win32 APIs are invoked unconditionally.
 7. **Release Signing Trust:** The GitHub release workflow builds unsigned artifacts. Local signing uses a self-signed certificate, which is cryptographically verifiable but not publicly trusted. Release copy must not imply SmartScreen trust.
 8. **Cross-Volume Folder Restore:** `restore_batch` stages a quarantined folder on the destination volume, publishes it with a no-overwrite rename, and only then removes the quarantined copy. A tree containing a link or junction is refused and left in quarantine rather than silently dropping the link. Unit tests cover staging, conflict refusal and folder round-trip; a native E:→C: quarantine→restore run through Cleaner verified the full path on 2026-11-16.
@@ -149,3 +160,5 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 16. **Performance Is a Short Sample:** CPU, memory, disk and process figures describe one 700 ms window every ten seconds, not a lifetime average. Spikes between samples are missed, and per-process I/O combines file, network, pipe and device transfers. Cyron does not measure temperature or fan speed.
 17. **Elevated Performance Paths:** Per-app boot impact requires the administrator-only Diagnostics-Performance log, and WPR tracing requires an administrator session. The unelevated UI says so and disables tracing; both elevated paths are UNVERIFIED as of 2026-11-17.
 18. **Baselines Show Association:** Two local samples can show that a number changed, not that a change caused a speed improvement. The UI says this explicitly and never reports a guaranteed gain.
+19. **Visual Accessibility Is Not Certified:** Keyboard order, visible focus, dialog trapping, Escape return and reduced motion were exercised in the native build. Narrator/NVDA traversal, Windows forced-colors rendering and 200% OS text scaling were not; those remain manual accessibility gates.
+20. **Screenshots Use This Machine's Inventory:** The committed Phase 5 captures show 179 installed applications, three local volumes and disposable fixtures. They are presentation evidence only; no real user cache or project was cleaned for them.

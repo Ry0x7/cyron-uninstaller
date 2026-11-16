@@ -5,7 +5,7 @@ export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "children"> {
   strokeWidth?: number;
 }
 
-function Svg({ size = 18, strokeWidth = 1.6, children, ...rest }: IconProps & { children: ReactNode }) {
+function Svg({ size = 18, strokeWidth = 1.7, children, ...rest }: IconProps & { children: ReactNode }) {
   return (
     <svg
       width={size}
@@ -25,12 +25,103 @@ function Svg({ size = 18, strokeWidth = 1.6, children, ...rest }: IconProps & { 
   );
 }
 
-export const IconOverview = (props: IconProps) => (
+export const IconHome = (props: IconProps) => (
   <Svg {...props}>
-    <rect x="3.5" y="3.5" width="7" height="7" rx="1.4" />
-    <rect x="13.5" y="3.5" width="7" height="7" rx="1.4" />
-    <rect x="3.5" y="13.5" width="7" height="7" rx="1.4" />
-    <rect x="13.5" y="13.5" width="7" height="7" rx="1.4" />
+    <path d="M3.5 10.2 12 3.5l8.5 6.7" />
+    <path d="M5.5 9.2v10.3h13V9.2" />
+    <path d="M9.8 19.5v-5.8h4.4v5.8" />
+  </Svg>
+);
+
+export const IconOverview = IconHome;
+
+export const IconStorage = (props: IconProps) => (
+  <Svg {...props}>
+    <rect x="3.2" y="4.5" width="17.6" height="15" rx="2.2" />
+    <path d="M3.2 10.2h17.6" />
+    <path d="M6.7 14.8h.01M10.1 14.8h.01" />
+    <path d="M15.3 14.8h3.1" />
+  </Svg>
+);
+
+export const IconHistory = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M3.6 12a8.4 8.4 0 1 0 2.5-5.9" />
+    <path d="M3.4 5.3v4.3h4.3" />
+    <path d="M12 7.8V12l3 1.8" />
+  </Svg>
+);
+
+export const IconWindow = (props: IconProps) => (
+  <Svg {...props}>
+    <rect x="3.2" y="4.5" width="17.6" height="15" rx="2" />
+    <path d="M3.2 8.8h17.6" />
+    <path d="M6.4 6.7h.01M9 6.7h.01" />
+  </Svg>
+);
+
+export const IconArrowLeft = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M19 12H5M10.5 6.5 5 12l5.5 5.5" />
+  </Svg>
+);
+
+export const IconMore = (props: IconProps) => (
+  <Svg {...props}>
+    <circle cx="5" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="19" cy="12" r="1.1" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
+export const IconFolderOpen = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M3.5 8.2V6.4c0-1 .8-1.8 1.8-1.8h3.1l1.9 2.1h7.9c1 0 1.8.8 1.8 1.8v1.2" />
+    <path d="M4.6 9.7h16.2l-2.2 8.1c-.2.8-.9 1.3-1.7 1.3H5.8c-1 0-1.8-.9-1.6-1.9l1.1-6.2c.1-.8.8-1.3 1.6-1.3Z" />
+  </Svg>
+);
+
+export const IconSliders = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M4 7h6M14 7h6M4 17h10M18 17h2" />
+    <circle cx="12" cy="7" r="2" />
+    <circle cx="16" cy="17" r="2" />
+  </Svg>
+);
+
+export const IconLayers = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="m12 3.4 8.4 4.4-8.4 4.4L3.6 7.8 12 3.4Z" />
+    <path d="m4.4 12 7.6 4 7.6-4" />
+    <path d="m4.4 16.2 7.6 4 7.6-4" />
+  </Svg>
+);
+
+export const IconArchive = (props: IconProps) => (
+  <Svg {...props}>
+    <rect x="3.5" y="4.5" width="17" height="4.5" rx="1.2" />
+    <path d="M5.2 9v9.1c0 .8.7 1.4 1.4 1.4h10.8c.8 0 1.4-.7 1.4-1.4V9" />
+    <path d="M9.7 13h4.6" />
+  </Svg>
+);
+
+export const IconUndo = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M4 9.5h10.2a5.8 5.8 0 0 1 0 11.6H8.4" />
+    <path d="M8.2 5.3 4 9.5l4.2 4.2" />
+  </Svg>
+);
+
+export const IconChevronUp = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="m5.5 14.5 6.5-6.5 6.5 6.5" />
+  </Svg>
+);
+
+export const IconDownload = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 3.5v11M7.5 10.5 12 15l4.5-4.5" />
+    <path d="M4.5 19.5h15" />
   </Svg>
 );
 

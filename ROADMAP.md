@@ -69,7 +69,7 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 - Automated documentation integrity gate (`npm run docs:check`) enforced in CI: links, commands, versions, and evidence references.
 
 ### Phase 7.4 — Hunter Navigation & Explorer Destructive Actions (`[x]`)
-- Moved Hunter Mode into main sidebar navigation below Uninstaller as a global session action.
+- Moved Hunter Mode into main sidebar navigation below Uninstaller as a global session action. (Superseded on 2026-11-17: the Phase 5 design-system rebuild moved it into Applications as **Find by window**.)
 - Added compact Hunter activation confirmation dialog explaining window targeting, actions, and exit controls.
 - Active sidebar indicator with direct exit control and instant `Esc` cancellation without stale background polling.
 - Rendered HUD banner and floating crosshair triggers strictly during active Hunter sessions.
@@ -87,6 +87,13 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 - Evidence-bound recommendations with measured effect, risk and a verification method.
 - Five symptom guides for "Why is my PC slow?", local before/after baselines, and an optional local WPR trace.
 - Explicit refusal of RAM boosters, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling and driver tweaks.
+
+### Phase 5 UI — Design System & Navigation Rebuild (`[x]`)
+- Replaced the dashboard surface with five primary destinations: Home, Applications, Storage & Cleanup, Performance, History & Recovery.
+- Moved Settings to the sidebar footer and Hunter Mode into Applications; removed redundant navigation pages.
+- Introduced shared design tokens and primitives for typography, spacing, radius, surfaces, controls, tables, states and dialogs.
+- Added keyboard-visible focus, dialog focus trapping, Escape return, reduced-motion support, responsive minimum-width layouts and intentional long-value truncation.
+- Consolidated the design rules in [docs/DESIGN.md](docs/DESIGN.md) and committed selected native evidence in [the design receipt](docs/evidence/2026-11-17-design-system.md).
 
 ---
 

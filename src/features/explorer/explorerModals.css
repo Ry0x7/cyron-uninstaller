@@ -1,48 +1,72 @@
 .exp-modal-card {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.exp-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 36px 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.exp-loading p {
+  max-width: 44ch;
+  font-size: 12.5px;
+  line-height: 1.55;
 }
 
 .exp-target-path {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  word-break: break-all;
-  color: var(--text-strong);
+  padding: 9px 11px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .exp-meta-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px 18px;
+  margin: 0;
 }
 
 .exp-meta-item {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .exp-meta-label {
-  font-size: 10px;
-  font-family: var(--font-mono);
-  text-transform: uppercase;
+  margin: 0;
   color: var(--text-muted);
-  letter-spacing: 0.05em;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .exp-meta-val {
-  font-size: 12px;
-  font-weight: 550;
+  margin: 0;
   color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .exp-badges {
@@ -52,97 +76,259 @@
 }
 
 .exp-reasons-list {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 11.5px;
-  color: var(--caution);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--caution);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.exp-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.exp-section-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.exp-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.exp-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
 }
 
 .exp-proc-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 180px;
+  max-height: 260px;
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 .exp-proc-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  padding: 7px 10px;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  font-size: 11.5px;
+  border-radius: 9px;
 }
 
 .exp-proc-info {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 }
 
 .exp-proc-title {
-  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.exp-proc-pid {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .exp-proc-meta {
-  font-size: 10.5px;
   color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.exp-proc-path {
+  color: var(--text-faint);
   font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.exp-proc-error {
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.exp-proc-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: none;
+  flex-wrap: wrap;
 }
 
 .exp-delete-modes {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.exp-delete-modes legend {
+  margin-bottom: 2px;
+  padding: 0;
 }
 
 .exp-mode-option {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 10px;
   cursor: pointer;
-  transition: border-color 120ms var(--ease);
+  transition: background 120ms var(--ease), border-color 120ms var(--ease), box-shadow 120ms var(--ease);
 }
 
 .exp-mode-option:hover {
-  border-color: var(--text-muted);
+  border-color: var(--line-strong);
 }
 
-.exp-mode-option--selected {
-  border-color: var(--accent);
+.exp-mode-option input,
+.exp-checkbox-label input,
+.exp-force-option input,
+.exp-select-row input {
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.exp-mode-option > span,
+.exp-force-option > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.exp-mode-option strong,
+.exp-force-option strong {
+  color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.exp-mode-detail {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.exp-mode-option.is-selected {
   background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
-.exp-mode-option--selected-danger {
-  border-color: var(--danger);
+.exp-mode-option--danger.is-selected {
   background: var(--danger-soft);
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+.exp-mode-option--danger.is-selected strong {
+  color: var(--danger);
 }
 
 .exp-checkbox-label {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  font-weight: 500;
-  color: var(--danger);
-  cursor: pointer;
-  padding: 6px 8px;
-  border-radius: 4px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
   background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  cursor: pointer;
+}
+
+.exp-checkbox-label input {
+  accent-color: var(--danger);
+}
+
+.exp-force-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.exp-select-row {
+  cursor: pointer;
+}
+
+.exp-select-row.is-disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1000px), (max-height: 720px) {
+  .exp-proc-list {
+    max-height: 220px;
+  }
+
+  .exp-proc-item {
+    flex-direction: column;
+  }
+
+  .exp-proc-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .exp-section-head {
+    flex-wrap: wrap;
+  }
 }

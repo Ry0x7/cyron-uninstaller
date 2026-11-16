@@ -663,7 +663,11 @@ fn cleanup_log_entry(report: &cleanup::CleanupReport, at: u64) -> cleanup::Clean
     cleanup::CleanupLogEntry {
         id: format!("cleanup-{}-{at}", report.run_id),
         at,
-        title: format!("Cleanup · {} locations", targets.len()),
+        title: format!(
+            "Cleanup · {} location{}",
+            targets.len(),
+            if targets.len() == 1 { "" } else { "s" }
+        ),
         targets,
         bytes: report.bytes,
         files: report.files,
@@ -695,7 +699,11 @@ fn failed_cleanup_log(
     cleanup::CleanupLogEntry {
         id: format!("cleanup-{run_id}-{at}"),
         at,
-        title: format!("Cleanup did not run · {} locations", targets.len()),
+        title: format!(
+            "Cleanup did not run · {} location{}",
+            targets.len(),
+            if targets.len() == 1 { "" } else { "s" }
+        ),
         targets,
         bytes: 0,
         files: 0,
@@ -987,8 +995,9 @@ pub async fn purge_quarantine(
         failed: 0,
         status: "completed".into(),
         detail: format!(
-            "{} files permanently removed · {} freed",
+            "{} {} permanently removed · {} freed",
             report.removed_files,
+            if report.removed_files == 1 { "file" } else { "files" },
             human_bytes(report.freed_bytes)
         ),
     };

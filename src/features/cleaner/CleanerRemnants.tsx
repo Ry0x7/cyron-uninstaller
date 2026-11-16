@@ -165,15 +165,30 @@ export function CleanerRemnants({
   };
 
   const removedHistory = (history ?? []).filter((record) => record.removedAt !== null);
+  const evidenceCount = (apps?.length ?? 0) + removedHistory.length;
   const sessionIds = new Set((apps ?? []).map((app) => app.id));
 
   return (
-    <Panel
-      title="Known removed applications"
-      subtitle="Review filesystem remnants tied to a verified removal, limited to the selected local drives. Registry review stays in Uninstaller."
-      flush
-    >
-      <div className="cl-remnants">
+    <details className="cl-remnants-block">
+      <summary className="cl-remnants-block__summary">
+        <span className="cl-remnants-block__title">Removed applications</span>
+        <span className="cl-remnants-block__detail">
+          Review filesystem evidence from a verified removal, or scan for an app removed before Cyron
+          was installed. Registry review stays in Applications.
+        </span>
+        <span className="cl-remnants-block__meta">
+          {evidenceCount > 0
+            ? `${evidenceCount} removal record${evidenceCount === 1 ? "" : "s"}`
+            : "No removal evidence yet"}
+        </span>
+      </summary>
+      <div className="cl-remnants-block__body">
+        <Panel
+          title="Known removed applications"
+          subtitle="Only reviewed removal evidence is scanned. Name-only matches stay caution and are never selected automatically."
+          flush
+        >
+          <div className="cl-remnants">
         {error && <Banner tone="danger">{error}</Banner>}
         {readOnly === true && (
           <Banner tone="accent">Read-only mode is on. You can scan and preview remnants, but the final quarantine action remains disabled.</Banner>
@@ -205,8 +220,8 @@ export function CleanerRemnants({
         )}
 
         <section aria-label="Persistent removal history">
-          <h4 style={{ fontSize: 13, margin: "4px 0" }}>Persistent removal history</h4>
-          <p className="cl-muted" style={{ marginTop: 0 }}>
+          <h4>Persistent removal history</h4>
+          <p className="cl-muted">
             These records survive restarts. History is evidence that an application was removed, not proof that any matching folder or registry key belongs to it.
           </p>
           {history === null ? (
@@ -239,12 +254,12 @@ export function CleanerRemnants({
         </section>
 
         <section aria-label="Scan an application removed earlier">
-          <h4 style={{ fontSize: 13, margin: "4px 0" }}>Scan an app removed earlier</h4>
-          <p className="cl-muted" style={{ marginTop: 0 }}>
+          <h4>Scan an app removed earlier</h4>
+          <p className="cl-muted">
             Use a name you know, plus a publisher or exact install path when you have one. Name-only matches remain caution and are never selected automatically; an exact path still needs your review. Cyron never deletes files from this step — selected candidates move to quarantine.
           </p>
-          <div style={{ display: "grid", gap: 8 }}>
-            <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+          <div className="cl-remnants__form">
+            <label className="cl-remnants__field">
               <span>Application name (required)</span>
               <input
                 value={manualName}
@@ -253,8 +268,8 @@ export function CleanerRemnants({
                 disabled={manualBusy}
               />
             </label>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
-              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+            <div className="cl-remnants__row">
+              <label className="cl-remnants__field">
                 <span>Publisher (optional)</span>
                 <input
                   value={manualPublisher}
@@ -263,7 +278,7 @@ export function CleanerRemnants({
                   disabled={manualBusy}
                 />
               </label>
-              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>
+              <label className="cl-remnants__field">
                 <span>Exact install path (optional)</span>
                 <input
                   value={manualPath}
@@ -297,7 +312,7 @@ export function CleanerRemnants({
             </div>
             {review.report.candidates.length === 0 ? (
               <p className="cl-muted">
-                No filesystem candidates under the selected drives met the evidence rules. Registry candidates and other drives remain available through Uninstaller review.
+                No filesystem candidates under the selected drives met the evidence rules. Registry candidates and other drives remain available through Applications review.
               </p>
             ) : (
               <ul className="cl-remnants__candidates">
@@ -338,8 +353,10 @@ export function CleanerRemnants({
               </Button>
             </div>
           </section>
-        )}
+            )}
+          </div>
+        </Panel>
       </div>
-    </Panel>
+    </details>
   );
 }

@@ -20,8 +20,8 @@ communication for non-technical users.
 | Frontend | React 19 + TypeScript, Vite 7, no router |
 | Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
 | Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json`, `recovery_journal.jsonl` and `quarantine/` in the Tauri app-data dir |
-| Frontend tests | Vitest, 98 tests in 12 files |
-| Backend tests | `cargo test`: 244 passed (202 library, 26 security, 5 cleanup-stress, 3 Phase 3 project, 1 real-system, 5 scanner-stress, 2 analyzer-actions), 4 ignored |
+| Frontend tests | Vitest, 100 tests in 12 files |
+| Backend tests | `cargo test`: 253 passed (210 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
 
 Native APIs used by the backend:
 
@@ -42,11 +42,13 @@ src/
   main.tsx                    React root + SettingsProvider
   components/ui.tsx           Button, Badge, Panel, Drawer, Segmented, Toggle, ...
   components/Icons.tsx        inline SVG icon set
-  features/overview/          storage, applications, cleanup, recent activity
-  features/uninstaller/       multi-source application inventory, uninstaller, batch queue, process manager & residual drawer
-  features/analyzer/          scan controls, treemap, tree, filters, duplicates, storage
-  features/cleaner/           review-first cache cleaner, preview drawer, execution, quarantine, restore & purge
-  features/activity/          local scan history
+  features/overview/          Home summary: system, volumes, applications, cleanup, recent activity
+  features/uninstaller/       Applications inventory, uninstaller, batch queue, process manager & residual drawer
+  features/analyzer/          Storage & Cleanup → Disk space: scan controls, treemap, tree, filters, duplicates, storage
+  features/cleaner/           Storage & Cleanup → Cleanup: caches, Projects, preview drawer, execution
+  features/storage/           Storage & Cleanup destination shell and page tabs
+  features/activity/          History & Recovery → Activity
+  features/history/          History & Recovery destination shell, Recovery and cleanup log
   features/performance/       live metrics, startup evidence, guided checks, baselines, optional trace
   features/settings/          theme, scan scope, exclusions, startup apps, Explorer integration, safety
   lib/api.ts                  typed invoke wrapper + cached cache-inventory request
@@ -58,6 +60,7 @@ src/
   lib/settings.tsx            persisted settings context
   lib/hooks.ts                useAsync, useDebouncedValue, useEscape
   styles/tokens.css           light/dark design tokens
+  styles/app.css              layout, panels, tables, forms and responsive rules
   styles/app.css              shell, primitives and shared layout
 src-tauri/
   src/apps.rs                 multi-source application discovery (Win32, Store/MSIX, Steam, Portable)
@@ -503,8 +506,14 @@ server-held scan, and `verify_developer_cleanup` re-measures them after a run.
 
 `App` owns the active view and a `visited` list. Visited views stay mounted but `hidden`, so an
 in-progress scan or a populated table survives navigation; there is no router dependency. The
-sidebar is collapsible (persisted under `cyron.sidebar.collapsed`), exposes `aria-current`, and
-offers a system/light/dark theme switch.
+sidebar has five primary destinations — Home, Applications, Storage & Cleanup, Performance, and
+History & Recovery — with Settings in the footer and a system/light/dark theme switch inside
+Settings. It is collapsible (persisted under `cyron.sidebar.collapsed`) and exposes `aria-current`.
+Hunter Mode is launched from **Find by window** inside Applications, not from navigation.
+
+The visual system is centralized in `src/styles/tokens.css`, shared primitives in
+`src/components/ui.tsx`, and the navigation and component rules in [DESIGN.md](DESIGN.md). Feature
+styles consume tokens instead of defining their own palette, radius or shadow scales.
 
 `SettingsProvider` reads `cyron.settings.v1`, writes changes back to localStorage, resolves
 `system` through `prefers-color-scheme`, and sets `data-theme` on `<html>`. Settings are:
@@ -514,18 +523,20 @@ automatically selecting anything; `readOnly` is pushed to the backend with `set_
 UI and the backend switch always agree (the backend also defaults to read-only on its own).
 
 `lib/api.ts` is the single IPC boundary. It rejects with a clear message when the app runs outside
-Tauri, normalizes errors, and memoizes `list_caches` so Overview and Cleaner share one measurement
-pass; `invalidateCaches()` forces the next request to run again after a cleanup changes files.
+Tauri, normalizes errors, and memoizes `list_caches` so Home and Storage & Cleanup share one
+measurement pass; `invalidateCaches()` forces the next request to run again after a cleanup changes
+files.
 
 ### Views
 
-- **Overview** joins volumes, application inventory, cache inventory and history. All figures come
-  from those responses; loading, error and empty states are explicit.
-- **Uninstaller** filters/sorts the registry inventory, shows missing sizes as "—" and opens a
-  drawer with metadata, real folder measurement and Explorer reveal.
-- **Analyzer** starts from volumes or the native folder picker, subscribes to progress events
-  filtered by a generated job id, supports cancel and cancels on unmount. Results are nodes held in
-  a stack for breadcrumbs. Three modes: **Map**, **Duplicates**, **Storage**.
+- **Home** joins volumes, application inventory, cache inventory and history. All figures come from
+  those responses; loading, error and empty states are explicit.
+- **Applications** filters/sorts the registry inventory, shows missing sizes as "—", opens a
+  drawer with metadata, real folder measurement and Explorer reveal, and launches Hunter Mode from
+  **Find by window**.
+- **Storage & Cleanup → Disk space** starts from volumes or the native folder picker, subscribes to
+  progress events filtered by a generated job id, supports cancel and cancels on unmount. Results
+  are nodes held in a stack for breadcrumbs. Tabs: **Map**, **Files**, **Duplicates**, **By type**.
 - **Treemap** measures its container with `ResizeObserver`, lays out children with
   `lib/treemap.ts`, and renders absolutely positioned buttons on a fixed dark canvas. File tiles
   are colored by extension category; folder tiles are neutral, aggregate nodes amber. Click
@@ -541,20 +552,26 @@ pass; `invalidateCaches()` forces the next request to run again after a cleanup 
   report cannot be shown as the new folder's result.
 - **Storage panel** presents categories, confidence, age buckets and insights, and states that
   observations are not removal guidance.
-- **Cleaner** groups cache targets into Windows / Applications / Developer tools / AI tools,
-  filters by risk, category and search, expands rows for path, impact and dates, and separates
-  protected data into a read-only section. Selecting targets opens a preview drawer that lists the
-  planned files (capped at 400 with an explicit note), skipped items, warnings and the quarantine
-  promise; a confirmation checkbox enables the run. Progress comes from `cyron-cleanup-progress`,
-  results are per item, and the Quarantine and History tabs drive restore, purge and the run log.
+- **Storage & Cleanup → Cleanup → Caches & leftovers** groups cache targets into Windows /
+  Applications / Developer tools / AI tools, filters by risk, category and search, expands rows for
+  path, impact and dates, and separates protected data into a read-only section. Selecting targets
+  opens a preview drawer that lists the planned files (capped at 400 with an explicit note),
+  skipped items, warnings and the quarantine promise; a confirmation checkbox enables the run.
+  Progress comes from `cyron-cleanup-progress` and results are per item.
   The **Projects** tab (`DeveloperStorage.tsx`) scans recognised repositories on the selected
   drives plus user-added folders, shows project activity, exact artifact evidence, rebuild/loss
   copy and protected components, and sends only selected server-held artifact ids into the same
   preview/cleanup engine. A successful run re-measures the selected artifacts and surfaces
   remaining files and restorable quarantine batches.
-- **Activity** lists persisted disk scans, with a two-step clear confirmation that Escape cancels.
+- **History & Recovery** combines **Activity** (persisted scans and cleanup runs with a two-step
+  clear confirmation that Escape cancels) and **Recovery** (quarantine restore/purge plus the
+  cleanup log). Opening Recovery refreshes quarantine so a just-finished run cannot look empty.
+- **Performance** (`features/performance/Performance.tsx`) renders measured system, disk, process,
+  startup and scheduled-task evidence, symptom guides, local baselines and the optional WPR trace.
+  All sampling is read-only; the only mutation is the existing reversible startup toggle.
 - **Settings** validates exclusions (drive-letter or UNC paths, no wildcards), debounces saving by
-  450 ms, and resets to defaults.
+  450 ms, and resets to defaults. Appearance, scanning, startup, Explorer and safety each have a
+  dedicated tab.
 
 The treemap layout is pure TypeScript (`squarify`) with no chart dependency; extension families,
 colors and labels live in `lib/categories.ts`.

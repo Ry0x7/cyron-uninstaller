@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorMessage, invalidateInstalledApps, loadInstalledApps } from "../../lib/api";
-import { formatBytes, formatCount, formatDate, formatDateTime, truncateMiddle } from "../../lib/format";
+import {
+  displayPath,
+  formatBytes,
+  formatCount,
+  formatDate,
+  formatDateTime,
+  truncateMiddle,
+} from "../../lib/format";
 import { useAsync, useDebouncedValue } from "../../lib/hooks";
 import type { BatchUninstallPlan, BatchUninstallReport, InstalledApp } from "../../lib/types";
 import {
@@ -10,7 +17,6 @@ import {
   Button,
   Drawer,
   EmptyState,
-  Eyebrow,
   Panel,
   SearchField,
   Segmented,
@@ -20,6 +26,8 @@ import {
 } from "../../components/ui";
 import {
   IconApps,
+  IconChevronDown,
+  IconChevronUp,
   IconCopy,
   IconFolder,
   IconLock,
@@ -27,6 +35,7 @@ import {
   IconRefresh,
   IconShield,
   IconTrash,
+  IconWindow,
 } from "../../components/Icons";
 import { AppDrawer } from "./AppDrawer";
 import { UninstallWizard, type UninstallMode } from "./UninstallWizard";
@@ -85,10 +94,12 @@ function normalizeSearch(value: string): string {
 export function Uninstaller({
   initialAppId,
   initialQuery,
+  onFindWindow,
 }: {
   initialAppId?: string | null;
   initialQuery?: string | null;
-} = {}) {
+  onFindWindow: () => void;
+}) {
   const inventory = useAsync(() => loadInstalledApps(), []);
   const [query, setQuery] = useState(initialQuery ?? "");
   const debouncedQuery = useDebouncedValue(query, 120);
@@ -325,11 +336,13 @@ export function Uninstaller({
   return (
     <>
       <ViewHeader
-        title="Uninstaller"
-        description="Application discovery, process termination, standard/MSI uninstaller execution, and review-first leftover scanning."
+        title="Applications"
+        description="See what is installed, find an app by its window, or remove it with a reviewed plan. Files stay recoverable until you purge them."
         actions={
           <>
-            <Badge tone="safe">Verified Engine</Badge>
+            <Button variant="primary" icon={<IconWindow size={15} />} onClick={onFindWindow}>
+              Find by window
+            </Button>
             <Button
               icon={<IconRefresh size={15} />}
               loading={inventory.status === "loading"}
@@ -345,11 +358,6 @@ export function Uninstaller({
       />
 
       <div className="view-body">
-        <Banner tone="accent">
-          <strong>Review-First Uninstaller.</strong> Select an application to view live processes,
-          launch its registered uninstaller, or scan and safely quarantine leftover files and registry keys.
-        </Banner>
-
         {warnings.length > 0 && (
           <Banner tone="caution">
             Some registry keys could not be read: {warnings.slice(0, 3).join(" · ")}
@@ -372,9 +380,16 @@ export function Uninstaller({
 
         <Panel
           title="Installed applications"
-          subtitle="Publisher, version, install date and size exactly as reported by each installer."
+          subtitle={`${formatCount(visible.length)} shown · reported by Windows and each installer`}
           flush
         >
+          <div className="un-inline-note">
+            <IconShield size={14} />
+            <span>
+              Uninstalling runs the vendor's own command. Leftovers are previewed first and moved to
+              a 7-day quarantine — never deleted silently.
+            </span>
+          </div>
           <div className="un-toolbar">
             <SearchField
               value={query}
@@ -388,23 +403,24 @@ export function Uninstaller({
               value={scope}
               onChange={setScope}
               options={[
-                { value: "all", label: "All scope", count: counts.all },
+                { value: "all", label: "All scopes", count: counts.all },
                 { value: "machine", label: "Machine", count: counts.machine },
                 { value: "user", label: "User", count: counts.user },
               ]}
             />
-            <Segmented
+            <Select
               ariaLabel="Filter by application source"
               value={sourceFilter}
               onChange={(val) => setSourceFilter(val as SourceFilter)}
               options={[
-                { value: "all", label: "All sources" },
-                { value: "win32", label: "Win32", count: counts.win32 },
-                { value: "store", label: "Store", count: counts.store },
-                { value: "steam", label: "Steam", count: counts.steam },
-                { value: "portable", label: "Portable", count: counts.portable },
-                { value: "broken", label: "Broken", count: counts.broken },
+                { value: "all", label: `All sources (${counts.all})` },
+                { value: "win32", label: `Win32 (${counts.win32})` },
+                { value: "store", label: `Microsoft Store (${counts.store})` },
+                { value: "steam", label: `Steam (${counts.steam})` },
+                { value: "portable", label: `Portable (${counts.portable})` },
+                { value: "broken", label: `Broken (${counts.broken})` },
               ]}
+              className="un-source"
             />
             <div className="un-toolbar__end">
               <span className="un-count" aria-live="polite">
@@ -460,6 +476,7 @@ export function Uninstaller({
                     onClick={() => {
                       setQuery("");
                       setScope("all");
+                      setSourceFilter("all");
                     }}
                   >
                     Clear filters
@@ -474,8 +491,8 @@ export function Uninstaller({
                   <col style={{ width: "36px" }} />
                   <col style={{ width: "26%" }} />
                   <col style={{ width: "18%" }} />
-                  <col style={{ width: "9%" }} />
-                  <col style={{ width: "11%" }} />
+                  <col className="un-col-version" style={{ width: "9%" }} />
+                  <col className="un-col-installed" style={{ width: "11%" }} />
                   <col style={{ width: "10%" }} />
                   <col style={{ width: "12%" }} />
                   <col style={{ width: "110px" }} />
@@ -503,7 +520,7 @@ export function Uninstaller({
                       <span className="un-th__content">
                         Application
                         {sort === "name" && (
-                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          <span className="un-sort-icon">{sortDirection === "asc" ? <IconChevronUp size={11} /> : <IconChevronDown size={11} />}</span>
                         )}
                       </span>
                     </th>
@@ -517,13 +534,13 @@ export function Uninstaller({
                       <span className="un-th__content">
                         Publisher
                         {sort === "publisher" && (
-                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          <span className="un-sort-icon">{sortDirection === "asc" ? <IconChevronUp size={11} /> : <IconChevronDown size={11} />}</span>
                         )}
                       </span>
                     </th>
                     <th
                       scope="col"
-                      className="un-th--sortable"
+                      className="un-th--sortable un-col-version"
                       onClick={() => handleSortHeader("version")}
                       aria-sort={sort === "version" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                       title="Sort by version"
@@ -531,13 +548,13 @@ export function Uninstaller({
                       <span className="un-th__content">
                         Version
                         {sort === "version" && (
-                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          <span className="un-sort-icon">{sortDirection === "asc" ? <IconChevronUp size={11} /> : <IconChevronDown size={11} />}</span>
                         )}
                       </span>
                     </th>
                     <th
                       scope="col"
-                      className="un-th--sortable"
+                      className="un-th--sortable un-col-installed"
                       onClick={() => handleSortHeader("installed")}
                       aria-sort={sort === "installed" ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
                       title="Sort by installation date"
@@ -545,7 +562,7 @@ export function Uninstaller({
                       <span className="un-th__content">
                         Installed
                         {sort === "installed" && (
-                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          <span className="un-sort-icon">{sortDirection === "asc" ? <IconChevronUp size={11} /> : <IconChevronDown size={11} />}</span>
                         )}
                       </span>
                     </th>
@@ -559,7 +576,7 @@ export function Uninstaller({
                       <span className="un-th__content un-th__content--numeric">
                         Size
                         {sort === "size" && (
-                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          <span className="un-sort-icon">{sortDirection === "asc" ? <IconChevronUp size={11} /> : <IconChevronDown size={11} />}</span>
                         )}
                       </span>
                     </th>
@@ -573,7 +590,7 @@ export function Uninstaller({
                       <span className="un-th__content">
                         Scope
                         {sort === "scope" && (
-                          <span className="un-sort-icon">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                          <span className="un-sort-icon">{sortDirection === "asc" ? <IconChevronUp size={11} /> : <IconChevronDown size={11} />}</span>
                         )}
                       </span>
                     </th>
@@ -617,16 +634,21 @@ export function Uninstaller({
                             )}
                             {app.name}
                           </span>
-                          <span className="cell-name__meta">
+                          <span
+                            className="cell-name__meta"
+                            title={app.installLocation ? displayPath(app.installLocation) : undefined}
+                          >
                             {app.installLocation
-                              ? truncateMiddle(app.installLocation, 58)
+                              ? truncateMiddle(displayPath(app.installLocation), 58)
                               : "No install location reported"}
                           </span>
                         </div>
                       </td>
-                      <td className="un-publisher">{app.publisher ?? "—"}</td>
-                      <td className="mono un-version">{app.version ?? "—"}</td>
-                      <td className="un-date">{formatDate(app.installDate)}</td>
+                      <td className="un-publisher" title={app.publisher ?? undefined}>
+                        {app.publisher ?? "—"}
+                      </td>
+                      <td className="mono un-version un-col-version">{app.version ?? "—"}</td>
+                      <td className="un-date un-col-installed">{formatDate(app.installDate)}</td>
                       <td
                         className="numeric"
                         title={
@@ -642,13 +664,8 @@ export function Uninstaller({
                           <Badge tone={app.source === "store" ? "accent" : app.source === "steam" ? "accent" : app.source === "portable" ? "caution" : "neutral"}>
                             {app.source === "store" ? "Store" : app.source === "steam" ? "Steam" : app.source === "portable" ? "Portable" : (app.scope === "machine" ? "Machine" : "User")}
                           </Badge>
-                          {app.source === "store" ? (
-                            <Badge tone="accent">AppX</Badge>
-                          ) : app.uninstallSupport === "missing" ? (
-                            <Badge tone="danger">Broken</Badge>
-                          ) : (
-                            <Badge tone="safe">Safe</Badge>
-                          )}
+                          {app.uninstallSupport === "missing" && <Badge tone="danger">Broken</Badge>}
+                          {app.isProtected && <Badge tone="caution">Protected</Badge>}
                           <span className="un-arch">{app.architecture === "x64" ? "64-bit" : app.architecture === "x86" ? "32-bit" : ""}</span>
                         </div>
                       </td>
@@ -848,8 +865,8 @@ export function Uninstaller({
       {batchOpen && (
         <Drawer
           open
-          title="Batch Uninstall"
-          subtitle={`Sequential execution for ${selectedApps.length} applications`}
+          title="Uninstall selected apps"
+          subtitle={`${selectedApps.length} applications run one after another`}
           onClose={() => { if (!batchRunning) setBatchOpen(false); }}
           footer={
             <>
@@ -900,8 +917,8 @@ export function Uninstaller({
             ) : batchPlan ? (
               <>
                 <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                  <Eyebrow>Queued applications ({batchPlan.items.length})</Eyebrow>
-                  <span className="mono" style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                  <span className="un-plan-label">Queued applications ({batchPlan.items.length})</span>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>
                     Plan expires {formatDateTime(batchPlan.expiresAt)}
                   </span>
                 </div>
@@ -925,7 +942,7 @@ export function Uninstaller({
                                     : "danger"
                                 }
                               >
-                                {itemRes.status.toUpperCase()}
+                                {itemRes.status.replaceAll("_", " ")}
                               </Badge>
                             ) : item.isValid ? (
                               <Badge tone="safe">Verified</Badge>
@@ -936,8 +953,8 @@ export function Uninstaller({
                         </div>
 
                         {item.isValid ? (
-                          <div className="mono" style={{ fontSize: 11, color: "var(--text-dim)", wordBreak: "break-all" }}>
-                            {item.executable} {item.arguments.join(" ")}
+                          <div className="mono" style={{ fontSize: 11, color: "var(--text-faint)", overflowWrap: "anywhere" }}>
+                            {displayPath(item.executable)} {item.arguments.join(" ")}
                           </div>
                         ) : (
                           <div style={{ fontSize: 12, color: "var(--danger)" }}>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Banner, Button, Drawer, KeyValue, ProgressBar } from "../../components/ui";
 import { api, errorMessage, invalidateCaches } from "../../lib/api";
-import { formatBytes, formatCount, formatDateTime } from "../../lib/format";
+import { displayPath, formatBytes, formatCount, formatDateTime, friendlyError, plural } from "../../lib/format";
 import type { AnalyzerAction, AnalyzerActionPreview, AnalyzerActionProgress, AnalyzerActionReport, ScanNode } from "../../lib/types";
 
 export function AnalyzerActions({ selected, onChanged, disabled = false, scope }: {
@@ -98,7 +98,7 @@ export function AnalyzerActions({ selected, onChanged, disabled = false, scope }
       <Button size="sm" variant="danger" disabled={disabled || !paths.length || busy || running} onClick={() => void review("permanent")}>Permanently delete…</Button>
       {paths.length > 0 && <Button size="sm" variant="ghost" disabled={busy || running} onClick={() => setPaths([])}>Clear selection</Button>}
       <p className="small muted">Select an item in the listing or treemap, then add it. Folders include their contents.</p>
-      {paths.length > 0 && <details><summary>Review selected paths</summary><ul>{paths.map((path) => <li key={path}><span className="mono">{path}</span>{" "}<Button size="sm" variant="ghost" disabled={busy || running} aria-label={`Exclude ${path}`} onClick={() => setPaths((previous) => previous.filter((entry) => entry !== path))}>Exclude</Button></li>)}</ul></details>}
+      {paths.length > 0 && <details><summary>Review selected paths</summary><ul>{paths.map((path) => <li key={path}><span className="mono">{displayPath(path)}</span>{" "}<Button size="sm" variant="ghost" disabled={busy || running} aria-label={`Exclude ${displayPath(path)}`} onClick={() => setPaths((previous) => previous.filter((entry) => entry !== path))}>Exclude</Button></li>)}</ul></details>}
     </div>
     <Drawer open={open} title={report ? "Filesystem results" : operation === "permanent" ? "Review permanent deletion" : "Review Recycle Bin move"}
       onClose={() => { if (!running) { generation.current += 1; setOpen(false); } }}
@@ -112,19 +112,19 @@ export function AnalyzerActions({ selected, onChanged, disabled = false, scope }
         <Banner tone="caution">{preview.operation === "permanent" ? "Cyron cannot restore permanently deleted data. This bypasses quarantine and the Recycle Bin." : "Windows manages recovery from the Recycle Bin. Recycling does not free disk space until the bin is emptied. If recycling is unavailable, Cyron reports the failure and does not permanently delete instead."}</Banner>
         <KeyValue items={[
           { label: "Operation", value: preview.operation === "permanent" ? "Permanent deletion" : "Move to Recycle Bin" },
-          { label: "Affected items", value: `${formatCount(preview.totalFiles)} files · ${formatCount(preview.totalDirs)} folders` },
+          { label: "Affected items", value: `${plural(preview.totalFiles, "file")} · ${plural(preview.totalDirs, "folder")}` },
           { label: "Estimated logical size", value: formatBytes(preview.totalBytes) },
           { label: "Review expires", value: formatDateTime(preview.expiresAt) },
         ]} />
-        <ul>{preview.targets.map((target) => <li key={target.path}><p className="mono az-action-path">{target.path}</p><span className="small">{formatBytes(target.bytes)} · {formatCount(target.files)} files · {formatCount(target.dirs)} folders</span></li>)}</ul>
-        {preview.warnings.map((warning) => <Banner key={warning} tone="caution">{warning}</Banner>)}
+        <ul>{preview.targets.map((target) => <li key={target.path}><p className="mono az-action-path">{displayPath(target.path)}</p><span className="small">{formatBytes(target.bytes)} · {plural(target.files, "file")} · {plural(target.dirs, "folder")}</span></li>)}</ul>
+        {preview.warnings.map((warning) => <Banner key={warning} tone="caution">{friendlyError(warning)}</Banner>)}
         <label className="row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />I reviewed these paths, contents and the selected operation.</label>
       </div>}
-      {running && <div className="stack" aria-live="polite"><ProgressBar label="Changing selected items" value={progress?.total ? progress.completed / progress.total : undefined} /><p>{progress ? `${progress.completed} of ${progress.total} items processed` : "Starting reviewed operation…"}</p><p className="mono az-action-path">{progress?.currentPath}</p><p>Cancellation stops between safe operations. Completed changes remain in effect.</p></div>}
+      {running && <div className="stack" aria-live="polite"><ProgressBar label="Changing selected items" value={progress?.total ? progress.completed / progress.total : undefined} /><p>{progress ? `${progress.completed} of ${progress.total} items processed` : "Starting reviewed operation…"}</p><p className="mono az-action-path">{progress?.currentPath ? displayPath(progress.currentPath) : null}</p><p>Cancellation stops between safe operations. Completed changes remain in effect.</p></div>}
       {report && <div className="stack" aria-live="polite">
-        <Banner tone={report.cancelled || report.items.some((item) => item.status !== "completed") ? "caution" : "safe"}>{report.cancelled ? "Stopped safely. " : "Operation finished. "}{formatCount(report.completedFiles)} files {report.operation === "recycle" ? "recycled" : "permanently deleted"}; {formatCount(report.completedDirs)} empty folders removed ({formatBytes(report.completedBytes)} logical bytes). Views are being rescanned.</Banner>
+        <Banner tone={report.cancelled || report.items.some((item) => item.status !== "completed") ? "caution" : "safe"}>{report.cancelled ? "Stopped safely. " : "Operation finished. "}{plural(report.completedFiles, "file")} {report.operation === "recycle" ? "recycled" : "permanently deleted"}; {plural(report.completedDirs, "empty folder")} removed ({formatBytes(report.completedBytes)} logical bytes). Views are being rescanned.</Banner>
         {report.operation === "recycle" && <p>Recycled bytes remain on disk until Windows empties the Recycle Bin.</p>}
-        <ul>{report.items.map((item) => <li key={item.path}><p className="mono az-action-path">{item.path}</p><strong>{item.status}</strong>{item.error && <p>{item.error}</p>}</li>)}</ul>
+        <ul>{report.items.map((item) => <li key={item.path}><p className="mono az-action-path">{displayPath(item.path)}</p><strong>{item.status}</strong>{item.error && <p>{item.error}</p>}</li>)}</ul>
       </div>}
     </Drawer>
   </>;

@@ -1,20 +1,30 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useAsync } from "../../lib/hooks";
-import { api, BACKEND_OFFLINE, invalidateCaches, invalidateInstalledApps, loadCaches, loadInstalledApps } from "../../lib/api";
+import {
+  api,
+  BACKEND_OFFLINE,
+  invalidateCaches,
+  invalidateInstalledApps,
+  loadCaches,
+  loadInstalledApps,
+} from "../../lib/api";
 import {
   formatBytes,
   formatCount,
   formatDate,
+  displayPath,
   formatPercent,
+  friendlyError,
+  operationTitle,
   plural,
   relativeTime,
 } from "../../lib/format";
 import type { CacheTarget, HistoryEntry, ViewId, VolumeInfo } from "../../lib/types";
 import {
+  Badge,
   Banner,
   Button,
   EmptyState,
-  Eyebrow,
   Panel,
   ProgressBar,
   RiskBadge,
@@ -29,7 +39,6 @@ import {
   IconApps,
   IconCleaner,
   IconClock,
-  IconCpu,
   IconDrive,
   IconRefresh,
   type IconProps,
@@ -56,11 +65,11 @@ function LoadingRows({ rows = 3 }: { rows?: number }) {
   return (
     <div aria-busy="true">
       {Array.from({ length: rows }, (_, index) => (
-        <div className="ov-skeleton-row" key={index}>
-          <Skeleton width={28} height={24} />
+        <div className="home-skeleton-row" key={index}>
+          <Skeleton width={30} height={26} />
           <div className="grow stack" style={{ gap: 5 }}>
-            <Skeleton width={`${64 - index * 9}%`} height={11} />
-            <Skeleton width="42%" height={9} />
+            <Skeleton width={`${62 - index * 8}%`} height={11} />
+            <Skeleton width="40%" height={9} />
           </div>
           <Skeleton width={48} height={11} />
         </div>
@@ -95,14 +104,14 @@ function StatusBadge({ entry }: { entry: HistoryEntry }) {
     entry.status === "completed" ? "safe" : entry.status === "cancelled" ? "caution" : "danger";
   const label =
     entry.status === "completed" ? "Done" : entry.status === "cancelled" ? "Cancelled" : "Failed";
-  return <span className={`badge badge--${tone}`}>{label}</span>;
+  return <Badge tone={tone}>{label}</Badge>;
 }
 
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
 }
@@ -140,20 +149,20 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
   const applicationData = applications.data ?? lastApplications;
   const cacheData = caches.data ?? lastCaches;
   const historyData = history.data ?? lastHistory;
-  const readyVolumes = [...new Map(
-    (volumeData ?? [])
-      .filter(
-        (volume) =>
-          volume.total > 0 &&
-          volume.free >= 0 &&
-          volume.free <= volume.total &&
-          volume.kind !== "network" &&
-          volume.kind !== "optical",
-      )
-      .map((volume) => [volume.mount.trim().toLowerCase(), volume] as const),
-  ).values()].sort(
-    (a, b) => kindRank(a.kind) - kindRank(b.kind) || a.mount.localeCompare(b.mount),
-  );
+  const readyVolumes = [
+    ...new Map(
+      (volumeData ?? [])
+        .filter(
+          (volume) =>
+            volume.total > 0 &&
+            volume.free >= 0 &&
+            volume.free <= volume.total &&
+            volume.kind !== "network" &&
+            volume.kind !== "optical",
+        )
+        .map((volume) => [volume.mount.trim().toLowerCase(), volume] as const),
+    ).values(),
+  ].sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.mount.localeCompare(b.mount));
   const totalCapacity = readyVolumes.reduce((sum, volume) => sum + volume.total, 0);
   const totalFree = readyVolumes.reduce((sum, volume) => sum + volume.free, 0);
   const totalUsed = Math.max(totalCapacity - totalFree, 0);
@@ -162,7 +171,6 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
   const apps = applicationData?.apps ?? [];
   const warnings = applicationData?.warnings ?? [];
   const machineCount = apps.filter((app) => app.scope === "machine").length;
-  // Sort by the parsed timestamp so unknown date formats cannot reorder rows.
   const recentInstalls = apps
     .map((app) => ({ app, at: app.installDate ? Date.parse(app.installDate) : Number.NaN }))
     .filter((entry) => Number.isFinite(entry.at))
@@ -181,7 +189,6 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
   const protectedBytes = inventory?.totalProtected ?? 0;
   const measuredLocations = existingTargets.length;
   const compositionBytes = safeBytes + cautionBytes + protectedBytes;
-  const cleanupTotal = compositionBytes;
   const compositionTotal = Math.max(compositionBytes, 1);
 
   const recentHistory = [...(historyData ?? [])].sort((a, b) => b.at - a.at).slice(0, 5);
@@ -193,7 +200,6 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
     (state) => state.status === "loading",
   );
 
-  // Activity clears history in this same window; drop the stale copy here.
   const reloadHistory = history.reload;
   useEffect(() => {
     const handler = () => reloadHistory();
@@ -211,12 +217,31 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
     history.reload();
   };
 
+  const systemItems = specsData
+    ? [
+        {
+          label: "OS",
+          value: `${specsData.osName || "Windows"}${
+            specsData.osBuild ? ` · ${specsData.osBuild}` : ""
+          }`,
+        },
+        { label: "Processor", value: specsData.cpuBrand || "Unknown" },
+        {
+          label: "Memory",
+          value: `${formatBytes(
+            specsData.totalMemoryBytes - specsData.availableMemoryBytes,
+          )} of ${formatBytes(specsData.totalMemoryBytes)} (${specsData.memoryInUsePercent}%)`,
+        },
+        { label: "Graphics", value: specsData.gpuBrand || "Standard display" },
+        { label: "Uptime", value: formatUptime(specsData.uptimeSeconds) },
+      ]
+    : [];
+
   return (
     <div>
       <ViewHeader
-        title="Overview"
-        meta={<span className="badge badge--neutral">Review-first</span>}
-        description="What is installed, where the space went, and what the known cache locations could give back. Cleaning is previewed before anything moves."
+        title="Home"
+        description="A clear summary of this PC: what is installed, where space goes, and what can be reclaimed safely."
         actions={
           <>
             <Button
@@ -232,7 +257,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
               icon={<IconAnalyzer size={15} />}
               onClick={() => onNavigate("analyzer")}
             >
-              Scan a folder
+              Open disk space
             </Button>
           </>
         }
@@ -254,107 +279,102 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
           </Banner>
         )}
 
-        <div className="ov-grid">
-          <Panel
-            className="ov-specs"
-            title="System & Hardware"
-            subtitle="Platform architecture, processor, memory pressure, and display adapters"
-            actions={
-              <div className="ov-panel-status">
-                {specs.status === "loading" && specsData && <span className="badge badge--neutral">Updating</span>}
-                {specs.status === "error" && specsData && specs.error !== BACKEND_OFFLINE && (
-                  <span className="badge badge--caution">Stale</span>
-                )}
-                {specsData && (
-                  <span className="badge badge--safe">
-                    Uptime: {formatUptime(specsData.uptimeSeconds)}
-                  </span>
-                )}
+        <section className="home-system" aria-label="This PC">
+          {systemItems.length > 0 &&
+            systemItems.map((item) => (
+              <div className="home-system__item" key={item.label}>
+                <span className="home-system__label">{item.label}</span>
+                <span className="home-system__value" title={item.value}>
+                  {item.value}
+                </span>
               </div>
+            ))}
+          {!specsData && specs.status === "loading" && (
+            <div className="home-system__loading" aria-busy="true">
+              <Skeleton width={220} height={11} />
+              <Skeleton width={180} height={11} />
+              <Skeleton width={140} height={11} />
+            </div>
+          )}
+          {!specsData && specs.status === "error" && specs.error !== BACKEND_OFFLINE && (
+            <div className="home-system__error">
+              <span>System details are unavailable.</span>
+              <Button size="sm" variant="ghost" onClick={specs.reload}>
+                Retry
+              </Button>
+            </div>
+          )}
+        </section>
+
+        <section className="home-stats" aria-label="At a glance">
+          <Stat
+            label="Free space"
+            value={
+              volumeData ? formatBytes(totalFree) : <Skeleton width={92} height={28} />
             }
-          >
-            {!specsData && specs.status === "loading" && <LoadingRows rows={2} />}
-            {specs.status === "error" && !specsData && specs.error && specs.error !== BACKEND_OFFLINE && (
-              <LoadError message={specs.error} onRetry={specs.reload} />
-            )}
-            {specsData && (
-              <div className="ov-specs__grid">
-                <div className="ov-specs__card">
-                  <span className="ov-specs__card-title">
-                    <IconApps size={14} /> Operating System
-                  </span>
-                  <span className="ov-specs__card-value">{specsData.osName || "Windows"}</span>
-                  <span className="ov-specs__card-sub">
-                    Build {specsData.osBuild || "Unknown"} ({specsData.osArchitecture})
-                  </span>
-                </div>
+            meta={volumeData ? `${formatPercent(usedRatio)} used of ${formatBytes(totalCapacity)}` : "Reading volumes"}
+          />
+          <Stat
+            label="Installed applications"
+            value={
+              applicationData ? formatCount(apps.length) : <Skeleton width={62} height={28} />
+            }
+            meta={
+              applicationData
+                ? `${formatCount(machineCount)} for all users · ${formatCount(
+                    apps.length - machineCount,
+                  )} for you`
+                : "Reading the registry"
+            }
+          />
+          <Stat
+            label="Can be regenerated"
+            value={
+              inventory ? formatBytes(safeBytes) : <Skeleton width={86} height={28} />
+            }
+            meta={
+              inventory
+                ? `across ${plural(measuredLocations, "measured location")}`
+                : "Measuring known caches"
+            }
+            tone="accent"
+          />
+        </section>
 
-                <div className="ov-specs__card">
-                  <span className="ov-specs__card-title">
-                    <IconCpu size={14} /> Processor
-                  </span>
-                  <span className="ov-specs__card-value">{specsData.cpuBrand || "Generic CPU"}</span>
-                  <span className="ov-specs__card-sub">
-                    {specsData.cpuLogicalCores} Logical Cores · {specsData.osArchitecture}
-                  </span>
-                </div>
-
-                <div className="ov-specs__card">
-                  <span className="ov-specs__card-title">
-                    <IconActivity size={14} /> Memory Pressure
-                  </span>
-                  <div className="spread" style={{ alignItems: "baseline" }}>
-                    <span className="ov-specs__card-value">
-                      {formatBytes(specsData.totalMemoryBytes - specsData.availableMemoryBytes)} / {formatBytes(specsData.totalMemoryBytes)}
-                    </span>
-                    <span className="mono small faint">{specsData.memoryInUsePercent}%</span>
-                  </div>
-                  <ProgressBar
-                    value={specsData.memoryInUsePercent / 100}
-                    label="Physical memory load"
-                    tone={specsData.memoryInUsePercent >= 85 ? "danger" : specsData.memoryInUsePercent >= 70 ? "caution" : "accent"}
-                  />
-                  <span className="ov-specs__card-sub">
-                    {formatBytes(specsData.availableMemoryBytes)} available
-                  </span>
-                </div>
-
-                <div className="ov-specs__card">
-                  <span className="ov-specs__card-title">
-                    <IconDrive size={14} /> Graphics Adapter
-                  </span>
-                  <span className="ov-specs__card-value truncate">
-                    {specsData.gpuBrand || "Standard Display Adapter"}
-                  </span>
-                  <span className="ov-specs__card-sub truncate">
-                    Direct3D / Vulkan hardware acceleration
-                  </span>
-                </div>
-              </div>
-            )}
-          </Panel>
-
+        <div className="home-grid">
           <Panel
-            className="ov-storage"
+            className="home-storage"
             title="Storage"
             subtitle="Capacity and free space on ready local volumes"
             actions={
-              <div className="ov-panel-status">
-                <Eyebrow>{volumeData ? `${formatCount(readyVolumes.length)} volumes` : "reading"}</Eyebrow>
-                {volumes.status === "loading" && volumeData && <span className="badge badge--neutral">Updating</span>}
-                {volumes.status === "error" && volumeData && volumes.error !== BACKEND_OFFLINE && <span className="badge badge--caution">Stale</span>}
-              </div>
+              <>
+                {volumes.status === "error" && volumeData && volumes.error !== BACKEND_OFFLINE && (
+                  <Badge tone="caution">Stale</Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconArrowUpRight size={13} />}
+                  onClick={() => onNavigate("analyzer")}
+                >
+                  Open disk space
+                </Button>
+              </>
             }
           >
             {!volumeData && volumes.status === "loading" && <LoadingRows rows={3} />}
             {volumes.status === "error" && volumeData && volumes.error !== BACKEND_OFFLINE && (
               <Banner tone="caution">
-                <strong>Showing the last successful volume reading.</strong> Refresh failed. {volumes.error}
+                <strong>Showing the last successful reading.</strong> Refresh failed.{" "}
+                {volumes.error}
               </Banner>
             )}
-            {volumes.status === "error" && !volumeData && volumes.error && volumes.error !== BACKEND_OFFLINE && (
-              <LoadError message={volumes.error} onRetry={volumes.reload} />
-            )}
+            {volumes.status === "error" &&
+              !volumeData &&
+              volumes.error &&
+              volumes.error !== BACKEND_OFFLINE && (
+                <LoadError message={volumes.error} onRetry={volumes.reload} />
+              )}
             {volumeData && readyVolumes.length === 0 && (
               <EmptyState
                 compact
@@ -370,46 +390,44 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
             )}
             {readyVolumes.length > 0 && (
               <>
-                <div className="ov-storage__summary">
-                  <Stat
-                    size="lg"
-                    label="Free space"
-                    value={formatBytes(totalFree)}
-                    meta={`across ${plural(readyVolumes.length, "volume")}`}
-                  />
-                  <div className="ov-storage__meter">
+                <div className="home-storage__summary">
+                  <div className="home-storage__label">
+                    <span className="home-subhead__title">
+                      {plural(readyVolumes.length, "volume")}
+                    </span>
+                    <span className="home-caption">
+                      {formatBytes(totalUsed)} used of {formatBytes(totalCapacity)}
+                    </span>
+                  </div>
+                  <div className="home-storage__meter">
                     <div className="spread">
-                      <Eyebrow>Used</Eyebrow>
-                      <span className="mono small muted">
-                        {formatBytes(totalUsed)} · {formatPercent(usedRatio)}
-                      </span>
+                      <span className="home-muted">Used</span>
+                      <span className="mono small muted">{formatPercent(usedRatio)}</span>
                     </div>
                     <ProgressBar
                       value={usedRatio}
                       label="Used space across all volumes"
                       tone={usedRatio >= 0.9 ? "caution" : "accent"}
                     />
-                    <span className="faint" style={{ fontSize: 10.5 }}>
-                      {formatBytes(totalCapacity)} total capacity
-                    </span>
                   </div>
                 </div>
 
-                <ul className="ov-volumes">
+                <ul className="home-volumes">
                   {readyVolumes.map((volume) => {
                     const volumeUsed = Math.max(volume.total - volume.free, 0);
                     const ratio = volumeUsed / volume.total;
                     const letter = volume.mount.replace(/[\\/]/g, "").replace(/:$/, "") || "?";
                     return (
-                      <li className="ov-volume" key={volume.mount}>
-                        <span className="ov-drive" aria-hidden="true">
+                      <li className="home-volume" key={volume.mount}>
+                        <span className="home-drive" aria-hidden="true">
                           {letter}:
                         </span>
-                        <div className="ov-volume__main">
-                          <div className="ov-volume__title">
+                        <div className="home-volume__main">
+                          <div className="home-volume__title">
                             <span className="truncate">{volumeName(volume)}</span>
-                            <span className="ov-volume__kind">
-                              {VOLUME_KIND[volume.kind] ?? "Volume"} · {volume.fileSystem || "unknown"}
+                            <span className="home-volume__kind">
+                              {VOLUME_KIND[volume.kind] ?? "Volume"} ·{" "}
+                              {volume.fileSystem || "unknown"}
                             </span>
                           </div>
                           <ProgressBar
@@ -418,7 +436,7 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
                             label={`${letter}: usage`}
                           />
                         </div>
-                        <div className="ov-volume__figures">
+                        <div className="home-volume__figures">
                           <span className="mono strong">{formatBytes(volume.free)} free</span>
                           <span className="mono faint">{formatBytes(volume.total)}</span>
                         </div>
@@ -431,36 +449,189 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
           </Panel>
 
           <Panel
-            className="ov-apps"
+            className="home-cleanup"
+            title="Cleanup potential"
+            subtitle="Known developer, AI and Windows caches measured on this PC"
+            actions={
+              <>
+                {caches.status === "error" && cacheData && caches.error !== BACKEND_OFFLINE && (
+                  <Badge tone="caution">Stale</Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconArrowUpRight size={13} />}
+                  onClick={() => onNavigate("cleaner")}
+                >
+                  Review cleanup
+                </Button>
+              </>
+            }
+          >
+            {!cacheData && caches.status === "loading" && <LoadingRows rows={3} />}
+            {caches.status === "error" && cacheData && caches.error && caches.error !== BACKEND_OFFLINE && (
+              <Banner tone="caution">
+                <strong>Showing the last successful measurement.</strong> Refresh failed.{" "}
+                {caches.error}
+              </Banner>
+            )}
+            {caches.status === "error" &&
+              !cacheData &&
+              caches.error &&
+              caches.error !== BACKEND_OFFLINE && (
+                <LoadError message={caches.error} onRetry={caches.reload} />
+              )}
+
+            {inventory && existingTargets.length === 0 && (
+              <EmptyState
+                compact
+                icon={IconCleaner}
+                title="No cache locations found"
+                description="None of the known developer or AI tool cache folders exist for this account yet."
+              />
+            )}
+
+            {inventory && inventory.warnings.length > 0 && (
+              <Banner tone="caution">
+                <strong>Some locations could not be measured.</strong>
+                <details className="home-warning-details">
+                  <summary>Review the blocked folders</summary>
+                  <ul className="home-warning-list">
+                    {[...new Set(inventory.warnings)].map((warning) => (
+                      <li key={warning}>{friendlyError(warning)}</li>
+                    ))}
+                  </ul>
+                </details>
+              </Banner>
+            )}
+
+            {inventory && existingTargets.length > 0 && (
+              <>
+                <div className="home-cleanup__head">
+                  <div className="home-cleanup__label">
+                    <span className="home-subhead__title">
+                      {formatBytes(compositionBytes)} measured
+                    </span>
+                    <span className="home-caption">
+                      Across {plural(measuredLocations, "location")}
+                    </span>
+                  </div>
+                  <div className="home-cleanup__side">
+                    <Stat label="Needs review" value={formatBytes(cautionBytes)} />
+                    <Stat label="Protected" value={formatBytes(protectedBytes)} />
+                  </div>
+                </div>
+
+                <div
+                  className="home-split"
+                  role="img"
+                  aria-label={`${formatBytes(safeBytes)} safe, ${formatBytes(
+                    cautionBytes,
+                  )} needs review, ${formatBytes(protectedBytes)} protected`}
+                >
+                  {safeBytes > 0 && (
+                    <span
+                      className="home-split__safe"
+                      style={{ width: `${(safeBytes / compositionTotal) * 100}%` }}
+                    />
+                  )}
+                  {cautionBytes > 0 && (
+                    <span
+                      className="home-split__caution"
+                      style={{ width: `${(cautionBytes / compositionTotal) * 100}%` }}
+                    />
+                  )}
+                  {protectedBytes > 0 && (
+                    <span
+                      className="home-split__protected"
+                      style={{ width: `${(protectedBytes / compositionTotal) * 100}%` }}
+                    />
+                  )}
+                </div>
+
+                <div className="home-legend">
+                  <span className="home-legend__item">
+                    <span className="home-dot home-dot--safe" />
+                    Regenerates
+                  </span>
+                  <span className="home-legend__item">
+                    <span className="home-dot home-dot--caution" />
+                    Re-download
+                  </span>
+                  <span className="home-legend__item">
+                    <span className="home-dot home-dot--protected" />
+                    Protected
+                  </span>
+                </div>
+
+                {compositionBytes === 0 && (
+                  <p className="home-note">
+                    Cache locations exist but hold no measurable bytes yet.
+                  </p>
+                )}
+
+                <ul className="home-list">
+                  {topTools.length === 0 && (
+                    <li className="home-row muted small">
+                      Cache locations exist but are currently empty.
+                    </li>
+                  )}
+                  {topTools.map((target) => (
+                    <li className="home-row" key={target.id}>
+                      <div className="home-row__main">
+                        <span className="home-row__title truncate">{target.tool}</span>
+                        <span className="home-row__meta truncate">{target.label}</span>
+                      </div>
+                      <span className="home-row__end">
+                        <RiskBadge risk={target.risk} />
+                        <span className="mono">{formatBytes(target.size)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                <p className="home-note">
+                  Measured {relativeTime(inventory.scannedAt).toLowerCase()}. Preview first; moved
+                  files stay restorable for seven days.
+                </p>
+              </>
+            )}
+          </Panel>
+
+          <Panel
+            className="home-apps"
             title="Applications"
             subtitle="Discovered from the Windows uninstall registry"
             actions={
               <>
-                {applications.status === "loading" && applicationData && (
-                  <span className="badge badge--neutral">Updating</span>
-                )}
-                {applications.status === "error" && applicationData && applications.error !== BACKEND_OFFLINE && (
-                  <span className="badge badge--caution">Stale</span>
-                )}
+                {applications.status === "error" &&
+                  applicationData &&
+                  applications.error !== BACKEND_OFFLINE && <Badge tone="caution">Stale</Badge>}
                 <Button
                   size="sm"
                   variant="ghost"
                   icon={<IconArrowUpRight size={13} />}
                   onClick={() => onNavigate("uninstaller")}
                 >
-                  Open uninstaller
+                  Open applications
                 </Button>
               </>
             }
           >
             {!applicationData && applications.status === "loading" && <LoadingRows rows={4} />}
-            {applications.status === "error" && applicationData && applications.error && applications.error !== BACKEND_OFFLINE && (
-              <Banner tone="caution">
-                <strong>Showing the last successful inventory.</strong> Refresh failed. {applications.error}
-              </Banner>
-            )}
-            {applications.status === "error" && !applicationData &&
-              applications.error && applications.error !== BACKEND_OFFLINE && (
+            {applications.status === "error" &&
+              applicationData &&
+              applications.error &&
+              applications.error !== BACKEND_OFFLINE && (
+                <Banner tone="caution">
+                  <strong>Showing the last successful inventory.</strong> Refresh failed.{" "}
+                  {applications.error}
+                </Banner>
+              )}
+            {applications.status === "error" &&
+              !applicationData &&
+              applications.error &&
+              applications.error !== BACKEND_OFFLINE && (
                 <LoadError message={applications.error} onRetry={applications.reload} />
               )}
 
@@ -474,57 +645,47 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
             )}
 
             {applicationData && warnings.length > 0 && (
-              <div style={{ paddingTop: 12 }}>
-                <Banner tone="caution">
-                  <strong>Partial inventory.</strong> {[...new Set(warnings)].join(" ")}
-                </Banner>
-              </div>
+              <Banner tone="caution">
+                <strong>Partial inventory.</strong> {[...new Set(warnings)].join(" ")}
+              </Banner>
             )}
 
             {apps.length > 0 && (
               <>
-                <div className="ov-apps__stats">
-                  <Stat
-                    size="lg"
-                    label="Installed"
-                    value={formatCount(apps.length)}
-                    meta="visible entries"
-                  />
-                  <Stat label="Machine" value={formatCount(machineCount)} meta="all users" />
-                  <Stat
-                    label="User"
-                    value={formatCount(apps.length - machineCount)}
-                    meta="current account"
-                  />
+                <div className="home-apps__stats">
+                  <Stat label="All users" value={formatCount(machineCount)} />
+                  <Stat label="This account" value={formatCount(apps.length - machineCount)} />
+                  <Stat label="With install date" value={formatCount(
+                    apps.filter(
+                      (app) => app.installDate && Number.isFinite(Date.parse(app.installDate)),
+                    ).length,
+                  )} />
                 </div>
-                <div className="ov-subhead">
-                  <Eyebrow>Recently installed</Eyebrow>
-                  <span className="faint" style={{ fontSize: 10.5 }}>
-                    InstallDate ·{" "}
-                    {
-                      apps.filter(
-                        (app) => app.installDate && Number.isFinite(Date.parse(app.installDate)),
-                      ).length
-                    }{" "}
-                    of {apps.length} entries
+                <div className="home-subhead">
+                  <span className="home-subhead__title">Recently installed</span>
+                  <span className="home-caption">
+                    {apps.filter(
+                      (app) => app.installDate && Number.isFinite(Date.parse(app.installDate)),
+                    ).length}{" "}
+                    of {apps.length} entries publish a date
                   </span>
                 </div>
                 {recentInstalls.length > 0 ? (
-                  <ul className="ov-list">
+                  <ul className="home-list">
                     {recentInstalls.map((app) => (
-                      <li className="ov-row" key={app.id}>
-                        <div className="ov-row__main">
-                          <span className="ov-row__title truncate">{app.name}</span>
-                          <span className="ov-row__meta truncate">
+                      <li className="home-row" key={app.id}>
+                        <div className="home-row__main">
+                          <span className="home-row__title truncate">{app.name}</span>
+                          <span className="home-row__meta truncate">
                             {app.publisher ?? "Unknown publisher"}
                           </span>
                         </div>
-                        <span className="ov-row__end mono">{formatDate(app.installDate)}</span>
+                        <span className="home-row__end mono">{formatDate(app.installDate)}</span>
                       </li>
                     ))}
                   </ul>
                 ) : (
-                  <p className="muted small" style={{ padding: "10px 0 2px" }}>
+                  <p className="home-note home-note--pad">
                     No install dates were published by these entries.
                   </p>
                 )}
@@ -533,166 +694,13 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
           </Panel>
 
           <Panel
-            className="ov-cleanup"
-            title="Cleanup potential"
-            subtitle="Developer, AI and Windows caches measured on this PC"
-            actions={
-              <>
-                {caches.status === "loading" && cacheData && <span className="badge badge--neutral">Updating</span>}
-                {caches.status === "error" && cacheData && caches.error !== BACKEND_OFFLINE && (
-                  <span className="badge badge--caution">Stale</span>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<IconArrowUpRight size={13} />}
-                  onClick={() => onNavigate("cleaner")}
-                >
-                  Review &amp; clean
-                </Button>
-              </>
-            }
-          >
-            {!cacheData && caches.status === "loading" && <LoadingRows rows={3} />}
-            {caches.status === "error" && cacheData && caches.error && caches.error !== BACKEND_OFFLINE && (
-              <Banner tone="caution">
-                <strong>Showing the last successful measurement.</strong> Refresh failed. {caches.error}
-              </Banner>
-            )}
-            {caches.status === "error" && !cacheData && caches.error && caches.error !== BACKEND_OFFLINE && (
-              <LoadError message={caches.error} onRetry={caches.reload} />
-            )}
-
-            {inventory && existingTargets.length === 0 && (
-              <EmptyState
-                compact
-                icon={IconCleaner}
-                title="No cache locations found"
-                description="None of the known developer or AI tool cache folders exist for this account."
-              />
-            )}
-
-            {inventory && inventory.warnings.length > 0 && (
-              <div style={{ paddingTop: 10 }}>
-                <Banner tone="caution">
-                  <strong>Some cache locations could not be measured.</strong>
-                  <ul className="ov-warning-list">
-                    {[...new Set(inventory.warnings)].map((warning) => (
-                      <li key={warning}>{warning}</li>
-                    ))}
-                  </ul>
-                </Banner>
-              </div>
-            )}
-
-            {inventory && existingTargets.length > 0 && (
-              <>
-                <div className="ov-cleanup__head">
-                  <Stat
-                    size="lg"
-                    tone="accent"
-                    label="Regenerable"
-                    value={formatBytes(safeBytes)}
-                    meta={`${formatBytes(cleanupTotal)} measured across ${plural(measuredLocations, "location")}`}
-                  />
-                  <div className="ov-cleanup__side">
-                    <Stat label="Review" value={formatBytes(cautionBytes)} />
-                    <Stat label="Protected · measured only" value={formatBytes(protectedBytes)} />
-                  </div>
-                </div>
-
-                <div
-                  className="ov-split"
-                  role="img"
-                  aria-label={`${formatBytes(safeBytes)} safe, ${formatBytes(cautionBytes)} needs review, ${formatBytes(protectedBytes)} protected`}
-                >
-                  {safeBytes > 0 && (
-                    <span
-                      style={{
-                        width: `${(safeBytes / compositionTotal) * 100}%`,
-                        background: "var(--safe)",
-                      }}
-                    />
-                  )}
-                  {cautionBytes > 0 && (
-                    <span
-                      style={{
-                        width: `${(cautionBytes / compositionTotal) * 100}%`,
-                        background: "var(--caution)",
-                      }}
-                    />
-                  )}
-                  {protectedBytes > 0 && (
-                    <span
-                      style={{
-                        width: `${(protectedBytes / compositionTotal) * 100}%`,
-                        background: "var(--text-faint)",
-                      }}
-                    />
-                  )}
-                </div>
-
-                <div className="ov-legend">
-                  <span className="ov-legend__item">
-                    <span className="ov-dot" style={{ background: "var(--safe)" }} />
-                    Regenerates
-                  </span>
-                  <span className="ov-legend__item">
-                    <span className="ov-dot" style={{ background: "var(--caution)" }} />
-                    Re-download
-                  </span>
-                  <span className="ov-legend__item">
-                    <span className="ov-dot" style={{ background: "var(--text-faint)" }} />
-                    Protected · measured only
-                  </span>
-                </div>
-
-                {compositionBytes === 0 && (
-                  <p className="ov-note">
-                    Cache locations exist but hold no measurable bytes yet.
-                  </p>
-                )}
-
-                <ul className="ov-list ov-cleanup__list">
-                  {topTools.length === 0 && (
-                    <li className="ov-row muted small">
-                      Cache locations exist but are currently empty.
-                    </li>
-                  )}
-                  {topTools.map((target) => (
-                    <li className="ov-row" key={target.id}>
-                      <div className="ov-row__main">
-                        <span className="ov-row__title truncate">{target.tool}</span>
-                        <span className="ov-row__meta truncate">{target.label}</span>
-                      </div>
-                      <span className="ov-row__end">
-                        <RiskBadge risk={target.risk} />
-                        <span className="mono">{formatBytes(target.size)}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                <p className="ov-note">
-                  Measured {relativeTime(inventory.scannedAt).toLowerCase()}. Cleaning is previewed
-                  first, then kept in a 7-day quarantine you can restore. Protected locations
-                  (histories, models, volumes) are never offered.
-                </p>
-              </>
-            )}
-          </Panel>
-
-          <Panel
-            className="ov-activity"
+            className="home-activity"
             title="Recent activity"
             subtitle="Scan and cleanup history from this computer"
             actions={
               <>
-                {history.status === "loading" && historyData && (
-                  <span className="badge badge--neutral">Updating</span>
-                )}
                 {history.status === "error" && historyData && history.error !== BACKEND_OFFLINE && (
-                  <span className="badge badge--caution">Stale</span>
+                  <Badge tone="caution">Stale</Badge>
                 )}
                 <Button
                   size="sm"
@@ -700,55 +708,71 @@ export function Overview({ onNavigate }: { onNavigate: (view: ViewId) => void })
                   icon={<IconArrowUpRight size={13} />}
                   onClick={() => onNavigate("activity")}
                 >
-                  View all
+                  View history
                 </Button>
               </>
             }
           >
             {!historyData && history.status === "loading" && <LoadingRows rows={4} />}
-            {history.status === "error" && historyData && history.error && history.error !== BACKEND_OFFLINE && (
-              <Banner tone="caution">
-                <strong>Showing the last successful history.</strong> Refresh failed. {history.error}
-              </Banner>
-            )}
-            {history.status === "error" && !historyData && history.error && history.error !== BACKEND_OFFLINE && (
-              <LoadError message={history.error} onRetry={history.reload} />
-            )}
+            {history.status === "error" &&
+              historyData &&
+              history.error &&
+              history.error !== BACKEND_OFFLINE && (
+                <Banner tone="caution">
+                  <strong>Showing the last successful history.</strong> Refresh failed.{" "}
+                  {history.error}
+                </Banner>
+              )}
+            {history.status === "error" &&
+              !historyData &&
+              history.error &&
+              history.error !== BACKEND_OFFLINE && (
+                <LoadError message={history.error} onRetry={history.reload} />
+              )}
 
             {historyData && recentHistory.length === 0 && (
               <EmptyState
                 compact
                 icon={IconClock}
                 title="No activity yet"
-                description="Run a disk analysis or a cleanup and Cyron records what happened, how long it took and what changed."
+                description="Run a disk scan or a cleanup and Cyron records what happened, how long it took and what changed."
                 action={
                   <Button
                     size="sm"
                     icon={<IconActivity size={13} />}
                     onClick={() => onNavigate("analyzer")}
                   >
-                    Open disk analyzer
+                    Open disk space
                   </Button>
                 }
               />
             )}
 
             {recentHistory.length > 0 && (
-              <ul className="ov-list">
+              <ul className="home-list">
                 {recentHistory.map((entry) => {
                   const Icon = historyIcon(entry.kind);
+                  const title = operationTitle(
+                    entry.title,
+                    entry.kind === "scan" ? "Disk scan" : "Cleanup",
+                  );
                   return (
-                    <li className="ov-row" key={entry.id}>
-                      <span className="ov-row__icon" aria-hidden="true">
+                    <li className="home-row" key={entry.id}>
+                      <span className="home-row__icon" aria-hidden="true">
                         <Icon size={14} />
                       </span>
-                      <div className="ov-row__main">
-                        <span className="ov-row__title truncate">{entry.title}</span>
-                        <span className="ov-row__meta truncate">
+                      <div className="home-row__main">
+                        <span className="home-row__title truncate" title={displayPath(entry.title)}>
+                          {title}
+                        </span>
+                        <span
+                          className="home-row__meta truncate"
+                          title={`${entry.detail} · ${relativeTime(entry.at)}`}
+                        >
                           {entry.detail} · {relativeTime(entry.at)}
                         </span>
                       </div>
-                      <span className="ov-row__end">
+                      <span className="home-row__end">
                         {entry.bytes > 0 && <span className="mono">{formatBytes(entry.bytes)}</span>}
                         <StatusBadge entry={entry} />
                       </span>
