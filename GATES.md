@@ -551,7 +551,7 @@ Acceptance contract recorded before implementation. Existing safety gates above 
 - [x] G89: typecheck, frontend tests, documentation check, production build and the native smoke run pass after the redesign.
   CHECK: `npm run typecheck`, `npm test`, `npm run docs:check`, `npm run build`, `npm run build:desktop`
   EXPECT: exit 0 and no regression in the existing frontend suite or documentation invariants
-  EVIDENCE: PASS. Typecheck exit 0; 100 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed; production build exit 0 (562.28 kB JS / 127.63 kB CSS, chunk-size warning only); `DOCS_CHECK: PASSED` over 79 Markdown files; `build:desktop` produced `src-tauri/target/debug/cyron.exe`; native smoke run exercised every destination and the keyboard/dialog checks above. Full command ledger in the [design-system receipt](docs/evidence/2026-11-17-design-system.md).
+  EVIDENCE: PASS. Typecheck exit 0; 100 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed; production build exit 0 (562.28 kB JS / 127.63 kB CSS, chunk-size warning only); `DOCS_CHECK: PASSED` over 79 Markdown files; `build:desktop` produced `src-tauri/target/debug/cyron.exe`; native smoke run exercised every destination and the keyboard/dialog checks above. Full command ledger in the [design-system receipt](docs/evidence/2026-11-17-design-system.md). GitHub Actions run [43953411889](https://github.com/Ry0x7/cyron-uninstaller/actions/runs/43953411889) passed both jobs on commit `2eeb91f`: frontend typecheck, 100 tests, `docs:check`, production build, Rust tests, security, cleanup-stress, cleanup fixture and RC1 E2E fixture.
 
 ## Not gated
 

@@ -17,12 +17,13 @@ Updated: 2026-11-17 (Phase 5 design-system rebuild; Phase 4, Phase 3, Phase 2 an
   `NotSigned`. The `CN=Chryypt Organization` certificate is self-signed (Subject == Issuer), so a
   locally signed build is cryptographically intact but not publicly trusted and earns no SmartScreen
   reputation. See [docs/CODE_SIGNING_POLICY.md](docs/CODE_SIGNING_POLICY.md).
-- **CI:** green. Run `43930569278` (commit `d5e5afc`, 2026-11-17) passed both jobs: typecheck, 98
-  Vitest tests, `docs:check` over 77 Markdown files, frontend build, full Rust suite, security and
-  cleanup-stress suites, cleanup fixture and RC1 E2E fixture. The prior run (`43200921453`) failed
-  only `docs:check` because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the
-  repository-local [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md),
-  and `scripts/verify-docs.mjs` rejects links into gitignored directories.
+- **CI:** green. Phase 5 run `43953411889` (commit `2eeb91f`, 2026-11-17) passed both jobs:
+  typecheck, 100 Vitest tests, `docs:check` over 79 Markdown files, frontend build, full Rust suite,
+  security and cleanup-stress suites, cleanup fixture and RC1 E2E fixture. The prior audit run
+  `43930569278` (commit `d5e5afc`) also passed both jobs. Run `43200921453` failed only `docs:check`
+  because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the repository-local
+  [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md), and
+  `scripts/verify-docs.mjs` rejects links into gitignored directories.
 
 ## 2. Phase 2 implementation state — 2026-11-16
 
