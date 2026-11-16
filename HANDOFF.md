@@ -4,7 +4,7 @@ Updated: 2026-11-17 (Performance diagnostics implementation; Phase 3, Phase 2 an
 
 ## 1. Current Verified State
 
-- **Branch:** `main`. This audit's changes are uncommitted. No commit, push, rebase, or release was made.
+- **Branch:** `main`. The audit is committed and pushed as `d5e5afc`; no rebase or release was made.
 - **Version:** `0.1.0`. `v0.1.0` is published with NSIS, MSI, portable EXE, and `SHA256SUMS.txt`.
 - **IPC surface:** 72 commands registered in `src-tauri/src/lib.rs` (including Phase 2
   `list_app_history`, `prepare_store_uninstall`, `execute_store_uninstall`, Phase 3
@@ -17,13 +17,12 @@ Updated: 2026-11-17 (Performance diagnostics implementation; Phase 3, Phase 2 an
   `NotSigned`. The `CN=Chryypt Organization` certificate is self-signed (Subject == Issuer), so a
   locally signed build is cryptographically intact but not publicly trusted and earns no SmartScreen
   reputation. See [docs/CODE_SIGNING_POLICY.md](docs/CODE_SIGNING_POLICY.md).
-- **CI:** the latest `main` run (`43200921453`, 2026-11-12) failed only `npm run docs:check`, because
-  `HANDOFF.md` linked to gitignored `.unlazy/capabilities/visual/visual-evidence.json`. The link and
-  every other `.unlazy` reference were replaced with the repository-local
-  [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md), and
-  `scripts/verify-docs.mjs` now rejects links into gitignored directories. The receipt and the
-  audit's new source files are untracked until the next commit. CI is not green until these changes
-  are committed, pushed and the workflow runs; local CI-equivalent commands pass.
+- **CI:** green. Run `43930569278` (commit `d5e5afc`, 2026-11-17) passed both jobs: typecheck, 98
+  Vitest tests, `docs:check` over 77 Markdown files, frontend build, full Rust suite, security and
+  cleanup-stress suites, cleanup fixture and RC1 E2E fixture. The prior run (`43200921453`) failed
+  only `docs:check` because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the
+  repository-local [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md),
+  and `scripts/verify-docs.mjs` rejects links into gitignored directories.
 
 ## 2. Phase 2 implementation state — 2026-11-16
 
@@ -139,20 +138,18 @@ installer test remain unexercised.
 
 ### P0 — release blockers
 
-1. **Prove CI green.** Commit and push this audit, then confirm `npm run docs:check`, typecheck, tests,
-   the frontend build, and the Rust suite pass in GitHub Actions. No push was performed here.
-2. **Resolve release signing trust.** `v0.1.0` is unsigned and the local certificate is self-signed.
+1. **Resolve release signing trust.** `v0.1.0` is unsigned and the local certificate is self-signed.
    Either obtain a publicly trusted Authenticode certificate or label every artifact explicitly as
    unsigned/self-signed in release notes. Files: `docs/BUILD_AND_SIGNING.md`,
    `docs/CODE_SIGNING_POLICY.md`, `scripts/sign-build.ps1`, `.github/workflows/release.yml`.
-3. **Re-run release verification after the next build.** The published bundles predate the fixes in
+2. **Re-run release verification after the next build.** The published bundles predate the fixes in
    this audit and the Phase 2/3 changes. Run `build:unsigned`, `verify:signatures`, `verify:metadata`,
    and `verify-release-bundles.mjs`, then test install/uninstall on a clean Windows VM.
-4. **Verify native Store and MSI removal end to end.** Use a disposable Windows profile and a
+3. **Verify native Store and MSI removal end to end.** Use a disposable Windows profile and a
    disposable MSI package. Confirm the Store plan revalidates identity, `RemovePackageAsync`
    reports truthfully, a denied current-user removal is not escalated, and 1605/1614 do not become
    `completed` without inventory evidence. These are UNVERIFIED today.
-5. **Verify the elevated performance paths.** Run one session as administrator to read the real
+4. **Verify the elevated performance paths.** Run one session as administrator to read the real
    Diagnostics-Performance boot impact and record/open a short WPR trace. The unelevated UI was
    verified to be honest and disabled; those two elevated paths are UNVERIFIED. Files: `perf.rs`,
    `src/features/performance/Performance.tsx`.
