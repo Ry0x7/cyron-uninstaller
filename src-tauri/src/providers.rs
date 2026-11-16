@@ -234,9 +234,9 @@ pub fn get_default_providers() -> Vec<CleanupProviderDef> {
         tool: "Ollama".into(),
         label: "Model weights cache".into(),
         path_template: r"%USERPROFILE%\.ollama\models\blobs".into(),
-        risk: CAUTION.into(),
+        risk: PROTECTED.into(),
         category: AI.into(),
-        impact: "Downloaded model weights. Cleaning frees multi-GB space but models must be pulled again.".into(),
+        impact: "Downloaded model weights. Cyron measures them but never selects a model because it is large.".into(),
         app_detection: None,
         patterns: vec!["*".into()],
     });
@@ -260,9 +260,9 @@ pub fn get_default_providers() -> Vec<CleanupProviderDef> {
         tool: "Hugging Face".into(),
         label: "Hub model cache".into(),
         path_template: r"%USERPROFILE%\.cache\huggingface\hub".into(),
-        risk: CAUTION.into(),
+        risk: PROTECTED.into(),
         category: AI.into(),
-        impact: "Cached model snapshots and tokenizer files. Re-downloaded on demand.".into(),
+        impact: "Hub model snapshots, datasets and token metadata. Use hf cache prune for reviewed unreferenced revisions; Cyron never cleans model weights.".into(),
         app_detection: None,
         patterns: vec!["*".into()],
     });
@@ -326,9 +326,9 @@ pub fn get_default_providers() -> Vec<CleanupProviderDef> {
         tool: "Rust Cargo".into(),
         label: "Crate archive cache".into(),
         path_template: r"%USERPROFILE%\.cargo\registry\cache".into(),
-        risk: SAFE.into(),
+        risk: CAUTION.into(),
         category: PACKAGES.into(),
-        impact: "Downloaded .crate archives. Re-downloaded during cargo build if missing.".into(),
+        impact: "Downloaded .crate archives. Removing them breaks offline builds until Cargo re-fetches them.".into(),
         app_detection: None,
         patterns: vec!["*".into()],
     });
@@ -378,9 +378,9 @@ pub fn get_default_providers() -> Vec<CleanupProviderDef> {
         tool: "Gradle".into(),
         label: "Dependency cache".into(),
         path_template: r"%USERPROFILE%\.gradle\caches".into(),
-        risk: SAFE.into(),
+        risk: CAUTION.into(),
         category: PACKAGES.into(),
-        impact: "Downloaded JAR/AAR dependencies. Re-downloaded when building with Gradle.".into(),
+        impact: "Downloaded JAR/AAR dependencies and build cache. Removing them forces a re-download and can break offline builds.".into(),
         app_detection: None,
         patterns: vec!["*".into()],
     });
@@ -392,9 +392,9 @@ pub fn get_default_providers() -> Vec<CleanupProviderDef> {
         tool: "VS Code".into(),
         label: "Workspace state cache".into(),
         path_template: r"%APPDATA%\Code\User\workspaceStorage".into(),
-        risk: SAFE.into(),
+        risk: PROTECTED.into(),
         category: IDE.into(),
-        impact: "Window UI state and search index for workspaces. Recreated on open.".into(),
+        impact: "Per-workspace extension state, including database-backed and chat extensions. Protected; never a cache target.".into(),
         app_detection: None,
         patterns: vec!["*".into()],
     });
@@ -405,9 +405,9 @@ pub fn get_default_providers() -> Vec<CleanupProviderDef> {
         tool: "Cursor".into(),
         label: "Workspace state cache".into(),
         path_template: r"%APPDATA%\Cursor\User\workspaceStorage".into(),
-        risk: SAFE.into(),
+        risk: PROTECTED.into(),
         category: IDE.into(),
-        impact: "Workspace editor state and cached indexing. Recreated on open.".into(),
+        impact: "Cursor stores chat history in per-workspace SQLite data here. Protected; never a cache target.".into(),
         app_detection: None,
         patterns: vec!["*".into()],
     });
@@ -553,6 +553,48 @@ mod tests {
             validate_provider(&p),
             Err(ProviderValidationError::ProtectedDataViolation(_))
         ));
+    }
+
+    #[test]
+    fn no_provider_marks_a_protected_catalog_path_cleanable() {
+        let providers = get_default_providers();
+        for definition in crate::caches::CATALOG
+            .iter()
+            .filter(|definition| definition.risk == "protected")
+        {
+            let Ok(protected) = crate::caches::resolve_template(definition.path) else {
+                continue;
+            };
+            for provider in &providers {
+                let Some(resolved) = resolve_path_template(&provider.path_template) else {
+                    continue;
+                };
+                if resolved.to_string_lossy().eq_ignore_ascii_case(&protected) {
+                    assert_eq!(
+                        provider.risk, PROTECTED,
+                        "provider {} marks protected catalog path {} as {}",
+                        provider.id, definition.id, provider.risk
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn model_and_workspace_providers_are_protected() {
+        let providers = get_default_providers();
+        for id in [
+            "ollama-models",
+            "huggingface-hub",
+            "vscode-workspace-storage",
+            "cursor-workspace-storage",
+        ] {
+            let provider = providers
+                .iter()
+                .find(|provider| provider.id == id)
+                .unwrap_or_else(|| panic!("missing provider {id}"));
+            assert_eq!(provider.risk, PROTECTED, "{id} must stay protected");
+        }
     }
 
     #[test]

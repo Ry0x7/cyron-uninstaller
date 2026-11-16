@@ -29,6 +29,18 @@ fn main() {
         }
 
         ShowWindow(hwnd, SW_SHOW);
+        // Keep the disposable window above other desktop windows so the
+        // WindowFromPoint check is deterministic on a busy desktop. The
+        // process exits at the end of the test, removing the topmost window.
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
 
         let pid = std::process::id();
         println!("TARGET_HWND:{:p} PID:{}", hwnd, pid);

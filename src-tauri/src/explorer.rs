@@ -1099,18 +1099,24 @@ pub fn prepare_kill_process_plan(exe_path_str: &str) -> Result<KillProcessPlanPr
                         if let Some(ref p) = path {
                             let p_key = crate::process::normalize_key(Path::new(p)).to_ascii_lowercase();
                             if p_key == target_key {
-                                let is_critical = crate::process::is_critical_process(pid, &name, Some(p));
-                                let creation_time = crate::process::get_process_creation_time(pid).unwrap_or(0);
-                                let title = crate::process::find_window_title(pid);
+                                // A process whose creation time cannot be read cannot
+                                // be bound to a verified plan, so it is not offered.
+                                if let Some(creation_time) = crate::process::get_process_creation_time(pid)
+                                    .filter(|time| *time != 0)
+                                {
+                                    let is_critical =
+                                        crate::process::is_critical_process(pid, &name, Some(p));
+                                    let title = crate::process::find_window_title(pid);
 
-                                matches.push(LockingProcessInfo {
-                                    pid,
-                                    name,
-                                    path: Some(p.clone()),
-                                    window_title: title,
-                                    is_critical,
-                                    creation_time,
-                                });
+                                    matches.push(LockingProcessInfo {
+                                        pid,
+                                        name,
+                                        path: Some(p.clone()),
+                                        window_title: title,
+                                        is_critical,
+                                        creation_time,
+                                    });
+                                }
                             }
                         }
                     }
@@ -1149,6 +1155,7 @@ fn remove_dir_contents_safe(
     warnings: &mut Vec<String>,
     deleted_files: &mut u64,
     deleted_dirs: &mut u64,
+    deleted_bytes: &mut u64,
 ) {
     let Ok(entries) = std::fs::read_dir(dir) else { return; };
     for entry in entries.flatten() {
@@ -1162,7 +1169,13 @@ fn remove_dir_contents_safe(
                     warnings.push(format!("Could not remove link: {}", path.display()));
                 }
             } else if meta.is_dir() {
-                remove_dir_contents_safe(&path, warnings, deleted_files, deleted_dirs);
+                remove_dir_contents_safe(
+                    &path,
+                    warnings,
+                    deleted_files,
+                    deleted_dirs,
+                    deleted_bytes,
+                );
                 clear_readonly_attribute(&path);
                 if std::fs::remove_dir(&path).is_ok() {
                     *deleted_dirs += 1;
@@ -1170,14 +1183,32 @@ fn remove_dir_contents_safe(
                     warnings.push(format!("Could not remove folder: {}", path.display()));
                 }
             } else {
+                let size = meta.len();
                 clear_readonly_attribute(&path);
                 if std::fs::remove_file(&path).is_ok() {
                     *deleted_files += 1;
+                    *deleted_bytes += size;
                 } else {
                     warnings.push(format!("Could not remove file: {}", path.display()));
                 }
             }
         }
+    }
+}
+
+/// Compares volume prefixes so the caller can choose between an atomic rename
+/// and a copy-then-delete quarantine fallback.
+fn same_volume(left: &Path, right: &Path) -> bool {
+    use std::path::Component;
+    let prefix = |path: &Path| match path.components().next() {
+        Some(Component::Prefix(prefix)) => {
+            Some(prefix.as_os_str().to_string_lossy().to_ascii_lowercase())
+        }
+        _ => None,
+    };
+    match (prefix(left), prefix(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
     }
 }
 
@@ -1253,37 +1284,114 @@ pub fn execute_force_delete(
             .map_err(|e| format!("Failed to create quarantine folder: {e}"))?;
 
         let dest = batch_dir.join(&target_name);
+        let manifest_item = crate::cleanup::ManifestItem {
+            original_path: plan.canonical_path.to_string_lossy().to_string(),
+            stored_path: dest.to_string_lossy().to_string(),
+            size: plan.inspection.size_bytes,
+        };
+        let journal_path = batch_dir.join(crate::cleanup::JOURNAL_FILE);
+        let open_journal = || -> Result<std::fs::File, String> {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&journal_path)
+                .map_err(|error| {
+                    format!("Could not open the quarantine recovery journal: {error}")
+                })
+        };
 
         clear_readonly_attribute(&plan.canonical_path);
 
-        let move_ok = std::fs::rename(&plan.canonical_path, &dest).is_ok();
-        if !move_ok {
-            if plan.is_directory {
-                copy_dir_recursive(&plan.canonical_path, &dest)?;
-                let mut dummy_files = 0;
-                let mut dummy_dirs = 0;
-                remove_dir_contents_safe(&plan.canonical_path, &mut warnings, &mut dummy_files, &mut dummy_dirs);
-                clear_readonly_attribute(&plan.canonical_path);
-                let _ = std::fs::remove_dir(&plan.canonical_path);
-            } else {
-                std::fs::copy(&plan.canonical_path, &dest)
-                    .map_err(|e| format!("Could not copy file to quarantine: {e}"))?;
-                clear_readonly_attribute(&plan.canonical_path);
-                std::fs::remove_file(&plan.canonical_path)
-                    .map_err(|e| format!("Could not remove original after copying to quarantine: {e}"))?;
+        let mut journal = match open_journal() {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                return Err(error);
+            }
+        };
+
+        if same_volume(&plan.canonical_path, quarantine_root) {
+            // Journal first: the rename is atomic, so a crash leaves either the
+            // original untouched or a recorded quarantine entry.
+            if let Err(error) =
+                crate::cleanup::append_journal_entry_file(&mut journal, &manifest_item)
+            {
+                drop(journal);
+                let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                return Err(error);
+            }
+            if std::fs::rename(&plan.canonical_path, &dest).is_err() {
+                // The failed rename changed nothing. Restart the journal so a
+                // crash during the copy fallback cannot advertise a partial copy.
+                drop(journal);
+                let _ = std::fs::remove_file(&journal_path);
+                if let Err(error) =
+                    copy_into_quarantine(&plan.canonical_path, &dest, plan.is_directory)
+                {
+                    let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                    return Err(error);
+                }
+                journal = match open_journal() {
+                    Ok(file) => file,
+                    Err(error) => {
+                        let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                        return Err(error);
+                    }
+                };
+                if let Err(error) =
+                    crate::cleanup::append_journal_entry_file(&mut journal, &manifest_item)
+                {
+                    drop(journal);
+                    let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                    return Err(error);
+                }
+                if let Err(error) = remove_original_after_copy(
+                    &plan.canonical_path,
+                    plan.is_directory,
+                    &mut warnings,
+                ) {
+                    drop(journal);
+                    let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                    return Err(error);
+                }
+            }
+        } else {
+            // Cross-volume: copy first. The originals stay untouched until the
+            // journal records the completed copy.
+            if let Err(error) = copy_into_quarantine(
+                &plan.canonical_path,
+                &dest,
+                plan.is_directory,
+            ) {
+                drop(journal);
+                let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                return Err(error);
+            }
+            if let Err(error) =
+                crate::cleanup::append_journal_entry_file(&mut journal, &manifest_item)
+            {
+                drop(journal);
+                let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                return Err(error);
+            }
+            if let Err(error) = remove_original_after_copy(
+                &plan.canonical_path,
+                plan.is_directory,
+                &mut warnings,
+            ) {
+                drop(journal);
+                let _ = crate::cleanup::remove_entry_no_follow(&batch_dir);
+                return Err(error);
             }
         }
+        drop(journal);
 
         let manifest = crate::cleanup::BatchManifest {
             run_id: batch_id.clone(),
             created_at: now,
             expires_at: now + 7 * 86400,
             target_ids: vec!["force-delete".to_string()],
-            items: vec![crate::cleanup::ManifestItem {
-                original_path: plan.canonical_path.to_string_lossy().to_string(),
-                stored_path: target_name.clone(),
-                size: plan.inspection.size_bytes,
-            }],
+            items: vec![manifest_item],
             registry_backup: None,
             registry_key_path: None,
             hive: None,
@@ -1292,28 +1400,46 @@ pub fn execute_force_delete(
             backup_sha256: None,
             backup_size_bytes: None,
         };
-        let manifest_str = serde_json::to_string_pretty(&manifest).unwrap_or_default();
-        let _ = std::fs::write(batch_dir.join(crate::cleanup::MANIFEST), manifest_str);
+        if let Err(error) = crate::cleanup::write_manifest(&batch_dir, &manifest) {
+            warnings.push(format!(
+                "The quarantined copy is recorded in the recovery journal, but the manifest could not be finalized: {error}"
+            ));
+        }
 
+        let success = warnings.is_empty();
         Ok(ForceDeleteResult {
-            success: true,
+            success,
             mode: "quarantine".into(),
             deleted_files: plan.inspection.file_count,
             deleted_dirs: plan.inspection.dir_count,
-            freed_bytes: plan.inspection.size_bytes,
+            freed_bytes: if success { plan.inspection.size_bytes } else { 0 },
             quarantine_batch_id: Some(batch_id),
-            message: format!(
-                "Successfully quarantined '{}' (restorable for 7 days in Cleaner Quarantine).",
-                target_name
-            ),
+            message: if success {
+                format!(
+                    "Successfully quarantined '{}' (restorable for 7 days in Cleaner Quarantine).",
+                    target_name
+                )
+            } else {
+                format!(
+                    "Quarantined '{}' with warnings. Review the batch in Cleaner Quarantine before purging.",
+                    target_name
+                )
+            },
             warnings,
         })
-    } else {
+    } else if mode == "permanent" {
         let mut deleted_files = 0u64;
         let mut deleted_dirs = 0u64;
+        let mut deleted_bytes = 0u64;
 
         if plan.is_directory {
-            remove_dir_contents_safe(&plan.canonical_path, &mut warnings, &mut deleted_files, &mut deleted_dirs);
+            remove_dir_contents_safe(
+                &plan.canonical_path,
+                &mut warnings,
+                &mut deleted_files,
+                &mut deleted_dirs,
+                &mut deleted_bytes,
+            );
             clear_readonly_attribute(&plan.canonical_path);
             if std::fs::remove_dir(&plan.canonical_path).is_ok() {
                 deleted_dirs += 1;
@@ -1321,25 +1447,79 @@ pub fn execute_force_delete(
                 warnings.push(format!("Could not remove root folder: {}", plan.canonical_path.display()));
             }
         } else {
+            let size = std::fs::metadata(&plan.canonical_path)
+                .map(|meta| meta.len())
+                .unwrap_or(0);
             clear_readonly_attribute(&plan.canonical_path);
             std::fs::remove_file(&plan.canonical_path)
                 .map_err(|e| format!("Windows refused to permanently delete file: {e}"))?;
             deleted_files += 1;
+            deleted_bytes = size;
         }
 
+        let success = warnings.is_empty();
         Ok(ForceDeleteResult {
-            success: true,
+            success,
             mode: "permanent".into(),
             deleted_files,
             deleted_dirs,
-            freed_bytes: plan.inspection.size_bytes,
+            freed_bytes: deleted_bytes,
             quarantine_batch_id: None,
-            message: format!(
-                "Permanently deleted '{}' ({} items freed).",
-                target_name,
-                deleted_files + deleted_dirs
-            ),
+            message: if success {
+                format!(
+                    "Permanently deleted '{}' ({} items freed).",
+                    target_name,
+                    deleted_files + deleted_dirs
+                )
+            } else {
+                format!(
+                    "Permanently deleted part of '{}': {} files and {} folders removed, with {} warning(s).",
+                    target_name,
+                    deleted_files,
+                    deleted_dirs,
+                    warnings.len()
+                )
+            },
             warnings,
+        })
+    } else {
+        Err(format!(
+            "Unknown force delete mode '{mode}'. Use quarantine or permanent."
+        ))
+    }
+}
+
+fn copy_into_quarantine(source: &Path, dest: &Path, is_directory: bool) -> Result<(), String> {
+    if is_directory {
+        copy_dir_recursive(source, dest)
+    } else {
+        std::fs::copy(source, dest)
+            .map(|_| ())
+            .map_err(|error| format!("Could not copy file to quarantine: {error}"))
+    }
+}
+
+fn remove_original_after_copy(
+    source: &Path,
+    is_directory: bool,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
+    if is_directory {
+        let mut files = 0;
+        let mut dirs = 0;
+        let mut bytes = 0;
+        remove_dir_contents_safe(source, warnings, &mut files, &mut dirs, &mut bytes);
+        clear_readonly_attribute(source);
+        if let Err(error) = std::fs::remove_dir(source) {
+            warnings.push(format!(
+                "Could not remove the original folder after copying it to quarantine: {error}"
+            ));
+        }
+        Ok(())
+    } else {
+        clear_readonly_attribute(source);
+        std::fs::remove_file(source).map_err(|error| {
+            format!("Could not remove original after copying to quarantine: {error}")
         })
     }
 }
@@ -1449,6 +1629,94 @@ mod tests {
         let check = is_protected_delete_target(&temp_dir);
         let _ = std::fs::remove_dir(&temp_dir);
         assert!(check.is_ok());
+    }
+
+    fn disposable_fixture(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-explorer-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn directory_plan(target: &Path) -> StoredForceDeletePlan {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        StoredForceDeletePlan {
+            plan_id: "fd-test".into(),
+            target_path: target.to_path_buf(),
+            canonical_path: target.canonicalize().unwrap(),
+            is_directory: true,
+            expires_at: now + 600,
+            inspection: inspect_target(target).unwrap(),
+            locking_processes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn quarantine_writes_journal_and_restores_a_folder() {
+        let root = disposable_fixture("quarantine-restore");
+        let target = root.join("disposable-folder");
+        std::fs::create_dir_all(target.join("nested")).unwrap();
+        std::fs::write(target.join("nested").join("file.txt"), b"disposable").unwrap();
+
+        let plan = directory_plan(&target);
+        let quarantine = root.join("quarantine");
+        let report = execute_force_delete(&plan, "quarantine", &quarantine).unwrap();
+        let batch_id = report.quarantine_batch_id.clone().unwrap();
+        let batch_dir = quarantine.join(&batch_id);
+
+        assert!(!target.exists(), "the target should have moved");
+        assert!(report.success, "unexpected warnings: {:?}", report.warnings);
+        assert!(batch_dir.join(crate::cleanup::JOURNAL_FILE).exists());
+        assert!(batch_dir.join(crate::cleanup::MANIFEST).exists());
+
+        let restore = crate::cleanup::restore_batch(&quarantine, &batch_id).unwrap();
+        assert_eq!(restore.restored, 1);
+        assert_eq!(restore.failed, 0);
+        assert_eq!(
+            std::fs::read(target.join("nested").join("file.txt")).unwrap(),
+            b"disposable"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn purge_removes_a_quarantined_folder_entry() {
+        let root = disposable_fixture("quarantine-purge");
+        let target = root.join("disposable-folder");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("file.txt"), b"disposable").unwrap();
+
+        let plan = directory_plan(&target);
+        let quarantine = root.join("quarantine");
+        let report = execute_force_delete(&plan, "quarantine", &quarantine).unwrap();
+        let batch_id = report.quarantine_batch_id.unwrap();
+
+        let purge = crate::cleanup::purge_batch(&quarantine, &batch_id).unwrap();
+        assert_eq!(purge.removed_files, 1);
+        assert!(!quarantine.join(&batch_id).exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_an_unknown_force_delete_mode() {
+        let root = disposable_fixture("unknown-mode");
+        let target = root.join("disposable-file.txt");
+        std::fs::write(&target, b"disposable").unwrap();
+        let plan = directory_plan(&root);
+
+        let result = execute_force_delete(&plan, "everything", &root.join("quarantine"));
+        assert!(result.is_err());
+        assert!(target.exists(), "an unknown mode must not modify the target");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

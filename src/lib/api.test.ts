@@ -97,6 +97,38 @@ describe("Tauri IPC contract", () => {
     }
   });
 
+  it("uses the Phase 3 developer project command names and payloads", async () => {
+    const calls = [
+      {
+        run: () => api.scanDeveloperStorage(["C:\\code"], ["C"]),
+        command: "scan_developer_storage",
+        args: { roots: ["C:\\code"], driveLetters: ["C"] },
+      },
+      {
+        run: () => api.scanDeveloperStorage([], undefined),
+        command: "scan_developer_storage",
+        args: { roots: [] },
+      },
+      {
+        run: () => api.previewDeveloperCleanup("devscan-1", ["artifact-1"], ["C:\\keep"]),
+        command: "preview_developer_cleanup",
+        args: { scanId: "devscan-1", artifactIds: ["artifact-1"], exclusions: ["C:\\keep"] },
+      },
+      {
+        run: () => api.verifyDeveloperCleanup("devscan-1", ["artifact-1"]),
+        command: "verify_developer_cleanup",
+        args: { scanId: "devscan-1", artifactIds: ["artifact-1"] },
+      },
+    ];
+
+    for (const { run, command, args } of calls) {
+      invoke.mockClear();
+      invoke.mockResolvedValue(undefined);
+      await run();
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(command, args);
+    }
+  });
+
   it("uses the Phase 4 uninstall and leftover commands and payloads", async () => {
     const calls = [
       { run: () => api.discoverAppProcesses("app-1"), command: "discover_app_processes", args: { appId: "app-1" } },
@@ -107,7 +139,8 @@ describe("Tauri IPC contract", () => {
       { run: () => api.scanAppLeftovers("app-1"), command: "scan_app_leftovers", args: { appId: "app-1" } },
       { run: () => api.cleanAppLeftovers("app-1", "plan-1", ["c1"]), command: "clean_app_leftovers", args: { appId: "app-1", planId: "plan-1", candidateIds: ["c1"] } },
       { run: () => api.snapshotAppIdentity("app-1"), command: "snapshot_app_identity", args: { appId: "app-1" } },
-      { run: () => api.uninstallStoreApp("store|Microsoft.Test_1.0_x64"), command: "uninstall_store_app", args: { appId: "store|Microsoft.Test_1.0_x64" } },
+      { run: () => api.prepareStoreUninstall("store|Microsoft.Test_abc"), command: "prepare_store_uninstall", args: { appId: "store|Microsoft.Test_abc" } },
+      { run: () => api.executeStoreUninstall("store-plan-1"), command: "execute_store_uninstall", args: { planId: "store-plan-1" } },
       { run: () => api.prepareForcedRemovalCleanup("app-1"), command: "prepare_forced_removal_cleanup", args: { appId: "app-1" } },
       { run: () => api.executeForcedRemovalCleanup("plan-1", "HKCU\\test"), command: "execute_forced_removal_cleanup", args: { planId: "plan-1", confirmedKeyPath: "HKCU\\test" } },
       { run: () => api.prepareBrokenInventoryCleanup("app-1"), command: "prepare_broken_inventory_cleanup", args: { appId: "app-1" } },
@@ -146,6 +179,13 @@ describe("Tauri IPC contract", () => {
       { run: () => api.getSystemSpecs(), command: "get_system_specs", args: undefined },
       { run: () => api.listStartupItems(), command: "list_startup_items", args: undefined },
       { run: () => api.setStartupItemEnabled("startup-1", false), command: "set_startup_item_enabled", args: { id: "startup-1", enabled: false } },
+      { run: () => api.capturePerformanceSnapshot(), command: "capture_performance_snapshot", args: { forceStartup: false } },
+      { run: () => api.capturePerformanceSnapshot(true), command: "capture_performance_snapshot", args: { forceStartup: true } },
+      { run: () => api.listPerformanceBaselines(), command: "list_performance_baselines", args: undefined },
+      { run: () => api.recordPerformanceBaseline("Before cleanup"), command: "record_performance_baseline", args: { label: "Before cleanup" } },
+      { run: () => api.startPerformanceTrace(), command: "start_performance_trace", args: undefined },
+      { run: () => api.stopPerformanceTrace(), command: "stop_performance_trace", args: undefined },
+      { run: () => api.openPerformanceSettings("task-manager"), command: "open_performance_settings", args: { page: "task-manager" } },
     ];
 
     for (const { run, command, args } of calls) {

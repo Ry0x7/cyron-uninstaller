@@ -5,12 +5,25 @@ import {
   formatDate,
   formatDuration,
   formatPercent,
+  displayPath,
   basename,
   parentPath,
   truncateMiddle,
   extensionOf,
   plural,
 } from "./format";
+
+describe("displayPath", () => {
+  it("hides the verbatim drive prefix but keeps other paths intact", () => {
+    expect(displayPath("\\\\?\\C:\\Users\\Ada\\project\\node_modules")).toBe(
+      "C:\\Users\\Ada\\project\\node_modules",
+    );
+    expect(displayPath("C:\\Users\\Ada\\project")).toBe("C:\\Users\\Ada\\project");
+    expect(displayPath("\\\\?\\UNC\\server\\share\\project")).toBe(
+      "\\\\?\\UNC\\server\\share\\project",
+    );
+  });
+});
 
 describe("formatBytes", () => {
   it("handles empty and invalid sizes", () => {

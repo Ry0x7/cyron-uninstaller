@@ -66,6 +66,7 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 - Public code signing policy authored (`docs/CODE_SIGNING_POLICY.md`).
 - Git history privacy audit: verified clean commit tree with zero `.chryypt` files.
 - Release Candidate 1 (`v0.1.0`) tagged and published on GitHub.
+- Automated documentation integrity gate (`npm run docs:check`) enforced in CI: links, commands, versions, and evidence references.
 
 ### Phase 7.4 — Hunter Navigation & Explorer Destructive Actions (`[x]`)
 - Moved Hunter Mode into main sidebar navigation below Uninstaller as a global session action.
@@ -78,11 +79,20 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 - Enforced system root, boot, and Windows component protections (`is_protected_delete_target`).
 - Safe process termination reusing core engine (`process::terminate_single_process`) with graceful closure and verified force termination.
 
+### Performance Diagnostics & Startup Evidence (`[x]`)
+- Live CPU, memory, PDH physical-disk, process and storage sampling with bounded overhead.
+- Startup application and boot/logon scheduled-task inventory with provenance and live usage.
+- Per-app boot impact only when Windows' administrator-only event log records it; otherwise **Unavailable**.
+- Reversible startup toggles through Windows `StartupApproved` behind a native confirmation dialog.
+- Evidence-bound recommendations with measured effect, risk and a verification method.
+- Five symptom guides for "Why is my PC slow?", local before/after baselines, and an optional local WPR trace.
+- Explicit refusal of RAM boosters, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling and driver tweaks.
+
 ---
 
 ## Upcoming Milestones
 
-### Phase 8 — Advanced Integration & Store Management (`[ ]`)
-- [ ] **Native WinRT COM Store Package Removal**: Direct integration with `Windows.Management.Deployment.PackageManager` via native COM bindings (without spawning PowerShell scripts), allowing managed uninstallation of Microsoft Store packages after operator review.
+### Phase 8 — Trusted Signing & Scale (`[ ]`)
+- [x] **Native WinRT Store Package Removal**: Current-user packages are removed through `PackageManager::RemovePackageAsync` after a server-held plan (live removal remains UNVERIFIED; see [IMPLEMENTATION_STATUS](docs/IMPLEMENTATION_STATUS.md)).
 - [ ] **Multi-Drive Concurrent Scanning**: Parallelized drive root scanning for workstations with multiple physical NVMe/SSD storage volumes.
-- [ ] **Automated Documentation CI Enforcement**: Automated validation of internal links, artifact naming, and command consistency via `scripts/verify-docs.mjs`.
+- [ ] **Publicly Trusted Release Signing**: Replace the local self-signed development certificate with a publicly trusted Authenticode certificate, or label every release explicitly as unsigned.

@@ -181,7 +181,7 @@ export function ForceDeleteModal({
           </div>
           {result.quarantineBatchId && (
             <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}>
-              Quarantine Batch ID: <code>{result.quarantineBatchId}</code> (Restorable in Settings &gt; Safety).
+              Quarantine Batch ID: <code>{result.quarantineBatchId}</code> (Restorable from Cleaner &gt; Quarantine).
             </p>
           )}
           {result.warnings.length > 0 && (
@@ -340,8 +340,8 @@ export function ForceDeleteModal({
                   Recoverable Quarantine (Recommended)
                 </div>
                 <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                  Moves the files to Cyron&apos;s 7-day secure quarantine directory. Can be restored at any time
-                  from the Activity / Quarantine tab if needed.
+                  Moves the target into Cyron&apos;s 7-day quarantine directory. Restore it from Cleaner &gt;
+                  Quarantine if needed.
                 </div>
               </div>
             </label>

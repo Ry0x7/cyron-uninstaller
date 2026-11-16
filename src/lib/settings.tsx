@@ -15,10 +15,10 @@ export interface AppSettings {
   theme: ThemePreference;
   includeHidden: boolean;
   exclusions: string[];
+  /** Extra project folders scanned by the developer storage view. */
+  projectRoots: string[];
   /** When true the backend refuses to execute any cleanup (the default). */
   readOnly: boolean;
-  /** Whether to show the floating Hunter Mode crosshair widget on the desktop. */
-  showHunterWidget: boolean;
 }
 
 const STORAGE_KEY = "cyron.settings.v1";
@@ -27,8 +27,8 @@ const DEFAULTS: AppSettings = {
   theme: "system",
   includeHidden: true,
   exclusions: [],
+  projectRoots: [],
   readOnly: true,
-  showHunterWidget: false,
 };
 
 function readSettings(): AppSettings {
@@ -46,12 +46,11 @@ function readSettings(): AppSettings {
       exclusions: Array.isArray(parsed.exclusions)
         ? parsed.exclusions.filter((item): item is string => typeof item === "string").slice(0, 200)
         : [],
+      projectRoots: Array.isArray(parsed.projectRoots)
+        ? parsed.projectRoots.filter((item): item is string => typeof item === "string").slice(0, 24)
+        : [],
       // Settings saved before Phase 3 have no flag; they stay read-only.
       readOnly: typeof parsed.readOnly === "boolean" ? parsed.readOnly : DEFAULTS.readOnly,
-      showHunterWidget:
-        typeof parsed.showHunterWidget === "boolean"
-          ? parsed.showHunterWidget
-          : DEFAULTS.showHunterWidget,
     };
   } catch {
     return DEFAULTS;
@@ -63,9 +62,9 @@ interface SettingsContextValue {
   setTheme: (theme: ThemePreference) => void;
   setIncludeHidden: (include: boolean) => void;
   setExclusions: (paths: string[]) => void;
+  setProjectRoots: (paths: string[]) => void;
   /** Enable or disable cleaning; the backend enforces the same flag. */
   setReadOnly: (readOnly: boolean) => void;
-  setShowHunterWidget: (show: boolean) => void;
   reset: () => void;
 }
 
@@ -114,12 +113,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     (exclusions: string[]) => setSettings((current) => ({ ...current, exclusions })),
     [],
   );
-  const setReadOnly = useCallback(
-    (readOnly: boolean) => setSettings((current) => ({ ...current, readOnly })),
+  const setProjectRoots = useCallback(
+    (projectRoots: string[]) => setSettings((current) => ({ ...current, projectRoots })),
     [],
   );
-  const setShowHunterWidget = useCallback(
-    (showHunterWidget: boolean) => setSettings((current) => ({ ...current, showHunterWidget })),
+  const setReadOnly = useCallback(
+    (readOnly: boolean) => setSettings((current) => ({ ...current, readOnly })),
     [],
   );
   const reset = useCallback(() => setSettings(DEFAULTS), []);
@@ -130,11 +129,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setTheme,
       setIncludeHidden,
       setExclusions,
+      setProjectRoots,
       setReadOnly,
-      setShowHunterWidget,
       reset,
     }),
-    [settings, setTheme, setIncludeHidden, setExclusions, setReadOnly, setShowHunterWidget, reset],
+    [settings, setTheme, setIncludeHidden, setExclusions, setProjectRoots, setReadOnly, reset],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

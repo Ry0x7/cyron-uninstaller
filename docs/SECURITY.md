@@ -2,12 +2,13 @@
 
 ## Scope and assets
 
-Cyron (Phases 1–4) is a local Windows desktop scanner, cache cleaner and application uninstaller.
-It reads installed-application metadata, enumerates filesystem metadata with either an NTFS MFT reader
-or a directory walk, verifies duplicate file content by hashing, classifies storage, measures a fixed
-catalog of 51 cache locations, moves caches and leftovers into a per-user recoverable quarantine with
-atomic restore, safely executes standard application uninstallers, and controls associated application
-processes with strict critical-process safeguards.
+Cyron (Phases 1–4) is a local Windows desktop scanner, cache cleaner, application uninstaller and
+performance diagnostics tool. It reads installed-application metadata, enumerates filesystem metadata
+with either an NTFS MFT reader or a directory walk, verifies duplicate file content by hashing,
+classifies storage, measures a fixed catalog of 66 cache locations, moves caches and project artifacts
+and leftovers into a per-user recoverable quarantine with atomic restore, safely executes standard
+application uninstallers, controls associated application processes with strict critical-process
+safeguards, and samples performance counters and startup evidence without changing system tuning.
 
 Protected assets: repositories and source code, credentials, SSH keys and tokens, application
 settings, AI conversation histories and memories, AI model weights, Docker images/volumes/containers,
@@ -31,7 +32,10 @@ Child processes are strictly controlled:
   once, rejects a selection the plan does not contain, enforces the 10-minute TTL and the backend
   read-only switch, and then re-runs the path guard for every target. Exclusions coming from Settings
   are validated (absolute, non-root, at most 128) before use and stored in the plan so preview and
-  execution skip the same folders.
+  execution skip the same folders. The Phase 3 developer path is also id-only: a server-held,
+  1-hour `DeveloperStorageScan` supplies the artifact record; `preview_developer_cleanup` refuses
+  unknown/protected ids and any artifact path that is not inside its recorded project. The frontend
+  never sends an artifact path to execution.
 - **Windows filesystem and registry:** filesystem metadata and registry values are external input
   and may be missing, malformed, inaccessible or concurrently changed. Enumeration reports bounded
   errors rather than assuming access or completeness. Application discovery reads uninstall registry
@@ -68,8 +72,15 @@ Child processes are strictly controlled:
 
 ## Cleanup guarantees and limits
 
-- **Catalog-only.** There is no command that deletes a caller-supplied path. Eligibility comes from
-  the fixed catalog and a guard that refuses protected locations and their ancestors.
+- **Catalog and server-held artifacts only.** There is no command that deletes a caller-supplied
+  path. Eligibility comes from the fixed catalog or from artifact ids resolved against a held project
+  scan, plus a guard that refuses protected locations and their ancestors.
+- **Developer scan is read-only and bounded.** `devscan.rs` never writes or deletes. It skips reparse
+  points, never enters dependency/build directories while looking for projects, caps directories,
+  projects, roots and measured artifacts, and counts hard links once by file id. Only named
+  regenerable artifacts become candidates; `.git`, `.env`-style files, credentials, keys, databases
+  and model weights are reported separately as protected. Activity and size are evidence, never
+  permission, and the scan has no selection or execution field.
 - **Moves, not deletes.** Execution renames each eligible file into the run's quarantine batch and
   writes a manifest during the run. For Cleaner, the only permanent removal is `purge_quarantine`, which deletes
   the files of one manifest that are still inside that batch folder. There is no recursive delete;
@@ -77,10 +88,12 @@ Child processes are strictly controlled:
 - **Off by default.** `AppState::read_only` starts `true`. Previewing still works there because it
   only reads sizes and paths (that is the dry run); `start_cleanup` refuses while the switch is set.
   Enabling cleaning is an explicit user action, and every run still needs the confirmation checkbox.
-- **Protected data.** 12 catalog entries are `protected` (Claude Code projects, Codex sessions,
-  Gemini history, Ollama and LM Studio models, VS Code/Cursor workspace storage and local history,
-  Docker data, WSL distros, Firefox profiles, the Windows Update download cache). They are measured
-  and explained but never planned. Hard-linked and reparse-point files are skipped.
+- **Protected data.** Protected catalog entries include Claude Code projects, Codex sessions,
+  Gemini history and `tmp` session state, Cursor/VS Code workspace storage and local history,
+  Antigravity agent data, LM Studio models/conversations/presets, Hugging Face model and token cache,
+  Freebuff settings, Ollama models, Docker data, WSL distros, Firefox profiles and the Windows Update
+  download cache. They are measured and explained but never planned. Hard-linked and reparse-point
+  files are skipped.
 - **Locked and system-owned files are left alone.** No elevation request, no restart manager, no VSS
   snapshot, no service stop, no process termination. Failures are reported per item.
 - **User exclusions are enforced server-side**, so a preview cannot show a file that will be left
@@ -92,10 +105,31 @@ Child processes are strictly controlled:
   does not defend against an attacker who already controls the user's session; it defends against
   its own mistakes, hostile inputs through IPC, and UI-level accidents.
 
+## Performance diagnostics boundary
+
+- `perf.rs` samples Windows performance data with read-only APIs: `GetSystemTimes`,
+  `GlobalMemoryStatusEx`, PDH physical-disk counters, `GetProcessTimes`,
+  `GetProcessMemoryInfo`, `GetProcessIoCounters`, volume queries and `schtasks` XML. It never clears
+  standby memory, disables services, deletes Prefetch, changes the page file, disables Defender or
+  updates, writes performance registry values, or applies driver/power tweaks.
+- The only modification on the Performance page is `set_startup_item_enabled`, which uses the
+  existing Windows `StartupApproved` path after a native confirmation. It refuses protected entries
+  and machine-wide entries when Cyron is not elevated; it never deletes the Run registration.
+- WPR tracing is opt-in and requires an administrator session. Cyron launches only
+  `%SystemRoot%\System32\wpr.exe` with the fixed `-start GeneralProfile` / `-stop <known path>
+  -skipPdbGen` arguments and `CREATE_NO_WINDOW`. There is no shell, no caller-supplied executable and
+  no uploaded trace. The ETL file stays under the app-data performance-traces folder.
+- The fixed **Open Task Manager**, **Resource Monitor** and **Windows settings** actions launch only
+  Windows binaries and `ms-settings:` URIs; the renderer cannot supply an arbitrary target.
+- Recommendations are generated only from measured sample values with evidence, effect, risk and a
+  verification method. Per-process I/O is never labeled as physical-disk pressure because Windows
+  combines file, network, pipe and device transfers in that counter.
+
 ## Network and data handling
 
 There is no application network or telemetry code. Scanned paths, duplicate hashes, quarantine
-manifests and the cleanup log remain local. Cyron contains no network feature.
+manifests, performance baselines and traces, and the cleanup log remain local. Cyron contains no
+network feature.
 
 ## Gates satisfied across Phases 3 and 4
 
@@ -245,6 +279,6 @@ The quarantine guarantee applies to Cleaner and leftover cleanup. Analyzer has a
 
 Permanent operations bind to Windows file handles and pin ancestors against rename. Recycling uses the Windows shell namespace and has a narrow same-name race after the last identity check; Cyron does not claim atomic shell identity binding against a malicious process already controlling the same user session. Follow the existing local-session threat boundary above. Locked or changing files may remain; partial outcomes are shown and scans are discarded after execution.
 
-Cleaner accepts catalog/evidence-backed target identifiers. Caller-encoded arbitrary directory paths are rejected; arbitrary age or a cache-like name is insufficient classification. Removed-application candidates require retained server identity plus absence from a complete fresh inventory, remain unchecked, and require their own leftover plan. Windows Installer servicing stores and unknown installer files are not offered for cleaning. Quarantine bytes are storage moved, not disk space reclaimed; only purge frees that storage.
+Cleaner accepts catalog/evidence-backed target identifiers and developer artifact ids from a held scan. Caller-encoded arbitrary directory paths are rejected; arbitrary age or a cache-like name is insufficient classification. Removed-application candidates require retained server identity plus absence from a complete fresh inventory, remain unchecked, and require their own leftover plan. Windows Installer servicing stores and unknown installer files are not offered for cleaning. Quarantine bytes are storage moved, not disk space reclaimed; only purge frees that storage. A project being old, or an artifact being large, is never evidence of ownership or permission.
 
 Cross-volume Cleaner moves use Windows MoveFileEx with COPY_ALLOWED and WRITE_THROUGH after the durable journal entry, without replacing an existing destination. The Windows copy-and-delete path is flushed before returning; a retained source or failed/partial destination is reported and remains recoverable. Logical quarantined bytes are not claimed as physical disk space freed. Restores preserve no-overwrite behavior and keep a full quarantined copy until a destination copy is durably published.

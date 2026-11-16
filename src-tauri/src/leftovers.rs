@@ -337,10 +337,21 @@ pub fn scan_app_leftovers_expanded(
         display_icon,
     );
 
+    let install_root = install_location
+        .map(|value| value.trim().trim_matches('"'))
+        .filter(|value| !value.is_empty())
+        .map(|value| normalize_key(Path::new(value)));
+
     for path in candidate_dirs {
         if path.exists() && guard_leftover_path(&path).is_ok() {
             let (size, files) = measure_directory_shallow(&path);
             if files > 0 && !candidates.iter().any(|c: &LeftoverCandidate| c.path == path.to_string_lossy()) {
+                // Only the exact recorded install location is owned evidence.
+                // A folder inferred from an uninstaller or icon path can be a
+                // shared vendor directory, so it stays caution and unselected.
+                let exact_install = install_root
+                    .as_deref()
+                    .is_some_and(|root| normalize_key(&path) == root);
                 total_size += size;
                 total_files += files;
                 candidates.push(LeftoverCandidate {
@@ -348,11 +359,15 @@ pub fn scan_app_leftovers_expanded(
                     kind: "directory".into(),
                     path: path.to_string_lossy().to_string(),
                     confidence: "high".into(),
-                    risk: "safe".into(),
-                    reason: "Application installation folder.".into(),
+                    risk: if exact_install { "safe".into() } else { "caution".into() },
+                    reason: if exact_install {
+                        "Exact application installation folder recorded by the installer.".into()
+                    } else {
+                        "Folder derived from uninstaller or icon metadata; ownership is not proven and it may be shared.".into()
+                    },
                     size,
                     file_count: files,
-                    selected: true,
+                    selected: exact_install,
                 });
             }
         }
@@ -387,10 +402,10 @@ pub fn scan_app_leftovers_expanded(
                         path: candidate_dir.to_string_lossy().to_string(),
                         confidence: "high".into(),
                         risk: "caution".into(),
-                        reason: "Application configuration and data under AppData/ProgramData.".into(),
+                        reason: "Application configuration and data under AppData/ProgramData. Name match only; ownership is not proven.".into(),
                         size,
                         file_count: files,
-                        selected: true,
+                        selected: false,
                     });
                 }
             } else if !is_shared_vendor && vendor_folder.exists() && guard_leftover_path(&vendor_folder).is_ok() {
@@ -430,10 +445,10 @@ pub fn scan_app_leftovers_expanded(
                         path: direct_dir.to_string_lossy().to_string(),
                         confidence: "high".into(),
                         risk: "caution".into(),
-                        reason: "Application data directory.".into(),
+                        reason: "Application data directory. Name match only; ownership is not proven.".into(),
                         size,
                         file_count: files,
-                        selected: true,
+                        selected: false,
                     });
                 }
             }
@@ -483,6 +498,71 @@ pub fn scan_app_leftovers_expanded(
     (plan, report)
 }
 
+/// Explicit scan for an application removed before Cyron was installed. Only
+/// the user-supplied name, publisher and install path are used. Every result is
+/// unverified ownership evidence, so nothing is safe or preselected.
+pub fn scan_named_leftovers(
+    app_name: &str,
+    publisher: Option<&str>,
+    install_location: Option<&str>,
+) -> (StoredLeftoverPlan, LeftoverScanReport) {
+    let clean_name = sanitize_for_path(app_name);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let empty = || {
+        let app_id = format!("manual|{clean_name}");
+        let plan_id = format!("leftover-{now}-{}-manual", std::process::id());
+        let expires_at = now + 600;
+        let plan = StoredLeftoverPlan {
+            plan_id: plan_id.clone(),
+            app_id: app_id.clone(),
+            app_name: app_name.to_string(),
+            candidates: Vec::new(),
+            expires_at,
+        };
+        let report = LeftoverScanReport {
+            plan_id,
+            app_id,
+            app_name: app_name.to_string(),
+            candidates: Vec::new(),
+            total_size: 0,
+            total_files: 0,
+            registry_keys_count: 0,
+            expires_at,
+        };
+        (plan, report)
+    };
+    if clean_name.trim().is_empty() {
+        return empty();
+    }
+
+    let app_id = format!("manual|{clean_name}");
+    let (mut plan, mut report) = scan_app_leftovers_expanded(
+        &app_id,
+        app_name,
+        publisher,
+        install_location,
+        None,
+        None,
+        "",
+    );
+    let caveat = " Explicit name/path match only; ownership is not proven.";
+    for candidate in &mut report.candidates {
+        candidate.risk = "caution".into();
+        candidate.selected = false;
+        if candidate.confidence == "high" {
+            candidate.confidence = "medium".into();
+        }
+        if !candidate.reason.contains("ownership is not proven") {
+            candidate.reason.push_str(caveat);
+        }
+    }
+    plan.candidates = report.candidates.clone();
+    (plan, report)
+}
+
 fn check_registry_candidates(
     app_name: &str,
     publisher: Option<&str>,
@@ -501,11 +581,11 @@ fn check_registry_candidates(
                 kind: "registry_key".into(),
                 path: format!("HKCU\\{path}"),
                 confidence: "high".into(),
-                risk: "safe".into(),
-                reason: "Application user registry settings.".into(),
+                risk: "caution".into(),
+                reason: "Application user registry settings. Name match only; ownership is not proven.".into(),
                 size: 0,
                 file_count: 0,
-                selected: true,
+                selected: false,
             });
             *reg_count += 1;
         }
@@ -517,11 +597,11 @@ fn check_registry_candidates(
                 kind: "registry_key".into(),
                 path: format!("HKLM\\{hklm_path}"),
                 confidence: "high".into(),
-                risk: "safe".into(),
-                reason: "Application machine registry settings.".into(),
+                risk: "caution".into(),
+                reason: "Application machine registry settings. Name match only; ownership is not proven.".into(),
                 size: 0,
                 file_count: 0,
-                selected: true,
+                selected: false,
             });
             *reg_count += 1;
         }
@@ -533,11 +613,11 @@ fn check_registry_candidates(
                 kind: "registry_key".into(),
                 path: format!("HKLM\\{wow_path}"),
                 confidence: "high".into(),
-                risk: "safe".into(),
-                reason: "32-bit application machine registry settings.".into(),
+                risk: "caution".into(),
+                reason: "32-bit application machine registry settings. Name match only; ownership is not proven.".into(),
                 size: 0,
                 file_count: 0,
-                selected: true,
+                selected: false,
             });
             *reg_count += 1;
         }
@@ -568,11 +648,11 @@ fn check_registry_candidates(
                 kind: "registry_key".into(),
                 path: format!("HKCU\\{direct_path}"),
                 confidence: "high".into(),
-                risk: "safe".into(),
-                reason: "Application user registry settings.".into(),
+                risk: "caution".into(),
+                reason: "Application user registry settings. Name match only; ownership is not proven.".into(),
                 size: 0,
                 file_count: 0,
-                selected: true,
+                selected: false,
             });
             *reg_count += 1;
         }
@@ -646,11 +726,11 @@ fn scan_shortcuts_in_dir(
                             kind: "directory".into(),
                             path: path.to_string_lossy().to_string(),
                             confidence: "high".into(),
-                            risk: "safe".into(),
-                            reason: "Start menu shortcut group for application.".into(),
+                            risk: "caution".into(),
+                            reason: "Start menu shortcut group for application. Name match only; ownership is not proven.".into(),
                             size,
                             file_count: files,
-                            selected: true,
+                            selected: false,
                         });
                     }
                 }
@@ -670,11 +750,11 @@ fn scan_shortcuts_in_dir(
                         kind: "file".into(),
                         path: path.to_string_lossy().to_string(),
                         confidence: "high".into(),
-                        risk: "safe".into(),
-                        reason: "Application shortcut (.lnk).".into(),
+                        risk: "caution".into(),
+                        reason: "Application shortcut (.lnk). Name match only; ownership is not proven.".into(),
                         size,
                         file_count: 1,
-                        selected: true,
+                        selected: false,
                     });
                 }
             }
@@ -729,6 +809,56 @@ fn check_uninstall_key_candidate(
             selected: true,
         });
         *reg_count += 1;
+    }
+}
+
+/// Appends one durable journal line and returns the previous file length so a
+/// failed move can remove the phantom entry instead of leaving recovery data
+/// that points at a file still in its original place.
+fn append_leftover_journal(
+    journal_file: &mut Option<fs::File>,
+    journal_path: &Path,
+    line: &str,
+) -> Result<u64, String> {
+    use std::io::Write;
+    let previous_len = match journal_file {
+        Some(file) => file
+            .metadata()
+            .map_err(|error| format!("Could not read the recovery journal length: {error}"))?
+            .len(),
+        None => fs::metadata(journal_path).map(|meta| meta.len()).unwrap_or(0),
+    };
+    let write = |file: &mut fs::File| -> std::io::Result<()> {
+        writeln!(file, "{line}")?;
+        file.flush()?;
+        file.sync_all()
+    };
+    match journal_file {
+        Some(file) => write(file),
+        None => {
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(journal_path)
+                .map_err(|error| format!("Could not open the recovery journal: {error}"))?;
+            write(&mut file)
+        }
+    }
+    .map_err(|error| format!("Could not write the recovery journal: {error}"))?;
+    Ok(previous_len)
+}
+
+fn rollback_leftover_journal(
+    journal_file: &mut Option<fs::File>,
+    journal_path: &Path,
+    previous_len: u64,
+) {
+    if let Some(file) = journal_file.as_mut() {
+        let _ = file.set_len(previous_len);
+        let _ = file.sync_all();
+    } else if let Ok(file) = fs::OpenOptions::new().write(true).open(journal_path) {
+        let _ = file.set_len(previous_len);
+        let _ = file.sync_all();
     }
 }
 
@@ -856,39 +986,34 @@ pub fn clean_leftovers(
             let dest_name = format!("{index}-{}", file.file_name().unwrap_or_default().to_string_lossy());
             let dest = batch.join(dest_name);
 
-            // Record in durable write-ahead journal before destructive rename
+            // Record in durable write-ahead journal before the move.
             let item = serde_json::json!({
                 "originalPath": file.to_string_lossy(),
                 "storedPath": dest.to_string_lossy(),
                 "size": size
             });
             let line = serde_json::to_string(&item).unwrap_or_default();
-            use std::io::Write;
-            let journal_res: Result<(), std::io::Error> = (|| {
-                if let Some(ref mut jf) = journal_file {
-                    writeln!(jf, "{line}")?;
-                    jf.flush()?;
-                    jf.sync_all()?;
-                } else {
-                    let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
-                    writeln!(jf, "{line}")?;
-                    jf.flush()?;
-                    jf.sync_all()?;
+            let previous_len = match append_leftover_journal(&mut journal_file, &journal_path, &line) {
+                Ok(offset) => offset,
+                Err(error) => {
+                    errors.push(format!("Journal write failed for {}: {error}; skipped moving to preserve recoverability", file.display()));
+                    continue; // fail closed: never move a file without a durable entry
                 }
-                Ok(())
-            })();
+            };
 
-            if let Err(e) = journal_res {
-                errors.push(format!("Journal write failed for {}: {e}; skipped moving to preserve recoverability", file.display()));
-                continue; // fail closed: NEVER move file if journal write failed!
-            }
-
-            if fs::rename(&file, &dest).is_ok() {
-                quarantined_files += 1;
-                quarantined_bytes += size;
-                manifest_items.push(item);
-            } else {
-                errors.push(format!("Could not move {} to quarantine", file.display()));
+            match crate::cleanup::move_to_quarantine(&file, &dest) {
+                Ok(()) => {
+                    quarantined_files += 1;
+                    quarantined_bytes += size;
+                    manifest_items.push(item);
+                }
+                Err(error) => {
+                    rollback_leftover_journal(&mut journal_file, &journal_path, previous_len);
+                    errors.push(format!(
+                        "Could not move {} to quarantine: {error}",
+                        file.display()
+                    ));
+                }
             }
         }
 
@@ -919,32 +1044,27 @@ pub fn clean_leftovers(
             "size": size
         });
         let line = serde_json::to_string(&item).unwrap_or_default();
-        use std::io::Write;
-        let journal_res: Result<(), std::io::Error> = (|| {
-            if let Some(ref mut jf) = journal_file {
-                writeln!(jf, "{line}")?;
-                jf.flush()?;
-                jf.sync_all()?;
-            } else {
-                let mut jf = fs::OpenOptions::new().create(true).append(true).open(&journal_path)?;
-                writeln!(jf, "{line}")?;
-                jf.flush()?;
-                jf.sync_all()?;
+        let previous_len = match append_leftover_journal(&mut journal_file, &journal_path, &line) {
+            Ok(offset) => offset,
+            Err(error) => {
+                errors.push(format!("Journal write failed for {}: {error}; skipped moving", file_path.display()));
+                continue;
             }
-            Ok(())
-        })();
+        };
 
-        if let Err(e) = journal_res {
-            errors.push(format!("Journal write failed for {}: {e}; skipped moving", file_path.display()));
-            continue;
-        }
-
-        if fs::rename(&file_path, &dest).is_ok() {
-            quarantined_files += 1;
-            quarantined_bytes += size;
-            manifest_items.push(item);
-        } else {
-            errors.push(format!("Could not move {} to quarantine", file_path.display()));
+        match crate::cleanup::move_to_quarantine(&file_path, &dest) {
+            Ok(()) => {
+                quarantined_files += 1;
+                quarantined_bytes += size;
+                manifest_items.push(item);
+            }
+            Err(error) => {
+                rollback_leftover_journal(&mut journal_file, &journal_path, previous_len);
+                errors.push(format!(
+                    "Could not move {} to quarantine: {error}",
+                    file_path.display()
+                ));
+            }
         }
     }
 
@@ -2217,6 +2337,100 @@ mod tests {
 
         let _ = hkcu.delete_subkey_all(&subkey_rel);
         let _ = fs::remove_dir_all(&q_root);
+    }
+
+    fn phase2_fixture_root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-phase2-remnant-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("settings.ini"), b"fixture").unwrap();
+        root
+    }
+
+    #[test]
+    fn phase2_remnant_named_scan_is_never_safe_or_preselected() {
+        let root = phase2_fixture_root("named");
+        let name = format!("CyronNamedFixture{}", std::process::id());
+        let (plan, report) = scan_named_leftovers(
+            &name,
+            Some("CyronFixturePublisher"),
+            Some(&root.to_string_lossy()),
+        );
+        assert_eq!(plan.app_id, report.app_id);
+        assert!(!report.candidates.is_empty(), "the explicit fixture path should be found");
+        assert!(
+            report
+                .candidates
+                .iter()
+                .all(|candidate| candidate.risk != "safe" && !candidate.selected),
+            "name/path-only evidence must never be safe or preselected"
+        );
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| Path::new(&candidate.path) == root),
+            "the supplied install path should be reported"
+        );
+        let (_, empty) = scan_named_leftovers("   ", None, None);
+        assert!(empty.candidates.is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn phase2_remnant_exact_install_location_stays_safe() {
+        let root = phase2_fixture_root("installed");
+        let name = format!("CyronInstalledFixture{}", std::process::id());
+        let (_, report) = scan_app_leftovers(
+            &format!("win32|{name}"),
+            &name,
+            None,
+            Some(&root.to_string_lossy()),
+        );
+        let candidate = report
+            .candidates
+            .iter()
+            .find(|candidate| Path::new(&candidate.path) == root)
+            .expect("exact install location candidate");
+        assert_eq!(candidate.risk, "safe");
+        assert!(candidate.selected);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn phase2_remnant_name_only_registry_match_is_not_safe() {
+        let unique = format!(
+            "CyronPhase2NameOnly_{}_{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = hkcu
+            .create_subkey(format!("Software\\{unique}"))
+            .expect("create fixture key");
+        drop(key);
+
+        let mut candidates = Vec::new();
+        let mut count = 0;
+        check_registry_candidates(&unique, None, &mut candidates, &mut count);
+        let candidate = candidates
+            .iter()
+            .find(|candidate| candidate.path.eq_ignore_ascii_case(&format!("HKCU\\Software\\{unique}")))
+            .expect("name-only registry candidate");
+        assert_eq!(candidate.risk, "caution");
+        assert!(!candidate.selected);
+        assert!(candidate.reason.contains("ownership is not proven"));
+
+        let _ = hkcu.delete_subkey_all(format!("Software\\{unique}"));
     }
 
     fn test_broken_name_helper(s: &str) -> String {

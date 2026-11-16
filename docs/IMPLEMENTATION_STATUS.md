@@ -1,12 +1,14 @@
 # Cyron — Implementation Status
 
-Last updated: 2026-11-06 (Phase 7 — Code Signing Architecture & Release Packaging)
+Last updated: 2026-11-17 (performance diagnostics and startup evidence, implementation ledger)
 
 ## Summary
 
 Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x64 featuring:
-- Multi-source application inventory (Win32 64/32-bit, Microsoft Store / AppX / MSIX, Steam game libraries, and portable heuristic scanning).
-- Application uninstallation with exit code 3010 (reboot required) tracking.
+- Multi-source application inventory (Win32 64/32-bit, Microsoft Store / AppX / MSIX through the Windows Runtime package manager, Steam game libraries, and portable heuristic scanning with PE version metadata).
+- Vendor uninstallation reconciliation with bounded post-exit inventory verification and explicit 1605/1614, 1602, 3010/1641 and still-registered outcomes.
+- Current-user Microsoft Store / MSIX removal through a server-held plan and `RemovePackageAsync`, without shells, `RemoveForAllUsers` or machine-wide deprovisioning.
+- Persistent installed/removed application lifecycle history across restarts (2,000 records).
 - Process discovery, snapshot-verified termination with critical-process protection and PID recycling prevention.
 - Leftover scanning with confidence & risk ratings, automatic recursive multi-type `.reg` backup, and quarantine storage.
 - Sequential batch uninstallation with failure isolation.
@@ -18,7 +20,8 @@ Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x6
 - Crash-consistent recoverable quarantine with durable write-ahead recovery journal (`recovery_journal.jsonl` with `sync_all`), atomic Win32 `MoveFileExW` no-overwrite restoration, and manifest-scoped purging.
 - Windows Explorer context menu integration (`HKCU\Software\Classes`) with safe argument routing.
 - Standardized Windows PE VERSIONINFO, WiX MSI properties, and NSIS installer headers (`WINDOWS_METADATA_OK`).
-- Chryypt Organization code signing architecture (`CHRYYPT_SIGNED`, `SIGNATURES_VERIFIED_OK`).
+- Local Chryypt Organization self-signed signing pipeline. Cryptographic integrity is separate from public trust: the published `v0.1.0` installer and current local release artifacts are `NotSigned`, and the certificate is self-signed.
+- Evidence-bound performance diagnostics: live CPU, memory, PDH disk, process, startup and scheduled-task evidence; reversible startup toggles behind a native confirmation; local before/after baselines; optional administrator-only WPR trace; no placebo tuning.
 - Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`).
 
 Historical narratives and early acceptance logs for Phases 1–3 are preserved in [docs/archive/PHASE_HISTORY.md](archive/PHASE_HISTORY.md).
@@ -31,14 +34,17 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | Feature | Status | Verification & Evidence |
 |---|---|---|
 | Win32 Discovery | Done | `apps.rs` enumerates `HKLM`/`HKCU` in 64-bit and 32-bit registry views; deduplicates, normalizes sizes/dates, flags broken entries. |
-| Store / MSIX Discovery | Done | Discovers installed modern packages via `AppModel\Repository\Packages`; provides read-only lifecycle indicators and leftover scanning. |
+| Store / MSIX Discovery | Done | `store.rs` enumerates current-user main packages through `PackageManager::FindPackagesByUserSecurityId`, with `AppModel\Repository\Packages` as a read-only fallback. Frameworks, resources, bundles and system packages are excluded. |
+| Store / MSIX Removal | Implemented — live UNVERIFIED | `prepare_store_uninstall` binds a 10-minute single-use plan to full name, family name and publisher ID; `execute_store_uninstall` revalidates identity and calls `RemovePackageAsync` for the current user only. No shell, `RemoveForAllUsers` or deprovisioning. Access-denied, in-use and not-found outcomes are distinct. Unit tests cover inventory filters; a real removal through the desktop UI remains UNVERIFIED. |
 | Steam Game Libraries | Done | Discovers multi-library Steam games via `libraryfolders.vdf` and `appmanifest_*.acf`. |
-| Portable Executables | Done | Bounded heuristic detection under `%LOCALAPPDATA%\Programs`. |
-| Standard Uninstaller Runner | Done | `uninstall.rs`: validates commands, strips command-chaining injection, rejects shell interpreters (`cmd.exe`, `powershell.exe`), handles reboot exit code `3010`. |
+| Portable Executables | Done | Bounded heuristic detection under `%LOCALAPPDATA%\Programs`, using PE `ProductName`/`CompanyName`/`FileVersion` metadata where available. |
+| MSI Identification | Done | `apps.rs` extracts a validated braced product code from `UninstallString`/`QuietUninstallString` or a GUID-named uninstall subkey and treats `WindowsInstaller=1` as MSI. Unit-tested. |
+| Standard Uninstaller Runner | Implemented — live MSI UNVERIFIED | `uninstall.rs`: validates commands, strips command-chaining injection, rejects shell interpreters (`cmd.exe`, `powershell.exe`), and reconciles exit codes. 1605/1614 count as removed only when a complete inventory confirms absence; 1602 is cancellation; 3010/1641 require restart; exit 0 with the product still registered stays `remaining`. Unit and real-exit-path tests use harmless fixture commands; a real vendor/MSI uninstall remains UNVERIFIED. |
+| Persistent Application History | Done | `app_history.rs` writes `<app_data_dir>/app-history.json` atomically, capped at 2,000 records. Incomplete inventory never marks an app removed; a live reappearance clears removal. Unit-tested. |
 | Server-Held Confirmation Plans | Done | All destructive operations require server-generated, single-use, 10-minute expiring plans (`UninstallPlan`, `BatchUninstallPlan`, `CleanupPlan`, `LeftoverPlan`). |
 | Process Management | Done | `process.rs`: matches processes strictly by executable path inside application root; verifies PID creation times (`GetProcessTimes`) against snapshot; protects critical Windows system processes. |
-| Leftover Residual Cleaning | Done | `leftovers.rs`: discovers residual files and registry subkeys; creates automatic recursive multi-type `.reg` backup before deletion; moves files to quarantine. |
-| Sequential Batch Uninstallation | Done | Sequential queue with failure isolation; residual cleanup requires separate confirmation. |
+| Leftover Residual Cleaning | Done | `leftovers.rs`: discovers residual files and registry subkeys; creates automatic recursive multi-type `.reg` backup before deletion; moves files to quarantine. Name-only file, shortcut and registry matches are `caution` and unselected; only an exact install location or exact registration identity is `safe` and preselected. |
+| Sequential Batch Uninstallation | Done | Sequential queue with failure isolation; residual cleanup requires separate confirmation. Single and batch results distinguish verified removal, remaining registration, restart-required, cancellation and failure; exit code 0 alone is never reported as confirmed removal. |
 
 ### 2. Disk Analysis & Intelligence
 | Feature | Status | Verification & Evidence |
@@ -50,24 +56,39 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 | Duplicate File Detection | Done | `duplicates.rs`: size grouping -> 4 KiB edge hashing -> full streaming SHA-256; hard links counted once for physical storage. |
 | Storage Categorization | Done | `storage.rs`: 10 categories, 5 age buckets, known vs inferred confidence ratings, explainable insights. |
 | Analyzer -> Cleaner Direct Action | Done | `inspect_cleanable_directory`: selecting recognized cache directory displays reclaimable space and provides 1-click review in Cleaner. |
+| Reviewed Analyzer Deletion | Done | `analyzer_actions.rs`: separate Recycle Bin and permanent actions behind expiring single-use plans; exact path/size timestamp binding; protected and reparse targets refused; recycle failure never falls back to permanent deletion; live progress and cancellation. Tested in `tests/analyzer_actions.rs` and unit tests. |
 
 ### 3. Review-First Cache Cleaning & Quarantine
 | Feature | Status | Verification & Evidence |
 |---|---|---|
 | Extensible Declarative Providers | Done | `providers.rs`: versioned (`schema_version: 1`) declarative definitions; validates environment roots, rejects path traversals and attempts to mark protected data safe. |
-| Cache Catalog & Guard | Done | `caches.rs`: 51 fixed locations; `cleanup.rs` guard refuses protected entries (histories, models, configurations, browser profiles, Docker/WSL). |
+| Cache Catalog & Guard | Done | `caches.rs`: 66 fixed locations; `cleanup.rs` guard refuses protected entries (histories, models, configurations, browser profiles, Docker/WSL). Gemini CLI `tmp`, Cursor/VS Code `workspaceStorage`, LM Studio conversations/models, Hugging Face tokens and Antigravity agent data are protected after the Phase 3 review; they are no longer treated as disposable caches. |
 | Read-Only Mode Default | Done | Backend initializes with `read_only = true`, gating `start_cleanup` and `clean_app_leftovers` until explicitly enabled. |
-| Crash-Consistent Quarantine | Done | Files moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\`; durable write-ahead recovery journal (`recovery_journal.jsonl`) physically synced (`sync_all`) before moves. |
+| Crash-Consistent Quarantine | Done | Files moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\`; durable write-ahead recovery journal (`recovery_journal.jsonl`) physically synced (`sync_all`) before moves. Explorer Force Delete uses the same journal before its rename (or before removing originals after a cross-volume copy), writes a full stored path, and restores or purges directory batches. Tested in `explorer::tests`. |
+| Cleaner Drive Scope & Remnant Review | Done | `list_caches` accepts selected mounted local drives; `preview_remnant_cleanup` feeds review-only residual candidates into the same capped, journaled plan engine and rechecks app absence before execution. Persistent history records removals across restarts and supplies scan metadata, but a record is never itself ownership proof. Incomplete inventory blocks removed-app classification. The explicit `scan_named_remnants` flow reviews apps removed before Cyron, with every name/path-only match caution and unselected. |
 | Atomic No-Overwrite Restore | Done | Restores use Win32 `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, preventing destination file overwrites. |
 | Manifest-Scoped Purge | Done | `purge_quarantine` permanently deletes only files recorded in that batch manifest whose paths remain inside the batch folder. |
 | Storage Caps & Low Space Protection | Done | Quarantine total storage is capped at 20 GB (`MAX_QUARANTINE_TOTAL_BYTES`); cleanup aborts if free space on the quarantine volume is below 512 MB. |
+
+### 3b. AI & Developer Storage Intelligence (Phase 3)
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Project Discovery | Done | `devscan.rs`: manifests, Git roots and framework metadata; automatic candidates plus user-selected roots on selected fixed/removable drives; 60,000-directory and 400-project caps; reparse points skipped. |
+| Regenerable Artifact Detection | Done | Named evidence-based artifacts only: `node_modules`, `dist`, `build`, Rust/Maven `target`, Gradle `build`/`.gradle`, `.next/cache`, `.turbo`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`. Source, `.git`, `.env`, credentials, keys, databases and model weights are reported protected and never become targets. |
+| Activity & Ownership Evidence | Done | Active/recent/old/unknown activity from project, marker and Git timestamps. Each artifact has exact ownership evidence, confidence, logical and allocated bytes, file count, last write, rebuild command and loss copy. Staleness is informational; no artifact is preselected or auto-cleaned because it is old. |
+| Tool Detection & Orphan Evidence | Done | `caches.rs` records `installState` per cache (`detected`, `not-detected`, `unknown`). Only conclusive `not-detected` is displayed as orphaned; model and history caches remain protected regardless. |
+| Selective Preview & Cleanup | Done | `preview_developer_cleanup` accepts only artifact ids from a 1-hour server-held scan, binds the project path and reuses `guard_path`, `CleanupPlan`, snapshot checks, journaled quarantine and no-overwrite restore. The Projects tab requires explicit artifact selection and a confirmation checkbox. |
+| Post-Cleanup Verification | Done | `verify_developer_cleanup` re-measures selected artifacts after execution, reports removed/remaining bytes and file counts, and lists quarantine batches still holding matching targets. The UI re-scans projects and shows verification truthfully. |
+| Disposable Project Round Trip | Done | `tests/phase3_project.rs`: (1) a temporary project with source, `.git`, `.env`, `node_modules` and `dist` — the plan selects only the two artifacts, source/credentials/Git remain, cleanup quarantines them, verification reports both removed, and restore returns them; (2) a Next.js project — only `.next/cache` moves while `.next/server`, `BUILD_ID` and source stay, then restore returns the cache. |
+| Multi-Drive & Protected Tool Coverage | Done | Catalog tests require reviewed entries for Claude Code, Codex, Gemini CLI, Antigravity, Cursor, VS Code, Freebuff, Ollama, LM Studio, Hugging Face, npm, pnpm, Yarn, pip, uv, Poetry, Cargo, Gradle, Docker and WSL. Native UI discovery across C: and E: was verified on 2026-11-17 with disposable projects. |
+| Native Desktop Workflow | Done | Windows UI Automation against the native Tauri debug app (local Vite dev server): discovered a disposable project, previewed 1 file, moved it to quarantine, verified `1 removed / 0 remaining`, refreshed Quarantine and restored the file; source, `.env`, `.git` and `dist` stayed. Seven local captures were reviewed; raw screenshots are not committed per [the evidence policy](evidence/README.md). |
 
 ### 4. Windows Integration & Packaging
 | Feature | Status | Verification & Evidence |
 |---|---|---|
 | Explorer Shell Integration | Done | `explorer.rs`: per-user shell verbs registered in `HKCU\Software\Classes` without elevation; safe CLI argument sanitization; toggleable and repairable via Settings. |
 | Windows Metadata Standards | Done | Product name, version, publisher (`Chryypt`), UpgradeCode, and description enforced across PE, MSI, and NSIS (`WINDOWS_METADATA_OK`). |
-| Chryypt Organization Code Signing | Done | `scripts/sign-build.ps1` signs binaries with Chryypt Organization certificate (`CHRYYPT_SIGNED`); signature integrity and negative tests verified (`SIGNATURES_VERIFIED_OK`). |
+| Chryypt Organization Code Signing | Partial — local only | `scripts/sign-build.ps1` can sign with the self-signed Chryypt Organization certificate (`CHRYYPT_SIGNED`); integrity and negative tests exist (`SIGNATURES_VERIFIED_OK` for a signed build). Verified 2026-11-16: the published `v0.1.0` NSIS installer and local release artifacts are `NotSigned`; the certificate is self-signed, so no public trust chain or SmartScreen reputation exists. |
 | Installer Bundling | Done | NSIS setup (`.exe`) and WiX MSI (`.msi`) generated and verified (`RELEASE_BUNDLES_OK`). |
 
 ### 5. Hunter Mode, Startup Manager & Release-Blocking Correctness (Milestones 7.1 & 7.2)
@@ -93,11 +114,38 @@ Historical narratives and early acceptance logs for Phases 1–3 are preserved i
 
 ---
 
+### 7. Performance Diagnostics
+| Feature | Status | Verification & Evidence |
+|---|---|---|
+| Live System Metrics | Done | `perf.rs`: a 700 ms sample of system CPU (`GetSystemTimes`), memory/commit (`GlobalMemoryStatusEx`), PDH physical-disk busy/queue, fixed-volume capacity, and bounded per-process CPU, working set and I/O. Native run showed 15% CPU, 37% memory in use, 1.1% disk busy and 179 processes, matching the snapshot. |
+| Process Table & Findings | Done | Per-process CPU, working set, read/write rates and PID; Cyron's own process and protected/system processes are labeled. Findings are raw observations, separate from recommendations. Native run showed the live table and the protected/system badges. |
+| Reversible Startup Inventory | Done | HKCU/HKLM `Run`, `RunOnce`, WOW6432Node and Startup folders with exact command, location, state, live usage and protected flags. Enabling/disabling uses `StartupApproved` 0x02/0x03, preserves the registration, and refuses protected or machine-wide entries when unelevated. Native disposable fixture: Cancel changed nothing; Disable wrote byte 0x03; Enable restored 0x02; the Run value stayed intact throughout. |
+| Boot Impact Provenance | Done | Per-app boot cost is read from the administrator-only Diagnostics-Performance event log and matched only to an exact executable path. Unelevated, the UI says **Unavailable** and explains why; no score is invented. Elevated live reading is UNVERIFIED. |
+| Scheduled Tasks | Done | Boot/logon registration tasks are listed read-only with path, trigger, delay, action, author and Microsoft-task flag. The page states that Cyron does not disable, change or run them. Native run listed 23 tasks. |
+| Evidence-Bound Recommendations | Done | Each recommendation requires a measured threshold and carries evidence, expected effect, risk and verification. The native run found a false **Measured disk I/O is busy** recommendation at 0.1% physical-disk busy caused by per-process I/O (which includes network); the gate now requires physical-disk busy and queue thresholds, and `high_process_io_with_an_idle_physical_disk_is_not_disk_pressure` covers it. |
+| Guided Investigation | Done | Five symptom guides filter recommendations and explain what the evidence can and cannot show. Native UIA selected startup, disk and fan guides; each changed the answer and showed **No pressure matches this symptom** when unsupported. |
+| Before/After Baselines | Done | Up to 50 labeled local measurements in `performance-baselines.json`, atomic writes, newest-first comparison of CPU, memory, available memory, commit, disk busy and boot time. Native run recorded two labels and showed the comparison plus the association-not-causation note; the test file was removed afterwards. |
+| Optional Advanced Trace | Implemented — live UNVERIFIED | `start_performance_trace`/`stop_performance_trace` invoke only `%SystemRoot%\System32\wpr.exe` with fixed arguments when elevated, write a local ETL under app data, and never upload it. Native unelevated run correctly showed **Needs administrator**, disabled the button and offered no elevation. A real recording/opening path remains UNVERIFIED. |
+| Constraints & Defaults | Done | No RAM booster, standby-memory clearing, registry cleaning, service disabling, Prefetch deletion, page-file change, Defender/update disabling or driver tweak. Manual Refresh bypasses the 120-second startup-evidence cache; live sampling keeps it. |
+| Native Desktop Workflow | Done | Windows UI Automation against the native Tauri debug app: captured live metrics, switched guides, reviewed startup/task rows, completed a disposable startup disable/enable round trip through the Win32 confirmation dialog, recorded/compared two baselines, and confirmed the trace is disabled unelevated. See [the receipt](evidence/2026-11-17-performance-diagnostics.md). |
+
 ## Known Limitations & Design Boundaries
 
-1. **Store / MSIX Lifecycle:** Windows Store packages are discovered from `AppModel\Repository\Packages` for inventory, file inspection, and residual scanning. Because Store removal requires Windows Runtime COM package management interfaces, traditional Win32 uninstallation is disabled with clear user guidance directing to Windows Settings or `winget`.
+1. **Store / MSIX Lifecycle:** Current-user packages are removed natively through `PackageManager::RemovePackageAsync` behind a single-use plan. Cyron does not call `RemoveForAllUsers`, deprovision, elevate automatically or launch `winget`/PowerShell. Machine-wide and provisioned packages require Windows Settings or an administrator-managed tool. A real package removal through the desktop UI is UNVERIFIED as of 2026-11-16.
 2. **Portable Applications:** Standalone portable executables in `%LOCALAPPDATA%\Programs` are discovered through explainable heuristics. They lack registry uninstaller commands; Cyron provides residual scanning, folder measurement, and Explorer navigation.
 3. **MFT Scanner Elevation:** Accessing raw volume handles (`\\.\X:`) requires administrator elevation. When unelevated, Cyron reports the reason and falls back seamlessly to the streaming directory walk.
 4. **MFT vs Walk Counting Difference:** The MFT reader counts physical NTFS records; the streaming directory walk counts accessible filesystem paths (deduplicating up to 1,000,000 hard-link IDs). Volume totals from the two methods differ by design (see [docs/BENCHMARKS.md](BENCHMARKS.md)).
 5. **Debug Desktop Build:** The debug build executable (`src-tauri/target/debug/cyron.exe`) targets Tauri's `devUrl` and requires the Vite dev server (`npm run dev`). Production release builds embed frontend assets directly and run standalone.
 6. **Platform Scope:** Cyron targets Windows 10/11 x64 exclusively. Win32 APIs are invoked unconditionally.
+7. **Release Signing Trust:** The GitHub release workflow builds unsigned artifacts. Local signing uses a self-signed certificate, which is cryptographically verifiable but not publicly trusted. Release copy must not imply SmartScreen trust.
+8. **Cross-Volume Folder Restore:** `restore_batch` stages a quarantined folder on the destination volume, publishes it with a no-overwrite rename, and only then removes the quarantined copy. A tree containing a link or junction is refused and left in quarantine rather than silently dropping the link. Unit tests cover staging, conflict refusal and folder round-trip; a native E:→C: quarantine→restore run through Cleaner verified the full path on 2026-11-16.
+9. **Scan Index IPC:** `query_directory_children`, `search_indexed_files` and `get_scan_index_stats` are registered and index data is built during scans, but no current view calls them. They are dead IPC until a tree/search view consumes the index.
+10. **Project Discovery Is Bounded, Not Exhaustive:** Automatic candidates cover common profile/drive folders; projects elsewhere require **Add project folder**. Scanning stops at 60,000 directories, 400 projects and 24 roots. It does not index every file on a drive.
+11. **Project Activity Is Heuristic:** Activity uses project, manifest and Git timestamps, not open handles or editor sessions. An old label is never permission to clean; every artifact is unselected until the user chooses it.
+12. **Artifact Rebuild Is Not Executed:** Cyron shows the official rebuild/prune command (`npm ci`, `cargo clean`, `pytest --cache-clear`, `ruff clean`, `hf cache prune`, etc.) but never launches a package manager, model CLI or shell. This preserves the no-arbitrary-command boundary.
+13. **Next.js Cache Caveat:** Only `.next/cache` is offered; `.next` output and runtime ISR data are not. A self-hosted server can use filesystem-backed ISR data that regenerates only if its upstream data still exists; the preview says so and marks the artifact caution.
+14. **Per-Drive and Custom Tool Stores:** Cyron uses documented default cache paths. pnpm per-drive `.pnpm-store`, custom `UV_CACHE_DIR`, `PIP_CACHE_DIR`, `HF_HOME`, `OLLAMA_MODELS`, Yarn PnP/Zero-Installs caches and other overridden locations are not discovered automatically; the owning tool's own command is the correct path. LM Studio's documented model/conversation paths and legacy cache are both protected.
+15. **Native Desktop UI:** The Projects tab was driven end to end in the native Tauri build on 2026-11-17 (Windows UI Automation), including preview, quarantine, verification, restore and a second volume. This is recorded in GATES.md G78 with screenshots. The run used disposable projects only; no real user project or cache was cleaned.
+16. **Performance Is a Short Sample:** CPU, memory, disk and process figures describe one 700 ms window every ten seconds, not a lifetime average. Spikes between samples are missed, and per-process I/O combines file, network, pipe and device transfers. Cyron does not measure temperature or fan speed.
+17. **Elevated Performance Paths:** Per-app boot impact requires the administrator-only Diagnostics-Performance log, and WPR tracing requires an administrator session. The unelevated UI says so and disables tracing; both elevated paths are UNVERIFIED as of 2026-11-17.
+18. **Baselines Show Association:** Two local samples can show that a number changed, not that a change caused a speed improvement. The UI says this explicitly and never reports a guaranteed gain.

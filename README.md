@@ -20,10 +20,10 @@ risk labels, built for everyday users and developers alike.
 ### 1. Application Inventory & Uninstallation
 - **Multi-Source Discovery**:
   - **Win32 Applications**: Reads 64-bit and 32-bit views across `HKEY_LOCAL_MACHINE` and `HKEY_CURRENT_USER`, filtering system components and updates. Identifies missing/broken uninstallers when executables no longer exist on disk.
-  - **Microsoft Store / MSIX / AppX**: Discovers installed modern packages via `AppModel\Repository\Packages` with read-only inventory and direct file inspection.
+  - **Microsoft Store / MSIX / AppX**: Current-user package inventory through the Windows Runtime package manager, with native reviewed removal (`RemovePackageAsync`) and no shell, `RemoveForAllUsers` or machine-wide deprovisioning.
   - **Steam Game Libraries**: Auto-detects Steam libraries across drives (`libraryfolders.vdf`), parsing `appmanifest_*.acf` to report game names, exact disk sizes, and launch URLs (`steam://uninstall/<appid>`).
   - **Portable Applications**: Bounded heuristic scanning in user app directories (`%LOCALAPPDATA%\Programs`) identifying standalone PE binaries without uninstaller registration.
-- **Standard & MSI Uninstallation**: Validates vendor uninstall commands and Windows Installer GUIDs, rejecting dangerous shell interpreters (`cmd.exe`, `powershell.exe`). Tracks process exit codes and handles reboot-required code `3010`.
+- **Standard & MSI Uninstallation**: Validates vendor uninstall commands and Windows Installer GUIDs, rejecting dangerous shell interpreters (`cmd.exe`, `powershell.exe`). Reconciles exit codes against live inventory: 1605/1614 require confirmed absence, 1602 is cancellation, 3010/1641 require restart, and exit 0 alone is never reported as removed.
 - **Process Manager**: Discovers running processes associated with the application's installation folder, verifies process creation times against snapshots to prevent PID recycling races, and unconditionally protects Windows critical system processes.
 - **Leftover Scanner**: Detects residual files, directories, and registry keys under AppData, ProgramData, and Windows Registry. Automatically creates a complete recursive `.reg` backup preserving all 6 Windows value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`) before subkey deletion, and moves residual files to quarantine.
 - **Sequential Batch Uninstallation**: Review-first batch queue executing under server-held, 10-minute expiring single-use confirmation plans (`BatchUninstallPlan`) with failure isolation.
@@ -38,7 +38,8 @@ risk labels, built for everyday users and developers alike.
 
 ### 3. Review-First Cache Cleaner & Extensible Providers
 - **Declarative Provider System**: Versioned (`schema_version: 1`) provider definitions with strict path validation, risk categorization (**Safe**, **Caution**, **Protected**), and application detection.
-- **Developer & AI Cache Catalog**: Covers Claude Code, Codex, Gemini, Cursor, VS Code, Ollama, Hugging Face, npm, pnpm, Yarn, pip, Poetry, uv, Cargo, Rustup, Gradle, vcpkg, Docker, WSL, Windows temp files, and browsers.
+- **Developer & AI Cache Catalog**: Covers Claude Code, Codex, Gemini, Cursor, VS Code, Antigravity, Freebuff, Ollama, LM Studio, Hugging Face, npm, pnpm, Yarn, pip, Poetry, uv, Cargo, Gradle, Docker, WSL, Windows temp files, and browsers. A conservative install check distinguishes detected tools from orphaned caches without ever auto-selecting them.
+- **Developer Project Storage**: Scans selected local drives and user-added folders for real projects by manifest and Git root, then measures only named regenerable artifacts (`node_modules`, `dist`, `build`, `target`, `.next/cache`, `.turbo`, `__pycache__`, and equivalents). Each artifact shows exact file ownership evidence, confidence, last write time, rebuild instructions and what is lost. Source, `.git`, `.env`, credentials, databases and model weights are protected and never offered. Cleanup uses the same preview, quarantine, restore and verification engine.
 - **Enforced Backend Protections**: Protected data (chat logs, models, credentials, settings, Windows Update downloads) is unconditionally rejected from cleaning in the Rust backend.
 - **Recoverable Quarantine**: Cleaned files are moved into `<app_data>\quarantine\<run-id>\` alongside an append-only, durable write-ahead recovery journal (`recovery_journal.jsonl` with physical `sync_all`). Restores use atomic `MoveFileExW` no-overwrite guarantees.
 
@@ -60,6 +61,14 @@ risk labels, built for everyday users and developers alike.
 - **Session Lifecycle**: Cursor tracking and targeting resolution only run during an active confirmed session; HUD banner and floating crosshair triggers are strictly hidden when inactive.
 - **Active Sidebar Indicator**: Persistent active indicator badge in the sidebar with an inline exit control; supports instant `Esc` cancellation without leaving stale targets or background polling.
 
+### 6. Performance Diagnostics & Startup Evidence
+- **Live Local Metrics**: Samples total CPU, physical memory and commit charge, Windows PDH physical-disk busy/queue counters, fixed-volume capacity, and per-process CPU, working set and I/O with a 700 ms measured window and a bounded 4,096-process cap.
+- **Startup and Task Provenance**: Lists HKCU/HKLM `Run`, `RunOnce`, WOW6432Node and Startup-folder registrations plus boot/logon scheduled tasks. Per-app boot impact is shown only when the administrator-only Diagnostics-Performance event log actually records it; otherwise the page says **Unavailable** instead of inventing a score.
+- **Reversible Startup Changes**: Enabling or disabling an entry uses the existing Windows `StartupApproved` bytes, preserves the original registration, and requires a native confirmation showing the exact entry and location. Machine-wide entries stay read-only without elevation.
+- **Evidence-Bound Recommendations**: Recommendations appear only for measured pressure (CPU, memory, physical disk, capacity, or recorded boot cost) and each carries its evidence, expected effect, risk and verification method. A high per-process I/O total alone is not treated as disk pressure because Windows includes network and device transfers.
+- **Guided Investigation & Baselines**: *Why is my PC slow?* filters the evidence by symptom. Users can record local before/after measurements; the page reports association, not causation, and never claims a guaranteed speed gain. An optional WPR trace is offered only when basic metrics cannot explain the lag, requires the user to relaunch as administrator, and is stored locally.
+- **No Placebo Tweaks**: No RAM boosters, standby-memory clearing, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling or driver tweaks.
+
 ---
 
 ## Architecture & Safety Guarantees
@@ -72,7 +81,7 @@ flowchart TD
     end
 
     subgraph IPC ["Tauri v2 IPC Boundary (CamelCase JSON)"]
-        Cmds[34 Validated Commands]
+        Cmds[72 Validated Commands]
     end
 
     subgraph Backend ["Rust Core Engine"]
@@ -85,6 +94,7 @@ flowchart TD
         CleanupEng[Cleanup Engine: Guard & Read-Only Check]
         Quarantine[Crash-Consistent Journal & Atomic MoveFileExW]
         ExplorerMgr[HKCU Shell Context Menu Verbs]
+        PerfMgr[Performance Diagnostics: Win32 + PDH + Event Log]
     end
 
     Views <--> Cmds
@@ -96,13 +106,14 @@ flowchart TD
     Cmds <--> ProvMgr
     Cmds <--> CleanupEng
     Cmds <--> ExplorerMgr
+    Cmds <--> PerfMgr
     CleanupEng --> Quarantine
     LeftoverMgr --> Quarantine
 ```
 
-- **Server-Held Confirmation Plans**: Every destructive action (cleaning, uninstallation, process termination, leftover removal, batch uninstallation) requires an expiring, single-use plan generated server-side.
+- **Server-Held Confirmation Plans**: Every destructive action (cleaning, uninstallation, process termination, leftover removal, batch uninstallation, Analyzer deletion and Explorer Force Delete) requires an expiring, single-use plan generated server-side.
 - **Fail-Closed Execution**: If process creation time cannot be verified, or if write-ahead journal synchronization fails, operations abort immediately.
-- **Zero In-Place Deletion**: Files are moved into quarantine batches; permanent purging is explicitly separated and manifest-scoped.
+- **Quarantine by Default**: Cleaner, leftover and Explorer Force Delete targets move into journaled quarantine batches. Permanent removal is a separate, explicitly confirmed Analyzer or Explorer action and is plan-scoped.
 - **No Network Telemetry**: Cyron does not contain tracking, analytics, or network-bound phone-home code.
 
 ---
@@ -137,7 +148,7 @@ Every build is verified with automated test suites, stress harnesses, and end-to
 
 ```powershell
 npm run typecheck                                      # TypeScript type validation (0 errors)
-npm test                                               # 71 Vitest frontend tests
+npm test                                               # 98 Vitest frontend tests
 npm run build                                          # Production frontend bundle
 node scripts/verify-dist.mjs                           # Frontend bundle assertions (DIST_OK)
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
@@ -159,7 +170,8 @@ npm run verify:signatures                              # Authenticode signature 
 
 ## Current Status & Limitations
 
-- **Store / MSIX Uninstallation**: Microsoft Store packages are inventoried with read-only inspection. Because Store lifecycle is managed by Windows Package Manager, standard Win32 uninstallation is disabled with explicit guidance to use Windows Settings or `winget`.
+- **Store / MSIX Uninstallation**: Current-user Microsoft Store packages can be removed through a server-held plan and the native Windows Runtime package manager. Cyron never calls `RemoveForAllUsers`, deprovisions machine-wide, elevates automatically or launches `winget`/PowerShell. Machine-wide or provisioned packages require Windows Settings or an administrator-managed tool. Live Store removal through the desktop UI is UNVERIFIED as of 2026-11-16.
+- **Performance Trace & Elevated Boot Impact**: The Performance page is read-only unless you toggle a startup entry. Recording a Windows Performance Recorder trace and reading per-app boot impact require an administrator session; the unelevated UI explains and disables both. Those elevated paths are UNVERIFIED. Cyron does not measure temperature, fan speed or guarantee any speed improvement.
 - **Portable Applications**: Discovered via explainable heuristics; standard uninstaller commands are disabled because portable apps lack registry uninstallers. Leftover and disk analysis are available.
 - **Code Signing Architecture**: Official Authenticode code signing under the Chryypt Organization:
   - `CHRYYPT_SIGNED`: Releases and installers signed by Chryypt Organization (`CN=Chryypt Organization`, RSA 3072, SHA-256) via `npm run build:signed` (`scripts/sign-build.ps1`).

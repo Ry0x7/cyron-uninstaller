@@ -397,6 +397,137 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
   EXPECT: Requires real GUI target executable `disposable_gui_target.exe` (non-GUI fallback strictly prohibited); asserts `WindowFromPoint` resolves the exact HWND, PID, and title; tests locking, cancellation, and verified termination. If desktop interaction is unavailable (headless CI), recorded as NOT VERIFIED rather than false PASS.
   EVIDENCE: Local desktop verification: PASS (disposable GUI target HWND and PID matched, process terminated). Headless CI without interactive desktop: recorded as NOT VERIFIED.
 
+## Phase 1 — Repository audit and reliability baseline (2026-11-16)
+
+- [x] G62: documentation evidence workflow is verifiable from a clean clone
+  CHECK: `npm run docs:check` plus a negative link test
+  EXPECT: `DOCS_CHECK: PASSED`; a Markdown link into a gitignored directory fails with exit 1
+  EVIDENCE: `DOCS_CHECK: PASSED` (74 Markdown files). The negative test added a Markdown link from `docs/evidence/` to `../../.unlazy/capabilities/PLAN.md` and produced exit 1 with "points into gitignored local-only". The test file was removed afterwards. `HANDOFF.md` and `GATES.md` now cite the committed [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md).
+
+- [x] G63: Explorer Force Delete quarantine is journaled, restorable and purgeable
+  CHECK: `cargo test --manifest-path src-tauri/Cargo.toml --lib explorer::tests`
+  EXPECT: 13 passed; 0 failed
+  EVIDENCE: 13/13 passed. New tests quarantine a disposable folder, assert the write-ahead journal and manifest exist, restore the folder byte-for-byte through `restore_batch`, purge a folder batch through `purge_batch`, and prove an unknown mode aborts without modifying the target. The quarantine path now records a full stored path (previously only a filename, so restore and purge could not find the batch), rejects unknown modes, and propagates manifest failures as warnings while the journal remains the recovery record.
+
+- [x] G64: single-process termination fails closed without a verified creation time
+  CHECK: `cargo test --manifest-path src-tauri/Cargo.toml --lib process::tests`
+  EXPECT: 6 passed; 0 failed
+  EVIDENCE: `single_process_termination_fails_closed_without_verified_creation_time` passed. Explorer Kill Process and Force Delete lock termination now refuse a plan whose creation time is 0 instead of skipping the identity check. The Kill Process plan also omits processes whose creation time cannot be read.
+
+- [x] G65: full suites after the Phase 1 fixes
+  CHECK: `npm run typecheck`, `npm test`, `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml`, `npm run docs:check`
+  EXPECT: exit 0
+  EVIDENCE: typecheck exit 0; 92 frontend tests in 11 files passed; Rust 213 passed, 4 ignored, 0 failed; documentation passed (74 files). Fixtures and the desktop build are recorded separately below.
+
+- [x] G66: Explorer Force Delete folder quarantine survives a cross-volume round trip
+  CHECK: `cargo test --manifest-path src-tauri/Cargo.toml --lib` plus native quarantine → Cleaner → restore
+  EXPECT: the folder is staged on the destination volume, published without overwrite, listed in Cleaner, and restored byte-for-byte
+  EVIDENCE: `cross_volume_folder_restore_stages_and_publishes`, `cross_volume_folder_restore_never_overwrites` and `quarantine_writes_journal_and_restores_a_folder` passed. Native desktop 2026-11-16: a disposable folder on E: was quarantined into `%APPDATA%` on C:, appeared in Cleaner > Quarantine, and was restored to E: through the UI with its contents intact. The pre-fix native run failed at publish (`os error 80`), which is why the staging path exists. A quarantined tree containing a reparse point is refused and kept in quarantine; that refusal is reviewed in code but has no automated fixture, because creating a junction can require privilege. Screenshots were captured into the gitignored `tmp/` and are not committed.
+
+## Phase 2 — production-grade removal (2026-11-16)
+
+These gates extend, and do not rewrite, the historical Phase 4 and Phase 1 evidence above.
+
+- [x] G67: discovery, Store plans, lifecycle history, remnant ownership and completion semantics pass their focused suites
+  CHECK: `node scripts/verify-phase2.mjs --discovery --store --history --remnants --quarantine --completion`
+  EXPECT: all six markers
+  EVIDENCE: `PHASE2_DISCOVERY_OK`, `PHASE2_STORE_PLAN_OK`, `PHASE2_HISTORY_OK`, `PHASE2_REMNANTS_OK`, `PHASE2_QUARANTINE_OK`, `PHASE2_COMPLETION_OK` (exit 0). Focused tests include live current-user Store inventory filters, MSI product-code detection, PE portable metadata, atomic history reload/removal, name-only remnant downgrades, and 1605/1614/3010/1602 reconciliation. No live Store package was removed.
+
+- [x] G68: security boundaries still hold after the Phase 2 modules
+  CHECK: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test security`
+  EXPECT: 26 passed, 0 failed
+  EVIDENCE: 26/26 passed. `app_history.rs` was added to the reviewed modules that may publish a file by rename; the assertion still rejects destructive primitives in every other module. Junction, no-overwrite, read-only, hostile-id and registry-backup-before-deletion checks all passed.
+
+- [x] G69: disposable Win32 registration → vendor process → absence → quarantine round trip
+  CHECK: `node scripts/verify-phase2.mjs --fixture`
+  EXPECT: `PHASE2_WIN32_FIXTURE_OK`
+  EVIDENCE: exit 0. The fixture creates a disposable HKCU uninstall key under `%TEMP%\cyron-phase2-win32-<pid>`, copies its own binary as the vendor uninstaller, discovers the app from the live registry, creates a server plan, runs the process, confirms the registration disappeared, reconciles `completed`, scans the exact install folder as `safe`, quarantines it, and restores it. The separate security suite covers no-overwrite restore refusal. Registry key and temp folder are removed by a drop guard.
+
+- [x] G70: frontend contracts and production bundle
+  CHECK: `node scripts/verify-phase2.mjs --frontend`
+  EXPECT: `PHASE2_FRONTEND_OK`
+  EVIDENCE: exit 0; TypeScript clean, 92 Vitest tests in 11 files passed, production build succeeded. The Store wizard and persistent-history UI are covered only by typecheck/contracts, not a desktop run.
+
+- [x] G71: full Rust regression and documentation integrity
+  CHECK: `node scripts/verify-phase2.mjs --regression`
+  EXPECT: `PHASE2_REGRESSION_OK`
+  EVIDENCE: exit 0. Full Rust suite: 230 passed, 4 ignored, 0 failed across lib, security, cleanup_stress, real_system, stress_scan and analyzer_actions. `npm run docs:check`: `DOCS_CHECK: PASSED` over 76 Markdown files.
+
+- [ ] G72: live Microsoft Store / MSIX removal
+  CHECK: `node scripts/verify-phase2.mjs --live-store` on a disposable Windows profile/package
+  EXPECT: a reviewed current-user package is removed and absence is verified
+  EVIDENCE: UNVERIFIED. No disposable signed MSIX package is available on this machine; enabling developer mode or changing the certificate trust store was out of scope. The UI path has not been exercised.
+
+- [ ] G73: live MSI/vendor uninstall and desktop Store wizard
+  CHECK: `node scripts/verify-phase2.mjs --live-msi`, then `--manual-ui`
+  EXPECT: a disposable MSI returns a real Windows Installer code reconciled against inventory, and the Store wizard is driven end to end
+  EVIDENCE: UNVERIFIED. WiX/NSIS are not installed here, and no native desktop session was recorded for this pass. The fixture covers a real Win32 exe uninstaller, not MSI or Store.
+
+## Phase 3 — AI and developer storage intelligence (2026-11-16)
+
+These gates cover the Projects engine added to Cleaner. The historical Phase 1, Phase 2 and earlier evidence above remains unchanged.
+
+- [x] G74: read-only project recognition, artifact measurement and protected-data evidence
+  CHECK: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib devscan`
+  EXPECT: 8 passed, 0 failed
+  EVIDENCE: 8/8 passed. Fixtures prove manifest and Git-root recognition, package name and framework metadata, `node_modules`, `.next/cache` (not the rest of `.next`), `dist`, Rust/Maven `target`, Gradle project caches, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, nested `__pycache__`, hard-link-aware measurement, activity labels, server-held id binding, tampered-path refusal, post-run verification, and refusal of profile/Windows/relative roots. `.git`, `.env`, credentials, keys and project databases are reported as protected; no artifact path may leave its recorded project.
+
+- [x] G75: disposable project cleanup, verification and restore round trip
+  CHECK: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test phase3_project`
+  EXPECT: 3 passed, 0 failed
+  EVIDENCE: 3/3 passed. Two scenarios: (1) a temporary project with source, `.git`, `.env`, `node_modules` and `dist` — the preview selects only the two regenerable folders, execution quarantines them, verification reports both removed, restore returns them, and source, credentials and Git data remain untouched; (2) a Next.js project — only `.next/cache` is selected and quarantined while `.next/server`, `.next/BUILD_ID` and source remain, verification reports the cache removed, and restore returns it. Unknown artifact ids and empty selections are refused.
+
+- [x] G76: IPC contracts and frontend selection logic
+  CHECK: `npm run typecheck`, `npm test`
+  EXPECT: 0 TypeScript errors; 98 Vitest tests in 12 files passed
+  EVIDENCE: typecheck exit 0; 98/98 passed in 12 files, including `developer.test.ts` filtering/totals, `format.test.ts` path display, and `api.test.ts` argument contracts for `scan_developer_storage`, `preview_developer_cleanup` and `verify_developer_cleanup`. The Projects tab is mounted only after the user opens it; its buttons require explicit artifact selection, a preview, and the confirmation checkbox.
+
+- [x] G77: full regression and documentation after the Phase 3 changes
+  CHECK: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml`, `npm run docs:check`
+  EXPECT: 244 passed, 4 ignored, 0 failed; `DOCS_CHECK: PASSED`
+  EVIDENCE: 244 passed (202 library, 26 security, 5 cleanup-stress, 3 Phase 3 project, 1 real-system, 5 scanner-stress, 2 analyzer-actions), 4 ignored, 0 failed. Documentation verification passed. The pre-existing safety suites (journal-before-move, no-overwrite restore, junction refusal, read-only gating, hostile ids) still pass unchanged.
+
+- [x] G79: RC1 E2E fixture is deterministic on a busy desktop
+  CHECK: `node scripts/verify-e2e.mjs`
+  EXPECT: `RC1_E2E_FIXTURE_OK`; all 8 scenarios
+  EVIDENCE: The first Phase 3 run failed scenario 1 because the disposable GUI window was left behind another window, so `WindowFromPoint` resolved a different HWND. The fixture window is now raised with `SetWindowPos(HWND_TOPMOST)` and the hit-test is polled for up to 3 seconds instead of checked once. Rerun passed all 8 scenarios, including Hunter targeting, verified termination, broken-entry recovery, Startup bytes, latency/memory loop and critical-process refusal. This changes test helpers only; the production targeting path is unchanged.
+
+- [x] G78: native Projects tab and multi-drive desktop run
+  CHECK: open Cleaner → Projects in the real Tauri desktop build, scan local drives with a disposable project on a second volume, select only reviewed artifacts, preview, clean, confirm verification, and restore from Quarantine
+  EXPECT: the UI shows the same targets and verification as the backend, and a disposable artifact is restored byte-for-byte
+  EVIDENCE: PASS on 2026-11-17 in the native Tauri debug desktop app (served by the local Vite dev server) on Windows 11, driven through Windows UI Automation. A disposable project under `Documents\GitHub` was discovered through an automatic profile root; the UI showed 2 artifacts, 50 B protected, exact paths, loss/rebuild evidence, and the read-only gate. After enabling cleaning, selecting only `node_modules`, previewing 1 file/20 B, checking the confirmation box, and choosing Move to quarantine, the result reported `1 file moved`, verification reported `1 artifact removed / 0 remaining`, and `.env`, `.git`, `dist` and source stayed. Quarantine showed the 1-file batch, and Restore returned the file to its original path without overwriting anything and emptied the batch. A second disposable project under `E:\Projects` was then discovered through the automatic `E:\Projects` root alongside the C: root, proving multi-drive discovery in the running window. Only disposable fixtures were touched; both were removed afterwards.
+  Local captures were reviewed for seven states: projects summary, artifact list, preview, result, quarantine, restored, and the E: project. They show the exact paths and counts above. Raw captures are local-only and not committed, per the [evidence policy](docs/evidence/README.md).
+  The native run found and fixed two UI defects: canonical `\\?\` paths were shown verbatim (now stripped for display only; operations keep the canonical path) and Quarantine stayed stale after a Projects cleanup (the tab now refreshes whenever it opens).
+
+## Performance diagnostics (2026-11-17)
+
+These gates cover the read-only Performance page. Earlier uninstaller/cleanup evidence above remains historical and unchanged.
+
+- [x] G80: live metrics are internally consistent and bounded
+  CHECK: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test performance -- --nocapture`
+  EXPECT: exit 0; sample ≥ 500 ms, CPU shares sum to 100%, memory and process figures consistent
+  EVIDENCE: passed on this machine. Native page showed a 702 ms sample across 179 processes: 15% CPU, 37% memory in use (30.3 GB available of 47.9 GB), 1.1% physical-disk busy with queue 0.03, and E: at 13% free. The snapshot's own limitations list a bounded sample, combined per-process I/O and unmeasured protected processes.
+
+- [x] G81: startup evidence and reversible toggling use the real Windows path
+  CHECK: native Tauri debug app driven with UI Automation, disposable HKCU `Run` value
+  EXPECT: Cancel changes nothing; Disable writes StartupApproved byte 0x03; Enable restores 0x02; the Run value survives; the row and notice update
+  EVIDENCE: PASS. `CyronPerfFixture` (notepad.exe) was created under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. **Cancel** left it enabled. **Disable** wrote `03 00 00 00 ...` to `StartupApproved\Run`, preserved the Run value, showed the disabled notice and changed the row action to **Enable**. **Enable** wrote `02 00 00 00 ...` and reversed the row. The confirmation is a native `#32770` dialog, not `window.confirm` (which was invisible in WebView2). Fixture values were removed afterwards. See [the receipt](docs/evidence/2026-11-17-performance-diagnostics.md) and [dialog](docs/evidence/phase4-native-startup-confirmation.png).
+
+- [x] G82: recommendations require physical evidence; process I/O alone is not disk pressure
+  CHECK: `cargo test --manifest-path src-tauri/Cargo.toml --lib perf::tests`
+  EXPECT: 8 passed; idle-disk regression and fixed System32 path validation present; every recommendation has evidence/effect/risk/verification
+  EVIDENCE: 8/8 passed. The native run first produced **Measured disk I/O is busy** at 0.1% physical-disk busy because the gate accepted 40.8 MB/s of per-process I/O (which includes network). The gate now requires measured physical-disk busy ≥ 70% and queue ≥ 2.0; `high_process_io_with_an_idle_physical_disk_is_not_disk_pressure` passed. The rebuilt native page showed **No pressure matches this symptom** at 1.1% disk busy.
+
+- [x] G83: guided investigation, freshness, baselines and trace availability behave honestly
+  CHECK: native Tauri debug app driven with UI Automation
+  EXPECT: guides change the answer; manual Refresh bypasses the startup cache; two baselines compare; trace is disabled and explained when unelevated
+  EVIDENCE: PASS. UIA selected **Startup takes forever**, **Disk is almost full** and **The fan is loud**; each changed the guide title and filtered recommendations. A disposable startup entry was absent until **Refresh** forced a new startup inventory. Two labeled baselines displayed previous/latest CPU, memory, available memory, commit and disk busy with the association-not-causation note. Unelevated, the trace panel showed **Needs administrator**, disabled **Record trace**, and offered no elevation. See [baselines](docs/evidence/phase4-native-baselines.png).
+
+- [x] G84: full regression and documentation after the performance changes
+  CHECK: `npm run typecheck`, `npm test`, full Rust suite, `npm run docs:check`
+  EXPECT: exit 0; all existing safety suites unchanged
+  EVIDENCE: typecheck exit 0; 98 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed, including 26 security and 5 cleanup-stress tests; `DOCS_CHECK: PASSED` over 77 Markdown files. CI is not yet green because this tree is uncommitted; local checks are recorded here. UNVERIFIED: elevated Diagnostics-Performance boot impact and a real WPR trace recording/opening.
+
 ## Not gated
 
 - [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;
@@ -406,11 +537,11 @@ Last run: 2026-11-06, Windows 10/11 development machine, MSVC toolchain via
 
 ## Capability improvements — 2026-11-09
 
-Acceptance contract recorded before implementation in .unlazy/capabilities/PLAN.md. Existing gates above remain historical evidence. Task gates cover Analyzer actions/safety, Cleaner scope/classification/recovery, Uninstaller outcomes, visual states, frontend/Rust/docs/build and fixture integration. Results will be appended after verification.
+Acceptance contract recorded before implementation in the local `.unlazy/` runtime directory (gitignored). Existing gates above remain historical evidence. Task gates cover Analyzer actions/safety, Cleaner scope/classification/recovery, Uninstaller outcomes, visual states, frontend/Rust/docs/build and fixture integration. Results will be appended after verification.
 
 ## Capability acceptance — 2026-11-09
 
-Task-specific acceptance was recorded before implementation in .unlazy/capabilities/PLAN.md; the historical gates above are preserved. The current verification receipts are separate from historical release evidence.
+Task-specific acceptance was recorded before implementation in the local `.unlazy/` runtime directory (gitignored); the historical gates above are preserved. The committed [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md) records the results; it is separate from historical release evidence.
 
 - [x] G57: Analyzer supports reviewed file/folder selections, separate Recycle Bin and permanent actions, expiring single-use plans, protected/reparse/stale-target refusal, progress, cancellation, partial results and scan invalidation.
   CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --test analyzer_actions
@@ -425,6 +556,6 @@ Task-specific acceptance was recorded before implementation in .unlazy/capabilit
   EXPECT: Test Files
   EVIDENCE: Frontend outcome/IPC regressions passed (92 tests across the complete frontend suite). Rust server reconciliation and changed-command tests passed. Root reviewed batch cancellation, Store guidance and the empty-process shortcut. Minimum-window search, empty results and clear-filter recovery were inspected in the desktop app. No real application uninstall was performed.
 - [x] G60: frontend, Rust, documentation, desktop build and isolated cleanup/uninstall/recovery integration checks succeed using the MSVC wrapper where required.
-  EVIDENCE: 92 frontend tests passed across 11 files; TypeScript passed. Full Rust suite passed (207 passed, 4 ignored); the ignored interactive Recycle Bin fixture was separately invoked and passed. Documentation, MSVC desktop debug build, isolated cleanup/recovery fixture and eight-scenario uninstall/process/registry/recovery fixture passed. Signing, installer bundles and release metadata were not rerun for this change. Current automatic command receipts live in .unlazy/capabilities/GATES.md.
+  EVIDENCE: 92 frontend tests passed across 11 files; TypeScript passed. Full Rust suite passed (207 passed, 4 ignored); the ignored interactive Recycle Bin fixture was separately invoked and passed. Documentation, MSVC desktop debug build, isolated cleanup/recovery fixture and eight-scenario uninstall/process/registry/recovery fixture passed. Signing, installer bundles and release metadata were not rerun for this change. The committed [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md) records the command ledger.
 - [x] G61: actual UI reviewed at representative window sizes with loading, empty, error, progress and result evidence; unexercised vendor/Store-specific scenarios named explicitly.
-  EVIDENCE: Eight scoped visual/interaction checks recorded in .unlazy/capabilities/visual/visual-evidence.json; integrity verification passed (76 files, including 59 source hashes). Inspected 1320x860 and minimum 1000x680 client windows and expanded Uninstaller. Covered Cleaner loading/C-only scan/inaccessible warning/session-remnant empty state, Uninstaller empty search/clear-filter recovery/Store guidance, and Analyzer protected-target refusal/review/live progress/cancel/result/rescan. A disposable 4000-file folder stopped with 2115 files deleted and an independently counted 1885 preserved; unrelated siblings remained. No real vendor uninstall, real cache cleanup, full screen-reader traversal or exhaustive provider/state matrix was exercised.
+  EVIDENCE: Eight scoped visual/interaction checks recorded in the committed [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md); the local integrity manifest was verified at recording time (76 files, including 59 source hashes). Those hashes describe commit `e38ea5c`, not the current tree, because this audit changed source files afterwards. Inspected 1320x860 and minimum 1000x680 client windows and expanded Uninstaller. Covered Cleaner loading/C-only scan/inaccessible warning/session-remnant empty state, Uninstaller empty search/clear-filter recovery/Store guidance, and Analyzer protected-target refusal/review/live progress/cancel/result/rescan. A disposable 4000-file folder stopped with 2115 files deleted and an independently counted 1885 preserved; unrelated siblings remained. No real vendor uninstall, real cache cleanup, full screen-reader traversal or exhaustive provider/state matrix was exercised.

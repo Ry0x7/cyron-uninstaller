@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "../../lib/api";
 import { useSettings, type ThemePreference } from "../../lib/settings";
 import type { ExplorerIntegrationStatus, StartupItem } from "../../lib/types";
@@ -100,7 +101,6 @@ export function Settings() {
     setIncludeHidden,
     setExclusions,
     setReadOnly,
-    setShowHunterWidget,
     reset,
   } = useSettings();
 
@@ -246,9 +246,22 @@ export function Settings() {
     if (item.isProtected || !item.canToggle) return;
     const targetState = !item.enabled;
     const actionLabel = targetState ? "enable" : "disable";
-    if (!window.confirm(`Are you sure you want to ${actionLabel} "${item.name}" from starting automatically?`)) {
+    let confirmed = false;
+    try {
+      confirmed = await ask(
+        `Are you sure you want to ${actionLabel} "${item.name}" from starting automatically?`,
+        {
+          title: targetState ? "Enable at startup?" : "Disable at startup?",
+          kind: "warning",
+          okLabel: targetState ? "Enable" : "Disable",
+          cancelLabel: "Cancel",
+        },
+      );
+    } catch (err) {
+      setStartupError(errorMessage(err));
       return;
     }
+    if (!confirmed) return;
 
     setTogglingId(item.id);
     setStartupError(null);
@@ -322,13 +335,11 @@ export function Settings() {
                 </p>
               </Panel>
 
-              <Panel title="Hunter Mode Desktop Trigger" subtitle="Target desktop windows to initiate uninstallation.">
-                <Toggle
-                  checked={settings.showHunterWidget}
-                  onChange={setShowHunterWidget}
-                  label="Show floating Hunter Mode desktop widget"
-                  description="Displays a persistent floating crosshair button in the bottom-right corner of the screen. When disabled, Hunter Mode is still accessible anytime from the Uninstaller header."
-                />
+              <Panel title="Hunter Mode" subtitle="Target desktop windows to review or remove an application.">
+                <p className="set-note">
+                  Hunter Mode is a session action in the sidebar below Uninstaller. It starts only after you
+                  confirm the targeting dialog, and its crosshair is hidden again when you exit or press Esc.
+                </p>
               </Panel>
             </div>
 

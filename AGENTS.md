@@ -14,8 +14,8 @@ Cyron is a Windows desktop application (Tauri v2 + Rust backend, React 19 + Type
 
 ## Architectural Invariants (Non-Negotiable)
 
-1. **IPC Surface:** 60 commands in `src-tauri/src/commands.rs`, registered in `lib.rs`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the contract. Change both together. Never accept free-form execution commands from the frontend.
-2. **Scanner is Strictly Read-Only:** Directory walk (`fs.rs`, `scan.rs`), direct NTFS MFT reader (`mft.rs`), duplicate finder (`duplicates.rs`), and storage categorization (`storage.rs`) never modify the filesystem. Reparse points (junctions, symlinks) are never followed.
+1. **IPC Surface:** 72 commands in `src-tauri/src/commands.rs`, registered in `lib.rs`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the contract. Change both together. Never accept free-form execution commands from the frontend.
+2. **Scanner is Strictly Read-Only:** Directory walk (`fs.rs`, `scan.rs`), direct NTFS MFT reader (`mft.rs`), duplicate finder (`duplicates.rs`), storage categorization (`storage.rs`), and developer project scanning (`devscan.rs`) never modify the filesystem. Reparse points (junctions, symlinks) are never followed.
 3. **Review-First Destructive Operations:** All modifications (cache cleaning, uninstallation, process termination, leftover removal, broken registry entry removal) require server-held, single-use expiring confirmation plans (`CleanupPlan`, `UninstallPlan`, `BatchUninstallPlan`, `LeftoverPlan`, `BrokenEntryPlan`).
 4. **Quarantine Over Deletion:** Cleaner and leftover files are moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\` using Win32 renames. Every move is preceded by a durable write-ahead recovery journal (`recovery_journal.jsonl`) with `sync_all`. Their only permanent removal is manifest-scoped `purge_quarantine`. **Narrow Analyzer exception:** explicit user-selected files/folders may be recycled or permanently deleted through separate, server-held, expiring, single-use Analyzer plans. Scanning remains strictly read-only; recycle failure never authorizes permanent file deletion. Permanent deletion has no Cyron restore.
 5. **Atomic No-Overwrite Restores:** Restoring quarantined files uses `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`. Existing files at destination are never overwritten.
@@ -24,6 +24,7 @@ Cyron is a Windows desktop application (Tauri v2 + Rust backend, React 19 + Type
 8. **App Discovery:** Win32 (HKLM/HKCU 64/32-bit), Microsoft Store (`AppModel\Repository\Packages`, read-only inventory), Steam (`libraryfolders.vdf`), and portable heuristics (`%LOCALAPPDATA%\Programs`). Store apps display guidance to Windows Settings / `winget`.
 9. **Shell Integration (`explorer.rs`):** Per-user shell verbs registered under `HKCU\Software\Classes` without elevation. CLI startup routes (`--analyze`, `--duplicates`, `--storage`, etc.) route to views; they never execute destructive actions directly.
 10. **Zero Telemetry:** The application contains no network stack or tracking code.
+11. **Performance Diagnostics Are Read-Only:** `perf.rs` samples CPU, memory, physical-disk counters, processes and startup/task inventory with bounded Windows APIs. It never clears standby memory, disables services, deletes Prefetch, changes the page file, disables Defender or updates, or applies registry/driver tweaks. Reversible startup toggling goes through the existing `StartupApproved` path and a native confirmation; advanced WPR tracing is optional, local, and requires the user to relaunch elevated.
 
 ## Git Workflow: Strict No-Rebase Policy
 
