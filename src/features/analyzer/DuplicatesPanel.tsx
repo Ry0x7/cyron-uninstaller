@@ -214,7 +214,6 @@ export function DuplicatesPanel({
     <div className="dup">
       <div className="dup-head">
         <div className="dup-head__copy">
-          <span className="dup-eyebrow">Duplicate files · read-only</span>
           <p className="dup-lede">
             Cyron groups files by size, hashes the first and last block, then verifies full contents
             with SHA-256. It only reports duplicates — nothing is deleted or moved.
@@ -240,7 +239,7 @@ export function DuplicatesPanel({
       </div>
 
       <p className="dup-scope" title={rootPath}>
-        Scope: <span className="dup-scope__path">{rootPath ? truncateMiddle(rootPath, 72) : "no folder scanned yet"}</span>
+        Folder: <span className="dup-scope__path">{rootPath ? truncateMiddle(rootPath, 72) : "no folder scanned yet"}</span>
       </p>
 
       {!rootPath && (

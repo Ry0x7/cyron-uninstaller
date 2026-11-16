@@ -139,6 +139,33 @@ export function truncateMiddle(value: string, max = 56): string {
   return `${value.slice(0, head)}…${tail > 0 ? value.slice(-tail) : ""}`;
 }
 
+/** Replaces Win32 error suffixes with plain language for warning lists. */
+export function friendlyError(message: string): string {
+  return message
+    .replace(/Access is denied\.?\s*\(os error 5\)/gi, "Windows denied access")
+    .replace(/The system cannot find the path specified\.?\s*\(os error 3\)/gi, "folder no longer exists")
+    .replace(/The system cannot find the file specified\.?\s*\(os error 2\)/gi, "file no longer exists")
+    .replace(
+      /The process cannot access the file because it is being used by another process\.?\s*\(os error 32\)/gi,
+      "file is in use by another program",
+    )
+    .replace(/\s*\(os error \d+\)/gi, "");
+}
+
+/**
+ * History stores a raw root path as the title for disk scans. Show the leaf
+ * folder with the operation name instead of the verbatim path.
+ */
+export function operationTitle(title: string, kindLabel: string): string {
+  const cleaned = displayPath(title).replace(
+    /^(Cleanup(?: did not run)?) · 1 locations$/,
+    "$1 · 1 location",
+  );
+  if (!/^[A-Za-z]:[\\/]|^\\\\/.test(title)) return cleaned;
+  const leaf = basename(cleaned);
+  return leaf ? `${kindLabel} · ${leaf}` : cleaned;
+}
+
 export function plural(count: number, singular: string, pluralForm?: string): string {
   return `${formatCount(count)} ${count === 1 ? singular : (pluralForm ?? `${singular}s`)}`;
 }

@@ -10,6 +10,8 @@ import {
   parentPath,
   truncateMiddle,
   extensionOf,
+  friendlyError,
+  operationTitle,
   plural,
 } from "./format";
 
@@ -161,6 +163,35 @@ describe("path helpers", () => {
     expect(extensionOf(".gitignore")).toBe("");
     expect(extensionOf("trailing.")).toBe("");
     expect(extensionOf("C:\\x\\file")).toBe("");
+  });
+});
+
+describe("friendlyError", () => {
+  it("turns Win32 error suffixes into plain language", () => {
+    expect(
+      friendlyError("User temporary files: Access is denied. (os error 5)"),
+    ).toBe("User temporary files: Windows denied access");
+    expect(
+      friendlyError("Cache: The system cannot find the path specified. (os error 3)"),
+    ).toBe("Cache: folder no longer exists");
+    expect(friendlyError("Other failure (os error 87)")).toBe("Other failure");
+  });
+});
+
+describe("operationTitle", () => {
+  it("shows the leaf of a raw scan path and leaves friendly titles alone", () => {
+    expect(operationTitle("\\\\?\\C:\\Users\\Ada\\work", "Disk scan")).toBe(
+      "Disk scan · work",
+    );
+    expect(operationTitle("Cleanup · 1 locations", "Cleanup")).toBe(
+      "Cleanup · 1 location",
+    );
+    expect(operationTitle("Cleanup did not run · 1 locations", "Cleanup")).toBe(
+      "Cleanup did not run · 1 location",
+    );
+    expect(operationTitle("Cleanup · 2 locations", "Cleanup")).toBe(
+      "Cleanup · 2 locations",
+    );
   });
 });
 

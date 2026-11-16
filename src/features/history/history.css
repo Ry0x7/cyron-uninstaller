@@ -1,0 +1,150 @@
+.recovery {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.recovery-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.recovery-summary strong {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.recovery-list,
+.recovery-log {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recovery-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+}
+
+.recovery-row:first-child {
+  border-top: 0;
+}
+
+.recovery-row__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.recovery-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.recovery-row__title {
+  color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.recovery-row__path {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.recovery-row__meta {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.recovery-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding-top: 2px;
+}
+
+.recovery-log__row {
+  display: grid;
+  grid-template-columns: 142px minmax(150px, 0.7fr) minmax(0, 2fr) 82px auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+}
+
+.recovery-log__row:first-child {
+  border-top: 0;
+}
+
+.recovery-log__when,
+.recovery-log__bytes {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.recovery-log__title {
+  color: var(--text-strong);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.recovery-log__detail {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.recovery-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0;
+}
+
+.recovery-skeleton__row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+@media (max-width: 1000px) {
+  .recovery-row {
+    flex-wrap: wrap;
+  }
+
+  .recovery-row__actions {
+    width: 100%;
+    padding-left: 44px;
+  }
+
+  .recovery-log__row {
+    grid-template-columns: 120px minmax(0, 1fr) auto auto;
+  }
+
+  .recovery-log__detail {
+    display: none;
+  }
+}

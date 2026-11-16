@@ -528,6 +528,31 @@ These gates cover the read-only Performance page. Earlier uninstaller/cleanup ev
   EXPECT: exit 0; all existing safety suites unchanged
   EVIDENCE: typecheck exit 0; 98 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed, including 26 security and 5 cleanup-stress tests; `DOCS_CHECK: PASSED` over 77 Markdown files. GitHub Actions run [43930569278](https://github.com/Ry0x7/cyron-uninstaller/actions/runs/43930569278) passed both jobs on commit `d5e5afc`, including the cleanup and RC1 E2E fixtures. UNVERIFIED: elevated Diagnostics-Performance boot impact and a real WPR trace recording/opening.
 
+## Phase 5 — design system and navigation rebuild — 2026-11-17
+
+Acceptance contract recorded before implementation. Existing safety gates above remain authoritative; this section covers presentation and navigation only.
+
+- [x] G85: exactly five primary destinations are reachable, Settings stays in the sidebar footer, and Hunter Mode lives inside Applications instead of its own page.
+  CHECK: native Tauri desktop app driven through WebView2 remote debugging at 1320x860 and 1000x680
+  EXPECT: Home, Applications, Storage & Cleanup, Performance, History & Recovery all open; Settings opens from the footer; no dead or duplicate navigation item
+  EVIDENCE: PASS. All five destinations opened; Settings was reached from the footer and resolved to the Appearance tab; **Find by window** opened the Hunter confirmation from Applications. No separate Hunter navigation item or dead link was present. See the [design-system receipt](docs/evidence/2026-11-17-design-system.md) and [Home](docs/evidence/phase5/01-home-light.png), [Applications](docs/evidence/phase5/03-applications-light.png), [Storage & Cleanup](docs/evidence/phase5/04-storage-cleanup-light.png), [Performance](docs/evidence/phase5/07-performance-light.png) and [History & Recovery](docs/evidence/phase5/09-activity-light.png).
+- [x] G86: every page and critical modal uses the committed token and primitive system, with no page-specific palette, radius, type scale or shadow.
+  CHECK: source audit plus desktop screenshots of every destination, its subviews and the Hunter/Uninstall/Force Delete/Recovery dialogs
+  EXPECT: one accent, one neutral family, one radius scale and one typographic hierarchy across all reviewed surfaces
+  EVIDENCE: PASS. Reviewed all five destinations, both Storage & Cleanup tabs, Cleanup sub-tabs, both History & Recovery tabs, Settings, the Hunter dialog, the uninstall wizard and the permanent-deletion review. All use `src/styles/tokens.css` and `src/components/ui.tsx` with one blue accent and one neutral family. No page-local palette, gradient, glass, neon or ad-hoc radius scale was found. See [design system](docs/DESIGN.md), [Settings dark](docs/evidence/phase5/11-settings-dark.png) and [Hunter dialog](docs/evidence/phase5/12-hunter-dialog.png).
+- [x] G87: representative long names, paths, counts, empty states and minimum window width do not clip, overlap or create horizontal page overflow.
+  CHECK: native captures at 1320x860 and 1000x680 plus a browser layout probe of the same views
+  EXPECT: no horizontal document overflow, no clipped actions, badges or headings; long values truncate or wrap intentionally
+  EVIDENCE: PASS after three fixes. At 1000x680 the page probe returned 0 horizontal overflow on Applications, Storage & Cleanup and History; the Activity table measured 646/646 px with no inner scroll after the Type column was hidden. The Recovery log badge no longer wraps to a second grid row, and the Analyzer review strips the `\\?\` display prefix. Long application names, publishers and paths truncate with the full value in `title`. See [Applications min](docs/evidence/phase5/15-applications-min.png), [Storage min](docs/evidence/phase5/16-storage-min.png) and [Recovery min](docs/evidence/phase5/17-recovery-min.png).
+- [x] G88: keyboard focus, reduced motion and contrast remain usable after the redesign.
+  CHECK: keyboard traversal of navigation, tab bars, tables and dialogs; `prefers-reduced-motion` emulation; contrast spot checks
+  EXPECT: visible focus on every interactive control, dialogs restore focus, Escape closes, reduced motion removes spatial movement, body text meets 4.5:1
+  EVIDENCE: PASS. Tab order reached brand → Home → Applications → Storage & Cleanup → Performance → History & Recovery → Settings; Enter activated Applications. The focused control had a visible 2px `rgb(47,111,235)` outline. In the Hunter dialog, ten Tab presses stayed inside and Escape closed it and returned focus to **Find by window**. With `prefers-reduced-motion: reduce`, no sampled button, link, input or tab exceeded 0.05 s transition/animation. Token spot checks: light body 9.32:1, secondary 6.05:1, faint 4.82:1; dark body 12.17:1, muted 7.34:1, faint 5.21:1; accent-on-white 4.57:1. UNVERIFIED: screen-reader traversal and forced-colors mode.
+- [x] G89: typecheck, frontend tests, documentation check, production build and the native smoke run pass after the redesign.
+  CHECK: `npm run typecheck`, `npm test`, `npm run docs:check`, `npm run build`, `npm run build:desktop`
+  EXPECT: exit 0 and no regression in the existing frontend suite or documentation invariants
+  EVIDENCE: PASS. Typecheck exit 0; 100 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed; production build exit 0 (562.28 kB JS / 127.63 kB CSS, chunk-size warning only); `DOCS_CHECK: PASSED` over 79 Markdown files; `build:desktop` produced `src-tauri/target/debug/cyron.exe`; native smoke run exercised every destination and the keyboard/dialog checks above. Full command ledger in the [design-system receipt](docs/evidence/2026-11-17-design-system.md).
+
 ## Not gated
 
 - [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;

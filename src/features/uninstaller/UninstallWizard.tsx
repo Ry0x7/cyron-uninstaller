@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage, invalidateInstalledApps } from "../../lib/api";
-import { formatBytes, formatCount } from "../../lib/format";
+import { displayPath, formatBytes, formatCount } from "../../lib/format";
 import type {
   AppProcess,
   BrokenEntryPlan,
@@ -506,15 +506,15 @@ export function UninstallWizard({
 
           {app.isProtected && (
             <Banner tone="caution">
-              <strong>Windows System Component.</strong> Cyron marks this entry protected to
+              <strong>Windows system component.</strong> Cyron marks this entry protected to
               prevent accidental damage to the operating system. Standard uninstallation is
               disabled.
             </Banner>
           )}
 
           <div style={{ marginTop: 8 }}>
-            <h4 style={{ fontSize: 13, marginBottom: 8, color: "var(--text-base)" }}>
-              Choose Removal Mode:
+            <h4 style={{ fontSize: 13, marginBottom: 8, color: "var(--text-strong)" }}>
+              How should Cyron remove it?
             </h4>
 
             {/* Store Mode Card */}
@@ -522,8 +522,8 @@ export function UninstallWizard({
               <div className={`un-mode-card ${mode === "store" ? "un-mode-card--selected" : ""}`}>
                 <div className="un-mode-card-content">
                   <div className="un-mode-card-title">
-                    <span>Remove with Windows (current user)</span>
-                    <Badge tone="accent">Native Store removal</Badge>
+                    <span>Remove with Windows</span>
+                    <Badge tone="accent">Current user</Badge>
                   </div>
                   <div className="un-mode-card-desc">
                     Cyron asks the Windows Package Manager to remove this package for your user
@@ -556,9 +556,8 @@ export function UninstallWizard({
                 />
                 <div className="un-mode-card-content">
                   <div className="un-mode-card-title">
-                    <span>Standard Uninstall (Recommended)</span>
-                    <Badge tone="safe">Safe Uninstall</Badge>
-                    <Badge tone="accent">Vendor Built-in</Badge>
+                    <span>Standard uninstall</span>
+                    <Badge tone="safe">Recommended</Badge>
                   </div>
                   <div className="un-mode-card-desc">
                     Runs the official registered uninstaller with live process monitoring and exit code
@@ -594,8 +593,7 @@ export function UninstallWizard({
               />
               <div className="un-mode-card-content">
                 <div className="un-mode-card-title">
-                  <span>Forced Removal</span>
-                  <Badge tone="caution">Deep Residual Clean</Badge>
+                  <span>Forced removal</span>
                   {app.uninstallSupport === "missing" && <Badge tone="safe">Recommended</Badge>}
                 </div>
                 <div className="un-mode-card-desc">
@@ -627,8 +625,8 @@ export function UninstallWizard({
                 />
                 <div className="un-mode-card-content">
                   <div className="un-mode-card-title">
-                    <span>Clean Invalid Inventory Entry Only</span>
-                    <Badge tone="neutral">Registry Only</Badge>
+                    <span>Clean broken entry only</span>
+                    <Badge tone="neutral">Registry only</Badge>
                   </div>
                   <div className="un-mode-card-desc">
                     Only removes this broken ghost entry from the Windows Uninstall registry. Does
@@ -639,7 +637,7 @@ export function UninstallWizard({
             )}
 
             {mode === "clean_entry" && brokenPlan && (
-              <div style={{ marginTop: 12, padding: 12, background: "var(--bg-subtle)", borderRadius: 6, border: "1px solid var(--border)" }}>
+              <div style={{ marginTop: 12, padding: 12, background: "var(--surface-2)", borderRadius: 6, border: "1px solid var(--line)" }}>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
                   Verified Registry Entry Confirmation:
                 </div>
@@ -665,7 +663,10 @@ export function UninstallWizard({
             <div className="stack">
               {preparingUninstall ? <p>Preparing the registered uninstaller for review…</p> : uninstallPlan && <>
                 <strong>Registered command to launch</strong>
-                <code style={{ overflowWrap: "anywhere" }}>{uninstallPlan.executable} {uninstallPlan.arguments.join(" ")}</code>
+                <code style={{ overflowWrap: "anywhere" }}>
+                  {displayPath(uninstallPlan.executable)}
+                  {uninstallPlan.arguments.length > 0 ? ` ${uninstallPlan.arguments.join(" ")}` : ""}
+                </code>
                 <p className="small muted">The vendor controls its own removal prompts. Cyron verifies the live inventory afterward; files may remain.</p>
               </>}
               {uninstallError && <Banner tone="danger">{uninstallError}</Banner>}
@@ -751,8 +752,8 @@ export function UninstallWizard({
       {step === "processes" && (
         <div className="stack" style={{ gap: 16 }}>
           <div>
-            <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-base)" }}>
-              Associated Running Processes
+            <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-strong)" }}>
+              Running processes
             </h4>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
               Running processes must be closed before removal to prevent locked files. Critical
@@ -779,7 +780,7 @@ export function UninstallWizard({
                 style={{
                   maxHeight: 220,
                   overflowY: "auto",
-                  border: "1px solid var(--border-subtle)",
+                  border: "1px solid var(--line)",
                   borderRadius: 6,
                 }}
               >
@@ -791,7 +792,7 @@ export function UninstallWizard({
                       alignItems: "center",
                       justifyContent: "space-between",
                       padding: "8px 12px",
-                      borderBottom: "1px solid var(--border-subtle)",
+                      borderBottom: "1px solid var(--line)",
                       fontSize: 12,
                     }}
                   >
@@ -879,8 +880,8 @@ export function UninstallWizard({
       {step === "execute" && (
         <div className="stack" style={{ gap: 16 }}>
           <div>
-            <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-base)" }}>
-              {mode === "store" ? "Removing Windows Package" : "Running Vendor Uninstaller"}
+            <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-strong)" }}>
+              {mode === "store" ? "Removing the Windows package" : "Running the vendor uninstaller"}
             </h4>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
               {mode === "store"
@@ -894,13 +895,13 @@ export function UninstallWizard({
               style={{
                 padding: 32,
                 textAlign: "center",
-                background: "var(--bg-panel)",
+                background: "var(--surface)",
                 borderRadius: 8,
-                border: "1px solid var(--border-subtle)",
+                border: "1px solid var(--line)",
               }}
             >
               <Spinner size={24} />
-              <p style={{ marginTop: 12, fontWeight: 600, color: "var(--text-base)" }}>
+              <p style={{ marginTop: 12, fontWeight: 600, color: "var(--text-strong)" }}>
                 {mode === "store" ? "Windows is removing the package..." : "Uninstaller is running..."}
               </p>
               <p style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
@@ -1016,8 +1017,8 @@ export function UninstallWizard({
       {step === "leftovers" && (
         <div className="stack" style={{ gap: 16 }}>
           <div>
-            <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-base)" }}>
-              Residual & Leftover Scan
+            <h4 style={{ fontSize: 13, marginBottom: 4, color: "var(--text-strong)" }}>
+              Review leftovers
             </h4>
             <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
               {mode === "store"
@@ -1059,7 +1060,7 @@ export function UninstallWizard({
                     alignItems: "center",
                     justifyContent: "space-between",
                     padding: "8px 12px",
-                    background: "var(--bg-subtle)",
+                    background: "var(--surface-2)",
                     borderRadius: 6,
                     fontSize: 12,
                   }}
@@ -1292,7 +1293,7 @@ export function UninstallWizard({
           <div
             style={{
               padding: 12,
-              background: "var(--bg-subtle)",
+              background: "var(--surface-2)",
               borderRadius: 6,
               fontSize: 12,
               color: "var(--text-muted)",

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, errorMessage } from "../../lib/api";
-import { formatBytes, formatCount, formatDate, formatDuration } from "../../lib/format";
+import { displayPath, formatBytes, formatCount, formatDate, formatDuration } from "../../lib/format";
 import type {
   AppProcess,
   InstalledApp,
@@ -16,7 +16,6 @@ import {
   Banner,
   Button,
   Drawer,
-  Eyebrow,
   KeyValue,
   Segmented,
 } from "../../components/ui";
@@ -442,8 +441,7 @@ export function AppDrawer({
           />
 
           <section className="un-section" aria-label="Measured install folder size">
-            <div className="un-section__head">
-              <Eyebrow>Measured on disk</Eyebrow>
+            <div className="un-section__head">                <span className="un-section__label">Measured on disk</span>
               {measured && (
                 <span className="un-elapsed">walked in {formatDuration(measured.elapsedMs)}</span>
               )}
@@ -505,7 +503,7 @@ export function AppDrawer({
       {tab === "processes" && (
         <section className="un-section" aria-label="Process manager">
           <div className="un-section__head">
-            <Eyebrow>Associated processes</Eyebrow>
+            <span className="un-section__label">Associated processes</span>
             <Button
               size="sm"
               variant="ghost"
@@ -577,7 +575,7 @@ export function AppDrawer({
       {/* Tab 3: Uninstall */}
       {tab === "uninstall" && (
         <section className="un-section" aria-label="Standard uninstaller">
-          <Eyebrow>Vendor uninstaller</Eyebrow>
+          <span className="un-section__label">Vendor uninstaller</span>
 
           {app.isProtected ? (
             <Banner tone="caution">
@@ -662,7 +660,7 @@ export function AppDrawer({
                 <div>
                   <span className="un-command__label">Executable</span>
                   <pre className="un-command" tabIndex={0}>
-                    {uninstallPlan.executable}
+                    {displayPath(uninstallPlan.executable)}
                   </pre>
                 </div>
                 {uninstallPlan.arguments.length > 0 && (
@@ -743,7 +741,7 @@ export function AppDrawer({
       {tab === "leftovers" && (
         <section className="un-section" aria-label="Leftover scanner">
           <div className="un-section__head">
-            <Eyebrow>Leftover scanner</Eyebrow>
+            <span className="un-section__label">Leftover scanner</span>
             <Button
               size="sm"
               icon={<IconRefresh size={13} />}
@@ -796,7 +794,7 @@ export function AppDrawer({
                               {cand.kind === "directory" ? "Folder" : "Registry"}
                             </Badge>
                             <Badge tone={cand.confidence === "high" ? "safe" : "neutral"}>
-                              {cand.confidence.toUpperCase()} confidence
+                              {cand.confidence} confidence
                             </Badge>
                             {cand.size > 0 && <span className="mono">{formatBytes(cand.size)}</span>}
                           </div>

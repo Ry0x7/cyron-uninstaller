@@ -12,17 +12,21 @@ import {
   Panel,
   Toggle,
   ViewHeader,
-  Segmented,
+  cx,
 } from "../../components/ui";
 import {
   IconCheck,
   IconCopy,
   IconExternal,
+  IconFolderOpen,
+  IconInfo,
   IconLock,
   IconMonitor,
   IconMoon,
+  IconPlay,
   IconRefresh,
   IconShield,
+  IconSliders,
   IconSun,
   type IconProps,
 } from "../../components/Icons";
@@ -92,7 +96,20 @@ function parseExclusions(raw: string): ParsedExclusions {
   return { paths, invalid };
 }
 
-type SettingsTab = "general" | "scanning" | "startup" | "explorer" | "safety";
+type SettingsTab = "appearance" | "scanning" | "startup" | "explorer" | "safety" | "about";
+
+const SECTIONS: {
+  value: SettingsTab;
+  label: string;
+  icon: (props: IconProps) => ReactNode;
+}[] = [
+  { value: "appearance", label: "Appearance", icon: IconSliders },
+  { value: "scanning", label: "Scanning", icon: IconFolderOpen },
+  { value: "startup", label: "Startup", icon: IconPlay },
+  { value: "explorer", label: "Explorer", icon: IconExternal },
+  { value: "safety", label: "Safety", icon: IconShield },
+  { value: "about", label: "About", icon: IconInfo },
+];
 
 export function Settings() {
   const {
@@ -104,7 +121,7 @@ export function Settings() {
     reset,
   } = useSettings();
 
-  const [tab, setTab] = useState<SettingsTab>("general");
+  const [tab, setTab] = useState<SettingsTab>("appearance");
 
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
@@ -292,203 +309,162 @@ export function Settings() {
       />
 
       <div className="view-body">
-        <div style={{ marginBottom: 16 }}>
-          <Segmented<SettingsTab>
-            ariaLabel="Settings sections"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: "general", label: "General" },
-              { value: "scanning", label: "Scanning" },
-              { value: "startup", label: "Startup Apps", count: startupItems.length },
-              { value: "explorer", label: "Explorer Integration" },
-              { value: "safety", label: "Safety & Quarantine" },
-            ]}
-          />
-        </div>
-
-        {tab === "general" && (
-          <div className="set-grid">
-            <div className="set-col">
-              <Panel title="Appearance" subtitle="Applies immediately to this window.">
-                <div className="set-theme" role="group" aria-label="Theme">
-                  {THEME_OPTIONS.map((option) => {
-                    const ThemeIcon = option.icon;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className="set-theme__item"
-                        aria-pressed={settings.theme === option.value}
-                        onClick={() => setTheme(option.value)}
-                      >
-                        <ThemeIcon size={16} />
-                        <span>{option.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="set-theme__current">
-                  <span className="set-theme__dot" aria-hidden="true" />
-                  {resolved === "dark" ? "Dark" : "Light"} theme
-                  <span className="set-theme__source">· {themeSource}</span>
-                </p>
-              </Panel>
-
-              <Panel title="Hunter Mode" subtitle="Target desktop windows to review or remove an application.">
-                <p className="set-note">
-                  Hunter Mode is a session action in the sidebar below Uninstaller. It starts only after you
-                  confirm the targeting dialog, and its crosshair is hidden again when you exit or press Esc.
-                </p>
-              </Panel>
-            </div>
-
-            <div className="set-col">
-              <Panel title="Data & Privacy">
-                <div className="set-status">
-                  <Badge tone="safe">
-                    <IconShield size={11} />
-                    Local only
-                  </Badge>
-                </div>
-                <p className="set-note set-note--spaced">
-                  Scans run on this machine and results stay in memory. Cyron sends nothing over the
-                  network and contains zero telemetry. Settings and scan history live in this Windows
-                  profile so they survive a restart.
-                </p>
-              </Panel>
-
-              <Panel title="About">
-                <KeyValue
-                  items={[
-                    { label: "Name", value: "Cyron" },
-                    { label: "Version", value: "0.1.0" },
-                    { label: "Stage", value: "Release Candidate 1 (RC1)" },
-                    { label: "Publisher", value: "Chryypt" },
-                    { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },
-                    {
-                      label: "Repository",
-                      value: (
-                        <a
-                          className="set-link"
-                          href="https://github.com/Ry0x7/Cyron-uninstaller"
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >
-                          Ry0x7/Cyron-uninstaller
-                          <IconExternal size={12} />
-                        </a>
-                      ),
-                    },
-                  ]}
-                />
-                <p className="set-note set-note--spaced">
-                  Application sizes come from installer metadata when the publisher recorded it.
-                  Measure a folder from the Uninstaller details to get the real on-disk size.
-                </p>
-              </Panel>
-            </div>
-          </div>
-        )}
-
-        {tab === "scanning" && (
-          <div className="set-grid" style={{ gridTemplateColumns: "1fr" }}>
-            <div className="set-col">
-              <Panel
-                title="Scanning Scope"
-                subtitle="These choices are applied the next time you start a disk scan or cache analysis."
-              >
-                <Toggle
-                  checked={settings.includeHidden}
-                  onChange={setIncludeHidden}
-                  label="Include hidden and system files"
-                  description="Hidden folders often hold the largest developer caches. Turning this off skips files and folders marked hidden or system, so the reported size can be lower than what the drive holds."
-                />
-
-                <hr className="hairline" />
-
-                <Field
-                  label="Excluded folders"
-                  htmlFor="cyron-exclusions"
-                  hint="One absolute folder per line, up to 200. Folders at or below these paths are skipped the next time you start a scan. Wildcards and relative paths are rejected."
+        <div className="settings-layout">
+          <nav className="settings-nav" aria-label="Settings sections">
+            {SECTIONS.map((section) => {
+              const Icon = section.icon;
+              return (
+                <button
+                  key={section.value}
+                  type="button"
+                  className={cx("settings-nav__item", tab === section.value && "is-active")}
+                  aria-current={tab === section.value ? "page" : undefined}
+                  onClick={() => setTab(section.value)}
                 >
-                  <textarea
-                    id="cyron-exclusions"
-                    className="textarea set-exclusions"
-                    value={exclusionText}
-                    spellCheck={false}
-                    placeholder={"e.g. C:\\Users\\Me\\Projects\\large-repo\ne.g. D:\\Virtual Machines"}
-                    onChange={(event) => setExclusionText(event.target.value)}
-                    onBlur={commitExclusions}
-                  />
-                </Field>
+                  <Icon size={16} />
+                  <span>{section.label}</span>
+                </button>
+              );
+            })}
+          </nav>
 
-                <div className="set-exclusions__meta" aria-live="polite">
-                  <span>
-                    {resetDone
-                      ? "Defaults restored. Changes apply to the next scan."
-                      : pending
-                        ? "Saving exclusion list…"
-                        : settings.exclusions.length === 0
-                          ? "No folders excluded"
-                          : `${settings.exclusions.length} ${
-                              settings.exclusions.length === 1 ? "folder" : "folders"
-                            } excluded · applies to the next scan`}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      if (exclusionText.length === 0) return;
-                      lastSynced.current = "";
-                      setExclusionText("");
-                      setExclusions([]);
-                      setResetDone(false);
-                    }}
-                  >
-                    Clear all
-                  </Button>
-                </div>
-
-                {parsed.invalid.length > 0 && (
-                  <div className="set-invalid" role="status">
-                    <strong>
-                      {parsed.invalid.length === 1
-                        ? "1 line was ignored"
-                        : `${parsed.invalid.length} lines were ignored`}
-                      :
-                    </strong>{" "}
-                    each path must be an absolute drive or UNC folder, without wildcards or
-                    traversal segments (maximum {MAX_EXCLUSIONS}).
-                    <ul className="set-invalid__list">
-                      {parsed.invalid.slice(0, 4).map((line, index) => (
-                        <li key={`${index}-${line}`}>
-                          <code>{line}</code>
-                        </li>
-                      ))}
-                    </ul>
+          <div className="settings-content">
+            {tab === "appearance" && (
+              <div className="set-stack">
+                <Panel title="Theme" subtitle="Applies immediately to this window.">
+                  <div className="set-theme" role="group" aria-label="Theme">
+                    {THEME_OPTIONS.map((option) => {
+                      const ThemeIcon = option.icon;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="set-theme__item"
+                          aria-pressed={settings.theme === option.value}
+                          onClick={() => setTheme(option.value)}
+                        >
+                          <ThemeIcon size={17} />
+                          <span>{option.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
-
-                <div className="set-actions">
-                  <p className="set-note">
-                    Reset restores the system theme, hidden-file scanning, an empty exclusion list
-                    and read-only cleaning.
+                  <p className="set-theme__current">
+                    <span className="set-theme__dot" aria-hidden="true" />
+                    {resolved === "dark" ? "Dark" : "Light"} theme
+                    <span className="set-theme__source">· {themeSource}</span>
                   </p>
-                  <Button variant="secondary" size="sm" onClick={handleReset}>
-                    Reset to defaults
-                  </Button>
-                </div>
-              </Panel>
-            </div>
-          </div>
-        )}
+                </Panel>
 
-        {tab === "startup" && (
-          <div className="set-grid" style={{ gridTemplateColumns: "1fr" }}>
-            <div className="set-col">
+                <Panel title="Data & privacy">
+                  <div className="set-status">
+                    <Badge tone="safe">
+                      <IconShield size={12} />
+                      Local only
+                    </Badge>
+                  </div>
+                  <p className="set-note set-note--spaced">
+                    Scans run locally. Cyron sends nothing over the network and contains zero
+                    telemetry. Settings and scan history stay in this Windows profile.
+                  </p>
+                </Panel>
+              </div>
+            )}
+
+            {tab === "scanning" && (
+              <div className="set-stack">
+                <Panel
+                  title="Scanning scope"
+                  subtitle="Applied the next time you start a disk scan or cache analysis."
+                >
+                  <Toggle
+                    checked={settings.includeHidden}
+                    onChange={setIncludeHidden}
+                    label="Include hidden and system files"
+                    description="Hidden folders often hold the largest developer caches. Turning this off skips files and folders marked hidden or system, so the reported size can be lower than what the drive holds."
+                  />
+
+                  <hr className="hairline" />
+
+                  <Field
+                    label="Excluded folders"
+                    htmlFor="cyron-exclusions"
+                    hint="One absolute folder per line, up to 200. Folders at or below these paths are skipped the next time you start a scan. Wildcards and relative paths are rejected."
+                  >
+                    <textarea
+                      id="cyron-exclusions"
+                      className="textarea set-exclusions"
+                      value={exclusionText}
+                      spellCheck={false}
+                      placeholder={"e.g. C:\\Users\\Me\\Projects\\large-repo\ne.g. D:\\Virtual Machines"}
+                      onChange={(event) => setExclusionText(event.target.value)}
+                      onBlur={commitExclusions}
+                    />
+                  </Field>
+
+                  <div className="set-exclusions__meta" aria-live="polite">
+                    <span>
+                      {resetDone
+                        ? "Defaults restored. Changes apply to the next scan."
+                        : pending
+                          ? "Saving exclusion list…"
+                          : settings.exclusions.length === 0
+                            ? "No folders excluded"
+                            : `${settings.exclusions.length} ${
+                                settings.exclusions.length === 1 ? "folder" : "folders"
+                              } excluded · applies to the next scan`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        if (exclusionText.length === 0) return;
+                        lastSynced.current = "";
+                        setExclusionText("");
+                        setExclusions([]);
+                        setResetDone(false);
+                      }}
+                    >
+                      Clear all
+                    </Button>
+                  </div>
+
+                  {parsed.invalid.length > 0 && (
+                    <div className="set-invalid" role="status">
+                      <strong>
+                        {parsed.invalid.length === 1
+                          ? "1 line was ignored"
+                          : `${parsed.invalid.length} lines were ignored`}
+                        :
+                      </strong>{" "}
+                      each path must be an absolute drive or UNC folder, without wildcards or traversal
+                      segments (maximum {MAX_EXCLUSIONS}).
+                      <ul className="set-invalid__list">
+                        {parsed.invalid.slice(0, 4).map((line, index) => (
+                          <li key={`${index}-${line}`}>
+                            <code>{line}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <div className="set-actions">
+                    <p className="set-note">
+                      Reset restores the system theme, hidden-file scanning, an empty exclusion list and
+                      read-only cleaning.
+                    </p>
+                    <Button variant="secondary" size="sm" onClick={handleReset}>
+                      Reset to defaults
+                    </Button>
+                  </div>
+                </Panel>
+              </div>
+            )}
+
+            {tab === "startup" && (
               <Panel
-                title="Startup Applications"
+                title="Startup applications"
                 subtitle="Programs registered to launch automatically when Windows boots."
                 actions={
                   <Button
@@ -502,19 +478,15 @@ export function Settings() {
                   </Button>
                 }
               >
-                {startupError && (
-                  <Banner tone="caution">
-                    {startupError}
-                  </Banner>
-                )}
+                {startupError && <Banner tone="caution">{startupError}</Banner>}
                 {startupItems.length === 0 ? (
                   <p className="set-note">
                     {startupLoading ? "Reading startup entries…" : "No startup applications detected."}
                   </p>
                 ) : (
-                  <div className="set-startup-list">
+                  <ul className="set-startup-list">
                     {startupItems.map((item) => (
-                      <div className="set-startup-item" key={item.id}>
+                      <li className="set-startup-item" key={item.id}>
                         <div className="set-startup-info">
                           <div className="set-startup-name">
                             <span className="set-startup-title">{item.name}</span>
@@ -523,7 +495,7 @@ export function Settings() {
                               <Badge tone={item.enabled ? "safe" : "neutral"}>
                                 {item.enabled ? "Enabled" : "Disabled"}
                               </Badge>
-                              {item.isProtected && <Badge tone="caution">System Protected</Badge>}
+                              {item.isProtected && <Badge tone="caution">System protected</Badge>}
                             </span>
                           </div>
                           <span className="set-startup-cmd" title={item.command}>
@@ -551,203 +523,233 @@ export function Settings() {
                             Copy
                           </Button>
                         </div>
-                      </div>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
               </Panel>
-            </div>
-          </div>
-        )}
+            )}
 
-        {tab === "explorer" && (
-          <div className="set-grid" style={{ gridTemplateColumns: "1fr" }}>
-            <div className="set-col">
-              <Panel title="Windows Explorer Integration">
-                <div className="set-status" style={{ flexWrap: "wrap", gap: 6 }}>
-                  {explorerStatus?.standardActionsRegistered && (
-                    <Badge tone="safe">Standard verbs registered</Badge>
-                  )}
-                  {explorerStatus?.advancedActionsRegistered && (
-                    <Badge tone="accent">Advanced verbs registered</Badge>
-                  )}
-                  {!explorerStatus?.isRegistered && (
-                    <Badge tone="neutral">Not registered</Badge>
-                  )}
-                  {explorerStatus?.needsRepair && (
-                    <Badge tone="caution">Needs repair / Path mismatch</Badge>
-                  )}
-                </div>
-
-                <p className="set-note set-note--spaced">
-                  Optional native Windows right-click menu integration for folders, drives, and executables.
-                  Registered exclusively in <code>HKEY_CURRENT_USER\Software\Classes</code> without requiring
-                  administrator privileges. Explorer commands always open a safe Cyron review dialog before
-                  anything is executed.
-                </p>
-
-                {explorerMsg && (
-                  <div style={{ marginTop: 12 }}>
-                    <Banner tone={explorerMsg.tone}>{explorerMsg.text}</Banner>
+            {tab === "explorer" && (
+              <div className="set-stack">
+                <Panel title="Windows Explorer integration">
+                  <div className="set-status">
+                    {explorerStatus?.standardActionsRegistered && (
+                      <Badge tone="safe">Standard verbs registered</Badge>
+                    )}
+                    {explorerStatus?.advancedActionsRegistered && (
+                      <Badge tone="accent">Advanced verbs registered</Badge>
+                    )}
+                    {!explorerStatus?.isRegistered && <Badge tone="neutral">Not registered</Badge>}
+                    {explorerStatus?.needsRepair && (
+                      <Badge tone="caution">Needs repair / path mismatch</Badge>
+                    )}
                   </div>
-                )}
 
-                <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16 }}>
-                  {/* Standard Actions Control */}
-                  <div className="exp-modal-card" style={{ background: "var(--surface)" }}>
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                  <p className="set-note set-note--spaced">
+                    Optional native Windows right-click menu integration for folders, drives and
+                    executables. Registered exclusively in{" "}
+                    <code>HKEY_CURRENT_USER\Software\Classes</code> without administrator privileges.
+                    Explorer commands always open a Cyron review dialog before anything is executed.
+                  </p>
+
+                  {explorerMsg && <Banner tone={explorerMsg.tone}>{explorerMsg.text}</Banner>}
+
+                  <div className="set-options">
+                    <label className={cx("set-option-card", standardExplorer && "is-selected")}>
                       <input
                         type="checkbox"
                         checked={standardExplorer}
                         disabled={explorerLoading}
-                        onChange={(e) => handleApplyExplorer(e.target.checked, advancedExplorer)}
-                        style={{ marginTop: 3 }}
+                        onChange={(event) =>
+                          handleApplyExplorer(event.target.checked, advancedExplorer)
+                        }
                       />
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-strong)" }}>
-                          Standard Context Menu Actions
-                        </div>
-                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
+                      <div className="set-option-copy">
+                        <span className="set-option-title">Standard context menu actions</span>
+                        <span className="set-option-description">
                           Adds safe analysis and discovery verbs to folder and drive context menus.
-                        </div>
-                        <ul className="set-guards" style={{ marginTop: 8 }}>
+                        </span>
+                        <ul className="set-guards set-guards--compact">
                           <li className="set-guard">
-                            <IconCheck size={14} />
-                            <span><strong>Folders &amp; Drives:</strong> Analyze with Cyron, Find Duplicates with Cyron, View Storage Breakdown with Cyron</span>
+                            <IconCheck size={13} />
+                            <span>
+                              <strong>Folders &amp; drives:</strong> Analyze, find duplicates, view
+                              storage breakdown
+                            </span>
                           </li>
                           <li className="set-guard">
-                            <IconCheck size={14} />
-                            <span><strong>Executables:</strong> Uninstall with Cyron, Find Related Files with Cyron</span>
+                            <IconCheck size={13} />
+                            <span>
+                              <strong>Executables:</strong> Uninstall, find related files
+                            </span>
                           </li>
                         </ul>
                       </div>
                     </label>
-                  </div>
 
-                  {/* Advanced / Destructive Actions Control */}
-                  <div className="exp-modal-card" style={{ background: "var(--surface)", borderColor: advancedExplorer ? "var(--accent)" : "var(--line)" }}>
-                    <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                    <label className={cx("set-option-card", advancedExplorer && "is-selected")}>
                       <input
                         type="checkbox"
                         checked={advancedExplorer}
                         disabled={explorerLoading}
-                        onChange={(e) => handleApplyExplorer(standardExplorer, e.target.checked)}
-                        style={{ marginTop: 3 }}
+                        onChange={(event) =>
+                          handleApplyExplorer(standardExplorer, event.target.checked)
+                        }
                       />
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: "var(--text-strong)" }}>
-                          Advanced &amp; Destructive Context Menu Actions
-                        </div>
-                        <div style={{ fontSize: 11.5, color: "var(--text-muted)", marginTop: 2 }}>
-                          Adds verified force deletion, handle inspection, and process termination verbs to context menus.
-                        </div>
-                        <ul className="set-guards" style={{ marginTop: 8 }}>
+                      <div className="set-option-copy">
+                        <span className="set-option-title">Advanced and destructive actions</span>
+                        <span className="set-option-description">
+                          Adds verified force deletion, handle inspection and process termination
+                          verbs to context menus.
+                        </span>
+                        <ul className="set-guards set-guards--compact">
                           <li className="set-guard">
-                            <IconCheck size={14} />
-                            <span><strong>Files &amp; Folders:</strong> Force Delete with Cyron, Find Locking Processes with Cyron</span>
+                            <IconCheck size={13} />
+                            <span>
+                              <strong>Files &amp; folders:</strong> Force delete, find locking
+                              processes
+                            </span>
                           </li>
                           <li className="set-guard">
-                            <IconCheck size={14} />
-                            <span><strong>Executables:</strong> Kill Running Process with Cyron</span>
+                            <IconCheck size={13} />
+                            <span>
+                              <strong>Executables:</strong> Kill running process
+                            </span>
                           </li>
                           <li className="set-guard">
-                            <IconCheck size={14} />
-                            <span><strong>Review-first safety:</strong> Every destructive action opens Cyron&apos;s confirmation dialog; never deletes or kills silently from Explorer</span>
+                            <IconCheck size={13} />
+                            <span>
+                              <strong>Review first:</strong> every action opens a Cyron confirmation;
+                              Explorer never deletes or kills silently
+                            </span>
                           </li>
                         </ul>
                       </div>
                     </label>
                   </div>
-                </div>
 
-                <div className="set-actions" style={{ marginTop: 16 }}>
-                  {explorerStatus?.isRegistered ? (
-                    <div className="row" style={{ gap: 8 }}>
+                  <div className="set-actions">
+                    {explorerStatus?.isRegistered ? (
+                      <div className="set-actions__group">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          loading={explorerLoading}
+                          onClick={() => handleApplyExplorer(false, false)}
+                        >
+                          Disable all integration
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={explorerLoading}
+                          onClick={handleRepairExplorer}
+                        >
+                          Repair / re-register verbs
+                        </Button>
+                      </div>
+                    ) : (
                       <Button
-                        variant="secondary"
+                        variant="primary"
                         size="sm"
                         loading={explorerLoading}
-                        onClick={() => handleApplyExplorer(false, false)}
+                        onClick={() => handleApplyExplorer(true, true)}
                       >
-                        Disable all integration
+                        Enable all Explorer integration
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        loading={explorerLoading}
-                        onClick={handleRepairExplorer}
-                      >
-                        Repair / Re-register verbs
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      loading={explorerLoading}
-                      onClick={() => handleApplyExplorer(true, true)}
-                    >
-                      Enable all Explorer integration
-                    </Button>
-                  )}
-                </div>
-              </Panel>
-            </div>
+                    )}
+                  </div>
+                </Panel>
+              </div>
+            )}
+
+            {tab === "safety" && (
+              <div className="set-stack">
+                <Panel title="Safety and quarantine">
+                  <div className="set-status">
+                    <Badge tone={settings.readOnly ? "accent" : "caution"}>
+                      <IconLock size={11} />
+                      {settings.readOnly ? "Read-only" : "Cleaning enabled"}
+                    </Badge>
+                    <span className="set-note">
+                      {settings.readOnly
+                        ? "Cyron can measure and preview, but the backend refuses to move any file."
+                        : "Cyron may move eligible cache files to quarantine after you confirm a preview."}
+                    </span>
+                  </div>
+
+                  <Toggle
+                    checked={!settings.readOnly}
+                    onChange={(enabled) => setReadOnly(!enabled)}
+                    label="Cleaning enabled"
+                    description="Off by default. Cyron still previews every cleanup and asks you to confirm. Eligible files move to a 7-day quarantine you can restore; protected data is refused by the backend, not merely hidden. Cyron never asks for administrator rights."
+                  />
+
+                  <hr className="hairline" />
+
+                  <h3 className="set-subhead">Cyron never touches</h3>
+                  <ul className="set-guards">
+                    {[
+                      "Conversation histories and chat logs from AI tools",
+                      "Local AI models, checkpoints and downloaded weights",
+                      "Credentials, tokens and tool settings",
+                      "Your source repositories and project folders",
+                      "Docker volumes and WSL disks",
+                      "Windows system and program files",
+                    ].map((item) => (
+                      <li className="set-guard" key={item}>
+                        <IconCheck size={14} />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <p className="set-note set-note--spaced">
+                    The Cleaner previews every cleanup before anything moves, quarantines what it does
+                    move, and refuses protected locations in the backend even if a request asks for
+                    them. Application uninstallation, process management and residual cleanup are
+                    review-first and require server-verified confirmation plans.
+                  </p>
+                </Panel>
+              </div>
+            )}
+
+            {tab === "about" && (
+              <div className="set-stack">
+                <Panel title="About Cyron" subtitle="A local Windows utility for removal, disk space and performance.">
+                  <KeyValue
+                    items={[
+                      { label: "Name", value: "Cyron" },
+                      { label: "Version", value: "0.1.0" },
+                      { label: "Stage", value: "Release Candidate 1 (RC1)" },
+                      { label: "Publisher", value: "Chryypt" },
+                      { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },
+                      {
+                        label: "Repository",
+                        value: (
+                          <a
+                            className="set-link"
+                            href="https://github.com/Ry0x7/Cyron-uninstaller"
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            Ry0x7/Cyron-uninstaller
+                            <IconExternal size={12} />
+                          </a>
+                        ),
+                      },
+                    ]}
+                  />
+                  <p className="set-note set-note--spaced">
+                    Application sizes come from installer metadata when the publisher recorded it.
+                    Measure a folder from the application details to get the real on-disk size.
+                  </p>
+                </Panel>
+              </div>
+            )}
           </div>
-        )}
-
-        {tab === "safety" && (
-          <div className="set-grid" style={{ gridTemplateColumns: "1fr" }}>
-            <div className="set-col">
-              <Panel title="Safety & Quarantine Controls">
-                <div className="set-status">
-                  <Badge tone={settings.readOnly ? "accent" : "caution"}>
-                    <IconLock size={11} />
-                    {settings.readOnly ? "Read-only" : "Cleaning enabled"}
-                  </Badge>
-                  <span className="set-note">
-                    {settings.readOnly
-                      ? "Cyron can measure and preview, but the backend refuses to move any file."
-                      : "Cyron may move eligible cache files to quarantine after you confirm a preview."}
-                  </span>
-                </div>
-
-                <Toggle
-                  checked={!settings.readOnly}
-                  onChange={(enabled) => setReadOnly(!enabled)}
-                  label="Cleaning enabled"
-                  description="Off by default. Cyron still previews every cleanup and asks you to confirm. Eligible files move to a 7-day quarantine you can restore; protected data is refused by the backend, not merely hidden. Cyron never asks for administrator rights."
-                />
-
-                <hr className="hairline" />
-
-                <h3 className="set-subhead">Cyron never touches</h3>
-                <ul className="set-guards">
-                  {[
-                    "Conversation histories and chat logs from AI tools",
-                    "Local AI models, checkpoints and downloaded weights",
-                    "Credentials, tokens and tool settings",
-                    "Your source repositories and project folders",
-                    "Docker volumes and WSL disks",
-                    "Windows system and program files",
-                  ].map((item) => (
-                    <li className="set-guard" key={item}>
-                      <IconCheck size={14} />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <p className="set-note set-note--spaced">
-                  The Cleaner previews every cleanup before anything moves, quarantines what it does
-                  move, and refuses protected locations in the backend even if a request asks for
-                  them. Application uninstallation, process management, and residual cleanup are review-first
-                  and require server-verified confirmation plans.
-                </p>
-              </Panel>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     </>
   );

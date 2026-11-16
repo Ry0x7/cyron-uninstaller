@@ -1,20 +1,19 @@
 .un-wizard-steps {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 10px 14px;
+  padding: 10px 12px;
   background: var(--surface-2);
   border: 1px solid var(--line);
-  border-radius: var(--radius);
-  margin-bottom: 16px;
+  border-radius: 10px;
+  margin-bottom: 18px;
 }
 
 .un-wizard-step {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   font-size: 11.5px;
   font-weight: 500;
   color: var(--text-muted);
@@ -22,7 +21,7 @@
 }
 
 .un-wizard-step--active {
-  color: var(--accent);
+  color: var(--accent-strong);
   font-weight: 600;
 }
 
@@ -37,9 +36,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
-  background: var(--surface-hover);
+  background: var(--surface);
   color: var(--text-muted);
   border: 1px solid var(--line);
 }
@@ -53,7 +52,7 @@
 .un-wizard-step--done .un-wizard-step-badge {
   background: var(--safe-soft);
   color: var(--safe);
-  border-color: color-mix(in srgb, var(--safe) 40%, transparent);
+  border-color: color-mix(in srgb, var(--safe) 30%, transparent);
 }
 
 .un-wizard-step-divider {
@@ -67,13 +66,13 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 13px 14px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 11px;
   background: var(--surface-2);
   cursor: pointer;
-  transition: all 0.14s var(--ease);
-  margin-bottom: 10px;
+  transition: background 140ms var(--ease), border-color 140ms var(--ease);
+  margin-bottom: 8px;
   text-align: left;
   width: 100%;
   box-sizing: border-box;
@@ -86,12 +85,13 @@
 
 .un-mode-card--selected {
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
 }
 
 .un-mode-card input[type="radio"] {
   margin-top: 3px;
   accent-color: var(--accent);
+  flex: none;
 }
 
 .un-mode-card-content {
@@ -100,12 +100,12 @@
 }
 
 .un-mode-card-title {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-strong);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
 }
 
@@ -113,13 +113,13 @@
   font-size: 11.5px;
   color: var(--text-muted);
   margin-top: 3px;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 .un-leftover-group {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
   border: 1px solid var(--line);
-  border-radius: var(--radius);
+  border-radius: 10px;
   overflow: hidden;
   background: var(--surface);
 }
@@ -128,7 +128,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 9px 12px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
   font-size: 11.5px;
@@ -140,24 +141,43 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-bottom: 1px solid var(--line);
   font-size: 11.5px;
+  cursor: pointer;
 }
 
 .un-leftover-item:last-child {
   border-bottom: none;
 }
 
+.un-leftover-item input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+.un-leftover-item-path,
 .un-leftover-path {
   font-family: var(--font-mono);
   font-size: 10.5px;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   color: var(--text-strong);
 }
 
+.un-leftover-item-reason,
 .un-leftover-meta {
   font-size: 10.5px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+@media (max-width: 1000px) {
+  .un-wizard-steps {
+    gap: 4px;
+  }
+
+  .un-wizard-step-divider {
+    display: none;
+  }
 }

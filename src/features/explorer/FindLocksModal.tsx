@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../lib/api";
+import { displayPath } from "../../lib/format";
 import type { LockingProcessInfo } from "../../lib/types";
 import { Badge, Banner, Button, Modal, Spinner } from "../../components/ui";
-import { IconRefresh, IconSearch } from "../../components/Icons";
+import { IconRefresh, IconSearch, IconShield } from "../../components/Icons";
 import "./explorerModals.css";
 
 interface FindLocksModalProps {
@@ -25,8 +26,8 @@ export function FindLocksModal({ open, targetPath, onClose }: FindLocksModalProp
     try {
       const list = await api.findLockingProcesses(path);
       setProcesses(list);
-    } catch (err) {
-      setError(errorMessage(err));
+    } catch (caught) {
+      setError(errorMessage(caught));
     } finally {
       setLoading(false);
     }
@@ -34,7 +35,7 @@ export function FindLocksModal({ open, targetPath, onClose }: FindLocksModalProp
 
   useEffect(() => {
     if (open && targetPath) {
-      loadLocks(targetPath);
+      void loadLocks(targetPath);
     } else {
       setProcesses([]);
       setError(null);
@@ -48,134 +49,145 @@ export function FindLocksModal({ open, targetPath, onClose }: FindLocksModalProp
     try {
       if (!targetPath) return;
       const plan = await api.prepareForceDeletePlan(targetPath);
-      const res = await api.terminateForceDeleteLockingProcess(plan.planId, pid, force);
-      if (res.success) {
-        setActionMsg(`Process ${pid} (${res.name}) closed successfully.`);
+      const response = await api.terminateForceDeleteLockingProcess(plan.planId, pid, force);
+      if (response.success) {
         await loadLocks(targetPath);
+        setActionMsg(`Process ${pid} (${response.name}) closed.`);
       } else {
-        setActionMsg(`Could not terminate process ${pid}: ${res.error ?? "Access denied or process already exited"}`);
+        setActionMsg(
+          `Could not close process ${pid}: ${response.error ?? "access denied or process already exited"}`,
+        );
       }
-    } catch (err) {
-      setActionMsg(`Termination error: ${errorMessage(err)}`);
+    } catch (caught) {
+      setActionMsg(`Could not close the process. ${errorMessage(caught)}`);
     } finally {
       setTerminatingPid(null);
     }
   };
+
+  const lockedCount = processes.length;
 
   return (
     <Modal
       open={open}
       title={
         <>
-          <IconSearch size={16} />
-          Locking Processes
+          <IconSearch size={18} />
+          Processes using this item
         </>
       }
-      subtitle={targetPath ? "Inspect active processes holding open handles on this filesystem object." : undefined}
+      subtitle={
+        targetPath
+          ? "Windows Restart Manager reports any process holding an open handle on the exact path."
+          : undefined
+      }
       onClose={onClose}
-      maxWidth={560}
+      maxWidth={600}
       footer={
-        <div className="row" style={{ gap: 8, justifyContent: "flex-end", width: "100%" }}>
+        <>
           {targetPath && (
             <Button
               variant="secondary"
-              size="sm"
               icon={<IconRefresh size={13} />}
               loading={loading}
-              onClick={() => loadLocks(targetPath)}
+              onClick={() => void loadLocks(targetPath)}
             >
-              Refresh Locks
+              Check again
             </Button>
           )}
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="primary" onClick={onClose}>
             Close
           </Button>
-        </div>
+        </>
       }
     >
       {targetPath && (
-        <div className="exp-modal-card">
-          <div className="exp-meta-label">Inspected Object</div>
-          <div className="exp-target-path">{targetPath}</div>
-        </div>
+        <section className="exp-modal-card">
+          <h3 className="exp-section-title">Inspected path</h3>
+          <div className="exp-target-path">{displayPath(targetPath)}</div>
+        </section>
       )}
 
       {loading && (
-        <div style={{ textAlign: "center", padding: 28 }}>
+        <div className="exp-loading">
           <Spinner size={22} />
-          <p style={{ marginTop: 10, color: "var(--text-muted)", fontSize: 12.5 }}>
-            Querying Windows Restart Manager for open handles…
-          </p>
+          <p>Asking Windows which processes hold this path open…</p>
         </div>
       )}
 
       {error && (
         <Banner tone="danger">
-          <strong>Error querying locks:</strong> {error}
+          <strong>Locks could not be read.</strong> {error}
         </Banner>
       )}
 
       {actionMsg && <Banner tone="info">{actionMsg}</Banner>}
 
-      {!loading && !error && processes.length === 0 && (
+      {!loading && !error && lockedCount === 0 && (
         <Banner tone="safe">
-          <strong>No active locks detected.</strong> No running process currently holds an exclusive handle
-          on this path through Windows Restart Manager.
+          <strong>No process is holding this item.</strong> Windows Restart Manager found no active
+          handle on the exact path.
         </Banner>
       )}
 
-      {!loading && processes.length > 0 && (
-        <div className="exp-modal-card">
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--danger)" }}>
-            {processes.length} Active Process{processes.length === 1 ? "" : "es"} Holding Locks:
+      {!loading && lockedCount > 0 && (
+        <section className="exp-modal-card" aria-labelledby="exp-lock-count">
+          <div className="exp-section-head">
+            <div>
+              <h3 className="exp-section-title" id="exp-lock-count">
+                {lockedCount} {lockedCount === 1 ? "process is" : "processes are"} using it
+              </h3>
+              <p className="exp-note">Close the app normally before forcing anything.</p>
+            </div>
+            <Badge tone="danger">{lockedCount}</Badge>
           </div>
 
-          <div className="exp-proc-list" style={{ maxHeight: 280 }}>
-            {processes.map((proc) => (
-              <div className="exp-proc-item" key={proc.pid}>
+          <div className="exp-proc-list">
+            {processes.map((process) => (
+              <div className="exp-proc-item" key={process.pid}>
                 <div className="exp-proc-info">
                   <span className="exp-proc-title">
-                    {proc.name} (PID {proc.pid})
-                  </span>
-                  {proc.windowTitle && (
-                    <span className="exp-proc-meta">Window: &ldquo;{proc.windowTitle}&rdquo;</span>
-                  )}
-                  {proc.path && <span className="exp-proc-meta">{proc.path}</span>}
-                  <div style={{ marginTop: 2 }}>
-                    {proc.isCritical ? (
-                      <Badge tone="danger">Windows Critical</Badge>
-                    ) : (
-                      <Badge tone="neutral">Standard Process</Badge>
+                    {process.name}
+                    <span className="exp-proc-pid">PID {process.pid}</span>
+                    {process.isCritical && (
+                      <Badge tone="danger">
+                        <IconShield size={10} /> Windows critical
+                      </Badge>
                     )}
-                  </div>
+                  </span>
+                  {process.windowTitle && (
+                    <span className="exp-proc-meta">Window: “{process.windowTitle}”</span>
+                  )}
+                  {process.path && (
+                    <span className="exp-proc-path">{displayPath(process.path)}</span>
+                  )}
                 </div>
 
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <div className="exp-proc-actions">
                   <Button
                     size="sm"
-                    variant="secondary"
-                    disabled={proc.isCritical || terminatingPid === proc.pid}
-                    loading={terminatingPid === proc.pid}
-                    onClick={() => handleTerminate(proc.pid, false)}
-                    title="Attempt graceful closure"
+                    disabled={process.isCritical || terminatingPid === process.pid}
+                    loading={terminatingPid === process.pid}
+                    onClick={() => void handleTerminate(process.pid, false)}
+                    title="Ask the app to close its window"
                   >
-                    Close
+                    Close app
                   </Button>
                   <Button
                     size="sm"
                     variant="danger"
-                    disabled={proc.isCritical || terminatingPid === proc.pid}
-                    loading={terminatingPid === proc.pid}
-                    onClick={() => handleTerminate(proc.pid, true)}
-                    title="Force terminate process"
+                    disabled={process.isCritical || terminatingPid === process.pid}
+                    loading={terminatingPid === process.pid}
+                    onClick={() => void handleTerminate(process.pid, true)}
+                    title="Terminate the process immediately"
                   >
-                    Kill
+                    Force close
                   </Button>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
     </Modal>
   );

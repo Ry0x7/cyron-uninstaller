@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../lib/api";
+import { displayPath } from "../../lib/format";
 import type { KillProcessPlanPreview, ProcessTerminateResult } from "../../lib/types";
 import { Badge, Banner, Button, Modal, Spinner } from "../../components/ui";
-import { IconStop } from "../../components/Icons";
+import { IconShield, IconStop } from "../../components/Icons";
 import "./explorerModals.css";
 
 interface KillProcessModalProps {
@@ -30,13 +31,14 @@ export function KillProcessModal({ open, exePath, onClose }: KillProcessModalPro
     setActionError(null);
     setSelectedPids(new Set());
     try {
-      const p = await api.prepareKillProcessPlan(path);
-      setPlan(p);
-      // Pre-select all non-critical matching processes by default
-      const nonCritical = p.matchingProcesses.filter((proc) => !proc.isCritical).map((proc) => proc.pid);
+      const prepared = await api.prepareKillProcessPlan(path);
+      setPlan(prepared);
+      const nonCritical = prepared.matchingProcesses
+        .filter((process) => !process.isCritical)
+        .map((process) => process.pid);
       setSelectedPids(new Set(nonCritical));
-    } catch (err) {
-      setError(errorMessage(err));
+    } catch (caught) {
+      setError(errorMessage(caught));
     } finally {
       setLoading(false);
     }
@@ -44,7 +46,7 @@ export function KillProcessModal({ open, exePath, onClose }: KillProcessModalPro
 
   useEffect(() => {
     if (open && exePath) {
-      loadPlan(exePath);
+      void loadPlan(exePath);
     } else {
       setPlan(null);
       setError(null);
@@ -54,8 +56,8 @@ export function KillProcessModal({ open, exePath, onClose }: KillProcessModalPro
   }, [open, exePath]);
 
   const togglePid = (pid: number) => {
-    setSelectedPids((prev) => {
-      const next = new Set(prev);
+    setSelectedPids((previous) => {
+      const next = new Set(previous);
       if (next.has(pid)) next.delete(pid);
       else next.add(pid);
       return next;
@@ -65,7 +67,9 @@ export function KillProcessModal({ open, exePath, onClose }: KillProcessModalPro
   const handleSelectAll = (select: boolean) => {
     if (!plan) return;
     if (select) {
-      const nonCritical = plan.matchingProcesses.filter((p) => !p.isCritical).map((p) => p.pid);
+      const nonCritical = plan.matchingProcesses
+        .filter((process) => !process.isCritical)
+        .map((process) => process.pid);
       setSelectedPids(new Set(nonCritical));
     } else {
       setSelectedPids(new Set());
@@ -77,37 +81,40 @@ export function KillProcessModal({ open, exePath, onClose }: KillProcessModalPro
     setExecuting(true);
     setActionError(null);
     try {
-      const pidsArray = Array.from(selectedPids);
-      const res = await api.executeKillProcessPlan(plan.planId, pidsArray, force);
-      setResults(res);
-    } catch (err) {
-      setActionError(errorMessage(err));
+      const response = await api.executeKillProcessPlan(plan.planId, Array.from(selectedPids), force);
+      setResults(response);
+    } catch (caught) {
+      setActionError(errorMessage(caught));
     } finally {
       setExecuting(false);
     }
   };
 
-  const hasRunning = plan && plan.matchingProcesses.length > 0;
+  const hasRunning = Boolean(plan && plan.matchingProcesses.length > 0);
 
   return (
     <Modal
       open={open}
       title={
         <>
-          <IconStop size={16} />
-          Kill Running Process Review
+          <IconStop size={18} />
+          Review process termination
         </>
       }
-      subtitle={exePath ? "Verify running processes whose executable path exactly matches the target." : undefined}
+      subtitle={
+        exePath
+          ? "Cyron matched running processes by this exact executable path. Windows-critical processes cannot be selected."
+          : undefined
+      }
       onClose={onClose}
-      maxWidth={580}
+      maxWidth={600}
       footer={
         results ? (
           <Button variant="primary" onClick={onClose}>
             Done
           </Button>
         ) : (
-          <div className="row" style={{ gap: 8, justifyContent: "flex-end", width: "100%" }}>
+          <>
             <Button variant="ghost" onClick={onClose} disabled={executing}>
               Cancel
             </Button>
@@ -117,143 +124,141 @@ export function KillProcessModal({ open, exePath, onClose }: KillProcessModalPro
                 icon={<IconStop size={14} />}
                 loading={executing}
                 disabled={selectedPids.size === 0}
-                onClick={handleExecute}
+                onClick={() => void handleExecute()}
               >
-                {force ? "Force Terminate Selected" : "Graceful Close Selected"} ({selectedPids.size})
+                {force ? "Force close" : "Close gracefully"} ({selectedPids.size})
               </Button>
             )}
-          </div>
+          </>
         )
       }
     >
       {exePath && (
-        <div className="exp-modal-card">
-          <div className="exp-meta-label">Selected Executable</div>
-          <div className="exp-target-path">{exePath}</div>
-        </div>
+        <section className="exp-modal-card">
+          <h3 className="exp-section-title">Matched executable</h3>
+          <div className="exp-target-path">{displayPath(exePath)}</div>
+        </section>
       )}
 
       {loading && (
-        <div style={{ textAlign: "center", padding: 28 }}>
+        <div className="exp-loading">
           <Spinner size={22} />
-          <p style={{ marginTop: 10, color: "var(--text-muted)", fontSize: 12.5 }}>
-            Scanning running process table for exact executable matches…
-          </p>
+          <p>Checking the running process table for this exact path…</p>
         </div>
       )}
 
       {error && (
         <Banner tone="danger">
-          <strong>Refused:</strong> {error}
+          <strong>Cyron refused this request.</strong> {error}
         </Banner>
       )}
 
       {actionError && (
         <Banner tone="danger">
-          <strong>Action Failed:</strong> {actionError}
+          <strong>Processes were not closed.</strong> {actionError}
         </Banner>
       )}
 
       {results && (
-        <div className="exp-modal-card">
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-strong)" }}>
-            Termination Results:
-          </span>
-          <div className="exp-proc-list" style={{ marginTop: 6 }}>
-            {results.map((res) => (
-              <div className="exp-proc-item" key={res.pid}>
+        <section className="exp-modal-card" aria-labelledby="exp-kill-results">
+          <h3 className="exp-section-title" id="exp-kill-results">
+            Results
+          </h3>
+          <div className="exp-proc-list">
+            {results.map((response) => (
+              <div className="exp-proc-item" key={response.pid}>
                 <div className="exp-proc-info">
                   <span className="exp-proc-title">
-                    {res.name} (PID {res.pid})
+                    {response.name}
+                    <span className="exp-proc-pid">PID {response.pid}</span>
                   </span>
-                  {res.error && (
-                    <span style={{ fontSize: 11, color: "var(--danger)" }}>{res.error}</span>
-                  )}
+                  {response.error && <span className="exp-proc-error">{response.error}</span>}
                 </div>
-                <Badge tone={res.success ? "safe" : "danger"}>
-                  {res.success ? "Terminated" : "Failed"}
+                <Badge tone={response.success ? "safe" : "danger"}>
+                  {response.success ? "Closed" : "Failed"}
                 </Badge>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {!loading && !error && !results && !hasRunning && (
         <Banner tone="safe">
-          <strong>No matching running process.</strong> There are currently no active processes running from this exact executable path.
+          <strong>Nothing is running from this path.</strong> There are no active matching processes
+          right now.
         </Banner>
       )}
 
-      {!loading && !results && hasRunning && (
-        <div className="exp-modal-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-strong)" }}>
-              {plan.matchingProcesses.length} Verified Matching Process{plan.matchingProcesses.length === 1 ? "" : "es"}:
-            </span>
-            <div style={{ display: "flex", gap: 6 }}>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleSelectAll(true)}
-              >
+      {!loading && !results && plan && hasRunning && (
+        <section className="exp-modal-card" aria-labelledby="exp-kill-list">
+          <div className="exp-section-head">
+            <div>
+              <h3 className="exp-section-title" id="exp-kill-list">
+                {plan.matchingProcesses.length}{" "}
+                {plan.matchingProcesses.length === 1 ? "matching process" : "matching processes"}
+              </h3>
+              <p className="exp-note">Only the checked processes will be closed.</p>
+            </div>
+            <div className="exp-inline-actions">
+              <Button size="sm" variant="ghost" onClick={() => handleSelectAll(true)}>
                 Select all
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleSelectAll(false)}
-              >
-                Deselect all
+              <Button size="sm" variant="ghost" onClick={() => handleSelectAll(false)}>
+                Clear
               </Button>
             </div>
           </div>
 
-          <div className="exp-proc-list" style={{ maxHeight: 220 }}>
-            {plan.matchingProcesses.map((proc) => {
-              const checked = selectedPids.has(proc.pid);
+          <div className="exp-proc-list">
+            {plan.matchingProcesses.map((process) => {
+              const checked = selectedPids.has(process.pid);
               return (
-                <div
-                  className="exp-proc-item"
-                  key={proc.pid}
-                  style={{ opacity: proc.isCritical ? 0.6 : 1 }}
+                <label
+                  className={`exp-proc-item exp-select-row${
+                    process.isCritical ? " is-disabled" : ""
+                  }`}
+                  key={process.pid}
                 >
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: proc.isCritical ? "not-allowed" : "pointer", flex: 1, minWidth: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={proc.isCritical}
-                      onChange={() => togglePid(proc.pid)}
-                    />
-                    <div className="exp-proc-info">
-                      <span className="exp-proc-title">
-                        {proc.name} (PID {proc.pid})
-                      </span>
-                      {proc.windowTitle && (
-                        <span className="exp-proc-meta">Window: &ldquo;{proc.windowTitle}&rdquo;</span>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={process.isCritical}
+                    onChange={() => togglePid(process.pid)}
+                  />
+                  <span className="exp-proc-info">
+                    <span className="exp-proc-title">
+                      {process.name}
+                      <span className="exp-proc-pid">PID {process.pid}</span>
+                      {process.isCritical && (
+                        <Badge tone="danger">
+                          <IconShield size={10} /> Windows critical
+                        </Badge>
                       )}
-                      {proc.path && <span className="exp-proc-meta">{proc.path}</span>}
-                    </div>
-                  </label>
-                  {proc.isCritical && <Badge tone="danger">Critical</Badge>}
-                </div>
+                    </span>
+                    {process.windowTitle && (
+                      <span className="exp-proc-meta">Window: “{process.windowTitle}”</span>
+                    )}
+                    {process.path && (
+                      <span className="exp-proc-path">{displayPath(process.path)}</span>
+                    )}
+                  </span>
+                </label>
               );
             })}
           </div>
 
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={force}
-                onChange={(e) => setForce(e.target.checked)}
-              />
-              <span>
-                <strong>Force termination:</strong> Bypass graceful window closure (WM_CLOSE) and immediately terminate process with TerminateProcess.
+          <label className="exp-force-option">
+            <input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />
+            <span>
+              <strong>Force termination</strong>
+              <span className="exp-mode-detail">
+                Skip the graceful window-close request and terminate immediately. Unsaved work in the
+                selected apps will be lost.
               </span>
-            </label>
-          </div>
-        </div>
+            </span>
+          </label>
+        </section>
       )}
     </Modal>
   );

@@ -1,54 +1,62 @@
-/* TreeSize-inspired detailed Explorer table styles */
+/* Files view: a calm Explorer-style table with a sortable header. */
 
 .az-details-wrap {
   display: flex;
   flex-direction: column;
-  flex: 1;
   min-height: 0;
-  background: var(--surface-1);
-  border-radius: 8px;
-  overflow: hidden;
+  background: var(--surface);
   border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
 }
 
 .az-details-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  gap: 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
-  gap: 12px;
 }
 
 .az-details-search {
   position: relative;
   display: flex;
   align-items: center;
-  width: 280px;
+  width: min(300px, 46vw);
 }
 
 .az-details-search-icon {
   position: absolute;
-  left: 8px;
-  color: var(--text-muted);
+  left: 9px;
+  color: var(--text-faint);
   pointer-events: none;
 }
 
 .az-details-search-input {
   width: 100%;
-  padding: 4px 8px 4px 28px;
-  border-radius: 6px;
+  height: 32px;
+  padding: 0 10px 0 30px;
+  border-radius: 8px;
   border: 1px solid var(--line);
-  background: var(--surface-1);
+  background: var(--surface);
   color: var(--text-strong);
-  font-size: 12px;
+  font-size: 12.5px;
+}
+
+.az-details-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .az-details-summary {
   font-size: 11.5px;
   color: var(--text-muted);
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .az-details-table-scroll {
@@ -66,25 +74,25 @@
 .az-details-table thead th {
   position: sticky;
   top: 0;
+  z-index: 2;
   background: var(--surface-2);
   border-bottom: 1px solid var(--line);
-  padding: 7px 10px;
+  padding: 9px 12px;
   font-weight: 600;
   color: var(--text-muted);
   user-select: none;
   cursor: pointer;
   white-space: nowrap;
   font-size: 11.5px;
-  z-index: 2;
 }
 
 .az-details-table thead th:hover {
   color: var(--text-strong);
-  background: var(--surface-3);
+  background: var(--surface-hover);
 }
 
 .az-details-table thead th.is-sorted {
-  color: var(--accent);
+  color: var(--accent-strong);
 }
 
 .az-details-table thead th span {
@@ -96,7 +104,7 @@
 .sort-chevron {
   display: inline-block;
   vertical-align: middle;
-  transition: transform 0.15s ease;
+  transition: transform 120ms var(--ease);
 }
 
 .sort-chevron--asc {
@@ -109,23 +117,24 @@
 }
 
 .az-details-row:hover {
-  background: var(--surface-2);
+  background: var(--surface-hover);
 }
 
 .az-details-row.is-selected {
-  background: var(--surface-3);
+  background: var(--accent-soft);
 }
 
 .az-details-row td {
-  padding: 6px 10px;
+  padding: 9px 12px;
   white-space: nowrap;
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .az-col-name {
-  font-family: var(--font-sans) !important;
+  font-family: var(--font-ui) !important;
   text-align: left;
 }
 
@@ -133,14 +142,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .az-item-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
   width: 16px;
+  flex: none;
+  color: var(--text-muted);
 }
 
 .az-item-icon--dir {
@@ -151,7 +162,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 320px;
+  max-width: 360px;
 }
 
 .az-col-size,
@@ -170,10 +181,10 @@
 }
 
 .az-percent-bar-wrap {
-  width: 50px;
+  width: 52px;
   height: 5px;
-  background: var(--line);
-  border-radius: 3px;
+  background: var(--bg-inset);
+  border-radius: 999px;
   overflow: hidden;
 }
 
@@ -181,49 +192,67 @@
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 3px;
+  border-radius: inherit;
 }
 
 .az-percent-label {
-  width: 42px;
+  width: 44px;
   text-align: right;
 }
 
 .az-details-empty {
   text-align: center;
-  padding: 32px;
+  padding: 34px;
   color: var(--text-muted);
 }
 
 .az-context-menu {
   position: fixed;
-  background: var(--surface-2);
+  min-width: 170px;
+  padding: 5px;
+  background: var(--surface-raised);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  padding: 4px;
+  border-radius: 9px;
+  box-shadow: var(--shadow-2);
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  min-width: 160px;
 }
 
 .az-context-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  border-radius: 4px;
+  width: 100%;
+  padding: 7px 10px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   font-size: 12px;
-  cursor: pointer;
   text-align: left;
-  width: 100%;
 }
 
 .az-context-item:hover {
-  background: var(--accent);
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+
+.az-context-item:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+@media (max-width: 1000px) {
+  .az-details-search {
+    width: min(240px, 44vw);
+  }
+
+  .az-item-title {
+    max-width: 220px;
+  }
+
+  .az-percent-bar-wrap {
+    display: none;
+  }
 }

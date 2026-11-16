@@ -1,10 +1,10 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-17 (Performance diagnostics implementation; Phase 3, Phase 2 and Phase 1 records preserved)
+Updated: 2026-11-17 (Phase 5 design-system rebuild; Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
 
 ## 1. Current Verified State
 
-- **Branch:** `main`. The audit is committed and pushed as `d5e5afc`; no rebase or release was made.
+- **Branch:** `main`. The prior audit is committed and pushed as `d5e5afc` with documentation follow-up `4cf4059`; the Phase 5 design-system rebuild is uncommitted in this tree. No rebase or release was made.
 - **Version:** `0.1.0`. `v0.1.0` is published with NSIS, MSI, portable EXE, and `SHA256SUMS.txt`.
 - **IPC surface:** 72 commands registered in `src-tauri/src/lib.rs` (including Phase 2
   `list_app_history`, `prepare_store_uninstall`, `execute_store_uninstall`, Phase 3
@@ -91,6 +91,33 @@ Performance diagnostics are read-only sampling plus one existing reversible star
 | Native Performance workflow | UIA against the native Tauri debug app | PASS on 2026-11-17: 702 ms sample / 179 processes, 15% CPU, 37% memory, 1.1% disk busy; guide switching; 23 startup entries; disposable startup Cancel/Disable/Enable round trip with 0x03→0x02 bytes; two baselines compared; trace correctly disabled unelevated. See [the receipt](docs/evidence/2026-11-17-performance-diagnostics.md). |
 
 The native run found and fixed two defects: the manual Refresh was served stale startup evidence for two minutes, and a disk recommendation fired from process I/O while the physical disk was idle. UNVERIFIED remains: an elevated Diagnostics-Performance boot-impact reading and a real WPR trace recording/opening.
+
+## 2d. Design-system and navigation rebuild — 2026-11-17
+
+Phase 5 replaces the old dashboard surface with a calmer Windows-native utility shell. Backend safety plans, quarantine and IPC payloads are unchanged; this is presentation and information architecture only.
+
+- **Navigation:** exactly five destinations — Home, Applications, Storage & Cleanup, Performance, History & Recovery. Settings sits in the sidebar footer. Hunter Mode is **Find by window** inside Applications; there is no separate Hunter page. Storage & Cleanup contains Cleanup and Disk space; History & Recovery contains Activity and Recovery.
+- **Design system:** `src/styles/tokens.css` now defines one neutral family, one blue accent, one type hierarchy, one radius scale and light/dark surfaces. `src/components/ui.tsx` provides the shared primitives (`ViewHeader`, `SectionHeader`, `PageTabs`, `Panel`, `Stat`, `Badge`, `Button`, `SearchField`, `Segmented`, `Toggle`, `Select`, `Field`, `ProgressBar`, `Skeleton`, `EmptyState`, `Banner`, `Drawer`, `Modal`, `KeyValue`). Feature CSS never defines a second palette.
+- **New feature shells:** `src/features/storage/StorageCleanup.tsx` hosts Cleanup and Disk space; `src/features/history/HistoryRecovery.tsx` hosts Activity and Recovery. Existing Cleaner, Analyzer, Uninstaller, Overview and Performance views were restyled into those destinations rather than duplicated.
+- **States and responsive behaviour:** loading skeletons match final layout; empty/error/stale/disabled states exist for scans, history, quarantine, projects and performance; tables hide secondary columns at 1000 px; actions and headings never collapse below usable widths.
+- **Accessibility:** visible `:focus-visible` rings, 32 px controls, dialog focus trap and Escape return, `aria-current` navigation, labelled icon-only controls, reduced-motion support and a forced-colors block. A `prefers-reduced-motion` emulation and native keyboard traversal were exercised; screen-reader software and forced-colors visuals were not.
+- **Native audit fixes:** the Projects tab no longer inherits the Caches & leftovers header or cache warnings; the Recovery log badge now fits its grid at 1000 px; the Activity table hides Type at 1000 px instead of scrolling; the Analyzer review strips `\\?\` from display paths; legacy `Cleanup · 1 locations` titles and `1 files permanently removed` copy were corrected.
+- **Evidence:** selected native captures and the full command ledger are in [docs/evidence/2026-11-17-design-system.md](docs/evidence/2026-11-17-design-system.md). Design rules are in [docs/DESIGN.md](docs/DESIGN.md).
+
+### Phase 5 verification (this tree)
+
+| Check | Command | Observed |
+|---|---|---|
+| TypeScript | `npm run typecheck` | exit 0 |
+| Frontend tests | `npm test` | 100 passed in 12 files |
+| Production frontend | `npm run build` | exit 0 (562.28 kB JS, 127.63 kB CSS; chunk-size warning only) |
+| Documentation | `npm run docs:check` | `DOCS_CHECK: PASSED`, 79 Markdown files |
+| Full Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 253 passed, 4 ignored, 0 failed |
+| Desktop build | `npm run build:desktop` | exit 0; debug executable built |
+| Native navigation and keyboard | WebView2 remote debugging against the debug app | PASS: five destinations; Settings footer; Hunter in Applications; focus trap; Escape return; reduced motion; 0 horizontal overflow at 1000x680 |
+| Contrast | WCAG token calculation | PASS: sampled text pairs 4.57:1–16.14:1 |
+
+UNVERIFIED in this tree: screen-reader traversal, forced-colors visuals, 200% OS text scaling and a clean-VM installer run. The screenshots show this machine's real 179-application inventory; no real user cache or project was cleaned.
 
 ## 3. Verification — Phase 1 tree, 2026-11-16
 
@@ -199,8 +226,9 @@ installer test remain unexercised.
 
 ## 6. Next step
 
-The combined tree now passes typecheck, frontend tests, the full Rust suite, documentation checks and
-the native Performance/Projects workflows recorded above. Remaining release blockers are the
-unexercised live Store/MSI paths and signing trust. Commit and push this tree so CI can prove the
-documentation gate on a clean clone, then run the release checks; do not call Store/MSIX removal or
-elevated performance tracing verified until those runs are recorded.
+The combined tree now passes typecheck, 100 frontend tests, the full Rust suite, documentation checks,
+the production frontend build and the native design-system/Performance/Projects reviews recorded above.
+Remaining release blockers are the unexercised live Store/MSI paths and signing trust. Commit and push
+this tree so CI can prove the documentation and design gates on a clean clone, then run the release
+checks; do not call Store/MSIX removal or elevated performance tracing verified until those runs are
+recorded.
