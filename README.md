@@ -212,6 +212,7 @@ elevation. Hashes, timings and limitations are in
 - [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md): Independent PASS/FAIL/UNVERIFIED matrix, adversarial review, blockers and evidence.
 - [docs/evidence/2026-11-17-installer-release.md](docs/evidence/2026-11-17-installer-release.md): 0.1.0 release artifact hashes, NSIS install/repair/uninstall/reinstall results, MSI elevation result and signature trust.
 - [docs/evidence/2026-11-18-release-0.2.0.md](docs/evidence/2026-11-18-release-0.2.0.md): 0.2.0 RC1 artifact hashes, metadata, signature result and NSIS install/launch/uninstall/reinstall receipt.
+- [docs/evidence/2026-11-18-release-0.2.0-rc2.md](docs/evidence/2026-11-18-release-0.2.0-rc2.md): Published rc.2 assets, checksum verification and signature status.
 - [docs/RELEASE_NOTES_v0.2.0-rc.2.md](docs/RELEASE_NOTES_v0.2.0-rc.2.md): Unsigned 0.2.0 RC2 notes, including batch eligibility and kernel/driver diagnostics.
 - [docs/RELEASE_NOTES_v0.2.0-rc.1.md](docs/RELEASE_NOTES_v0.2.0-rc.1.md): Unsigned 0.2.0 release candidate 1 notes.
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): Release packaging and VM verification steps.
