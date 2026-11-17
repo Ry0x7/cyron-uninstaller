@@ -1,0 +1,229 @@
+{
+  "generatedAt": "2026-11-17T20:07:21.216Z",
+  "testedAt": "2026-11-17T20:07:19.136Z",
+  "head": "b274e412b01ca89a38ae7358e5074168126e6c20",
+  "branch": "main",
+  "dirty": true,
+  "reports": [
+    "wdio-0-0-json-reporter.json",
+    "wdio-0-1-json-reporter.json"
+  ],
+  "summary": {
+    "specs": 2,
+    "suites": 2,
+    "tests": 11,
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0,
+    "pending": 0
+  },
+  "suites": [
+    {
+      "name": "Cyron desktop core journeys",
+      "duration": 520063,
+      "start": "2026-11-17T19:46:13.845Z",
+      "end": "2026-11-17T19:54:53.908Z",
+      "sessionId": "e24bb4e2921a538b09b54c39229ca889",
+      "tests": [
+        {
+          "name": "first launch and every destination render real content",
+          "start": "2026-11-17T19:46:18.805Z",
+          "end": "2026-11-17T19:47:54.110Z",
+          "duration": 95305,
+          "state": "passed"
+        },
+        {
+          "name": "Applications search, broken filter, sort and selection respond to real inventory",
+          "start": "2026-11-17T19:47:54.286Z",
+          "end": "2026-11-17T19:48:47.689Z",
+          "duration": 53403,
+          "state": "passed"
+        },
+        {
+          "name": "batch uninstall reports verified, remaining and cancelled outcomes",
+          "start": "2026-11-17T19:48:47.882Z",
+          "end": "2026-11-17T19:50:27.084Z",
+          "duration": 99202,
+          "state": "passed"
+        },
+        {
+          "name": "single uninstall launches the registered fixture uninstaller and verifies removal",
+          "start": "2026-11-17T19:50:27.284Z",
+          "end": "2026-11-17T19:52:16.077Z",
+          "duration": 108793,
+          "state": "passed"
+        },
+        {
+          "name": "broken entry removal backs up the registry and restores it",
+          "start": "2026-11-17T19:52:16.263Z",
+          "end": "2026-11-17T19:54:53.725Z",
+          "duration": 157462,
+          "state": "passed"
+        }
+      ],
+      "hooks": [
+        {
+          "start": "2026-11-17T19:46:13.845Z",
+          "end": "2026-11-17T19:46:18.805Z",
+          "duration": 4960,
+          "title": "\"before all\" hook for Cyron desktop core journeys",
+          "associatedSuite": "Cyron desktop core journeys",
+          "associatedTest": "first launch and every destination render real content",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T19:47:54.110Z",
+          "end": "2026-11-17T19:47:54.286Z",
+          "duration": 176,
+          "title": "\"after each\" hook for Cyron desktop core journeys",
+          "associatedSuite": "Cyron desktop core journeys",
+          "associatedTest": "first launch and every destination render real content",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T19:48:47.689Z",
+          "end": "2026-11-17T19:48:47.882Z",
+          "duration": 193,
+          "title": "\"after each\" hook for Cyron desktop core journeys",
+          "associatedSuite": "Cyron desktop core journeys",
+          "associatedTest": "Applications search, broken filter, sort and selection respond to real inventory",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T19:50:27.084Z",
+          "end": "2026-11-17T19:50:27.284Z",
+          "duration": 200,
+          "title": "\"after each\" hook for Cyron desktop core journeys",
+          "associatedSuite": "Cyron desktop core journeys",
+          "associatedTest": "batch uninstall reports verified, remaining and cancelled outcomes",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T19:52:16.078Z",
+          "end": "2026-11-17T19:52:16.263Z",
+          "duration": 185,
+          "title": "\"after each\" hook for Cyron desktop core journeys",
+          "associatedSuite": "Cyron desktop core journeys",
+          "associatedTest": "single uninstall launches the registered fixture uninstaller and verifies removal",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T19:54:53.726Z",
+          "end": "2026-11-17T19:54:53.907Z",
+          "duration": 181,
+          "title": "\"after each\" hook for Cyron desktop core journeys",
+          "associatedSuite": "Cyron desktop core journeys",
+          "associatedTest": "broken entry removal backs up the registry and restores it",
+          "state": "passed"
+        }
+      ]
+    },
+    {
+      "name": "Cyron desktop secondary journeys and visual matrix",
+      "duration": 670245,
+      "start": "2026-11-17T19:54:57.502Z",
+      "end": "2026-11-17T20:06:07.747Z",
+      "sessionId": "e6cfa1df75ec30fa3edc0d2199e7003a",
+      "tests": [
+        {
+          "name": "light and dark destinations fit the minimum and a large window",
+          "start": "2026-11-17T19:54:57.503Z",
+          "end": "2026-11-17T20:00:30.558Z",
+          "duration": 333055,
+          "state": "passed"
+        },
+        {
+          "name": "Settings persists the chosen theme across a real reload",
+          "start": "2026-11-17T20:00:30.737Z",
+          "end": "2026-11-17T20:02:14.172Z",
+          "duration": 103435,
+          "state": "passed"
+        },
+        {
+          "name": "Storage disk-space, Performance evidence and History render measured content",
+          "start": "2026-11-17T20:02:14.354Z",
+          "end": "2026-11-17T20:03:48.213Z",
+          "duration": 93859,
+          "state": "passed"
+        },
+        {
+          "name": "spike capture and kernel/driver evidence render from live data",
+          "start": "2026-11-17T20:03:48.385Z",
+          "end": "2026-11-17T20:04:43.996Z",
+          "duration": 55611,
+          "state": "passed"
+        },
+        {
+          "name": "startup inventory shows real provenance for the disposable entry",
+          "start": "2026-11-17T20:04:44.182Z",
+          "end": "2026-11-17T20:05:22.132Z",
+          "duration": 37950,
+          "state": "passed"
+        },
+        {
+          "name": "Hunter asks for confirmation, enters targeting and exits with Escape",
+          "start": "2026-11-17T20:05:22.308Z",
+          "end": "2026-11-17T20:06:07.571Z",
+          "duration": 45263,
+          "state": "passed"
+        }
+      ],
+      "hooks": [
+        {
+          "start": "2026-11-17T20:00:30.559Z",
+          "end": "2026-11-17T20:00:30.736Z",
+          "duration": 177,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "light and dark destinations fit the minimum and a large window",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T20:02:14.173Z",
+          "end": "2026-11-17T20:02:14.354Z",
+          "duration": 181,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "Settings persists the chosen theme across a real reload",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T20:03:48.213Z",
+          "end": "2026-11-17T20:03:48.384Z",
+          "duration": 171,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "Storage disk-space, Performance evidence and History render measured content",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T20:04:43.996Z",
+          "end": "2026-11-17T20:04:44.182Z",
+          "duration": 186,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "spike capture and kernel/driver evidence render from live data",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T20:05:22.132Z",
+          "end": "2026-11-17T20:05:22.307Z",
+          "duration": 175,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "startup inventory shows real provenance for the disposable entry",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T20:06:07.572Z",
+          "end": "2026-11-17T20:06:07.746Z",
+          "duration": 174,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "Hunter asks for confirmation, enters targeting and exits with Escape",
+          "state": "passed"
+        }
+      ]
+    }
+  ]
+}

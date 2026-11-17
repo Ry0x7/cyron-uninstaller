@@ -89,9 +89,7 @@ memory, disable services, delete Prefetch, change the page file, or apply driver
   performance integration test passed.
 - `npm run docs:check`: passed.
 - `RELEASE_BUNDLES_OK` and `WINDOWS_METADATA_OK` are rechecked by the release workflow for the
-  tagged revision. Signature verification is expected to fail as `NotSigned` by design.
-- The new spike and driver panels have not yet been driven in the native window; that native UI
-  verification remains open.
+  tagged revision. Signature verification is expected to fail as `NotSigned` by design.- Post-publication native verification on 2026-11-18 drove both panels through the real Tauri/WebView2 app as part of an 11/11 desktop suite run. See [the native receipt](evidence/2026-11-18-desktop-performance.md).
 
 ## Known blockers
 
