@@ -6,7 +6,7 @@ This document defines the code-signing standards, key-management policies, relea
 
 Local signed builds use a **Chryypt Organization** self-signed certificate (`CN=Chryypt Organization`, publisher `Chryypt`). The current GitHub release workflow builds unsigned artifacts. A signature proves that the artifact has not changed since signing; it does not create public trust unless the signing certificate chains to a CA that Windows already trusts.
 
-**Current status (verified 2026-11-17):** the published `v0.1.0` NSIS installer and all three local release artifacts are `NotSigned`. The Chryypt certificate is self-signed (`Subject == Issuer`) and its chain reports `UntrustedRoot`, so even a signed local build does not earn public trust or SmartScreen reputation. The unsigned NSIS installer was installed, repaired, relaunched, uninstalled and reinstalled successfully; that does not change the trust result. See [the installer receipt](evidence/2026-11-17-installer-release.md).
+**Current status (verified 2026-11-18):** the published `v0.1.0` NSIS installer and all three 0.2.0 RC1 release artifacts are `NotSigned`. The Chryypt certificate is self-signed (`Subject == Issuer`) and its chain reports `UntrustedRoot`, so even a signed local build does not earn public trust or SmartScreen reputation. The unsigned NSIS installer was installed, repaired, relaunched, uninstalled and reinstalled successfully; that does not change the trust result. See [the installer receipt](evidence/2026-11-17-installer-release.md).
 
 ---
 

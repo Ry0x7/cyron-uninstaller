@@ -206,8 +206,9 @@ elevation. Hashes, timings and limitations are in
 - [docs/BENCHMARKS.md](docs/BENCHMARKS.md): Cyron-only measured scan time and working set, with explicit methodology and limitations.
 - [docs/COMPETITOR_COMPARISON.md](docs/COMPETITOR_COMPARISON.md): Documentation-based capability comparison; competitor scenarios are marked NOT RUN.
 - [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md): Independent PASS/FAIL/UNVERIFIED matrix, adversarial review, blockers and evidence.
-- [docs/evidence/2026-11-17-installer-release.md](docs/evidence/2026-11-17-installer-release.md): Release artifact hashes, NSIS install/repair/uninstall/reinstall results, MSI elevation result and signature trust.
-- [docs/RELEASE_NOTES_NEXT.md](docs/RELEASE_NOTES_NEXT.md): Unreleased next-release notes.
+- [docs/evidence/2026-11-17-installer-release.md](docs/evidence/2026-11-17-installer-release.md): 0.1.0 release artifact hashes, NSIS install/repair/uninstall/reinstall results, MSI elevation result and signature trust.
+- [docs/evidence/2026-11-18-release-0.2.0.md](docs/evidence/2026-11-18-release-0.2.0.md): 0.2.0 RC1 artifact hashes, metadata, signature result and NSIS install/launch/uninstall/reinstall receipt.
+- [docs/RELEASE_NOTES_v0.2.0-rc.1.md](docs/RELEASE_NOTES_v0.2.0-rc.1.md): Unsigned 0.2.0 release candidate notes.
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): Release packaging and VM verification steps.
 - [docs/BUILD_AND_SIGNING.md](docs/BUILD_AND_SIGNING.md): Build instructions, installer targets, WebView2 requirements, and code signing architecture.
 - [CONTRIBUTING.md](CONTRIBUTING.md): Code standards, safety invariants, and contribution workflow.

@@ -105,7 +105,7 @@ Windows metadata is enforced consistently across all artifacts and audited autom
 
 - **Product Name**: `Cyron Uninstaller`
 - **File Description**: `Windows Application Uninstaller, Disk Analyzer & Cleaner`
-- **Version**: Derived dynamically from `package.json` and `tauri.conf.json` (`0.1.0`)
+- **Version**: Derived dynamically from `package.json` and `tauri.conf.json` (`0.2.0`)
 - **Original Filename**: `cyron.exe`
 - **Publisher**: `Chryypt`
 - **Copyright**: `Copyright © 2026 Chryypt`
@@ -113,8 +113,8 @@ Windows metadata is enforced consistently across all artifacts and audited autom
 - **MSI UpgradeCode**: `{C2BCD648-205F-5904-9E5C-85726E376EC2}`
 
 ### Generated Release Bundles:
-- **NSIS Setup (current user)**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.1.0_x64-setup.exe`
-- **WiX MSI Package (per machine)**: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.1.0_x64_en-US.msi`
+- **NSIS Setup (current user)**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.2.0_x64-setup.exe`
+- **WiX MSI Package (per machine)**: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.2.0_x64_en-US.msi`
 - **Standalone Binary**: `src-tauri/target/release/cyron.exe`
 
 The WiX package is per-machine and its install requires administrator elevation. The NSIS package

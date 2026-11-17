@@ -1,12 +1,12 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-17 (Phase 8 independent release audit, release bundles and NSIS installer verification; Phase 7 real desktop E2E, Phase 6 workflow UX, Phase 5, Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
+Updated: 2026-11-18 (Phase 6-8 feature commits, 0.2.0 release-candidate build, release notes and NSIS install/launch/uninstall/reinstall verification; Phase 7 real desktop E2E, Phase 6 workflow UX, Phase 5, Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
 
 ## 1. Current Verified State
 
-- **Branch:** `main`. Phase 5 is committed as `2eeb91f` with documentation follow-up `3d9f2da`; the Phase 6 workflow completion, Phase 7 desktop E2E harness and Phase 8 safety hardening are uncommitted in this tree. No rebase or release was made.
+- **Branch:** `main`. Phase 5 is committed as `2eeb91f` with documentation follow-up `3d9f2da`. The Phase 8 safety hardening is `18cd4df`, the Phase 7 desktop E2E harness is `bd0de9d`, and the Phase 6-8 audit/evidence is `6c8defa`; the release-prep commit contains the 0.2.0 version bump and this handoff. No rebase was made.
 - **Phase 8 verdict:** **NOT PRODUCTION READY — release blocked.** The full audit, evidence and blockers are in [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md). The NSIS installer path is now verified end to end; signing trust and real vendor/MSI/Store removal are the remaining release blockers.
-- **Version:** `0.1.0`. `v0.1.0` is published with NSIS, MSI, portable EXE, and `SHA256SUMS.txt`. The published NSIS asset is `NotSigned` and predates the current tree.
+- **Version:** `0.2.0`. The release target is `v0.2.0-rc.1`, an unsigned prerelease; it is not a trusted production release. The previous `v0.1.0` assets remain `NotSigned` and predate this tree.
 - **IPC surface:** 72 commands registered in `src-tauri/src/lib.rs` (including Phase 2
   `list_app_history`, `prepare_store_uninstall`, `execute_store_uninstall`, Phase 3
   `scan_developer_storage`, `preview_developer_cleanup`, `verify_developer_cleanup`, and Phase 4
@@ -18,10 +18,10 @@ Updated: 2026-11-17 (Phase 8 independent release audit, release bundles and NSIS
   `NotSigned`. The `CN=Chryypt Organization` certificate is self-signed (Subject == Issuer), so a
   locally signed build is cryptographically intact but not publicly trusted and earns no SmartScreen
   reputation. See [docs/CODE_SIGNING_POLICY.md](docs/CODE_SIGNING_POLICY.md).
-- **CI:** the last committed revision (`3d9f2da`) is green in run `43954491263`: typecheck, 100 Vitest tests, `docs:check`, frontend build, full Rust suite, security and cleanup-stress suites, cleanup fixture and RC1 E2E fixture. The current working tree is uncommitted, so it has no CI run yet; its local Phase 8 checks are in the release audit. Run `43200921453` failed only `docs:check` because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the repository-local
+- **CI:** the previously committed revision (`3d9f2da`) is green in run `43954491263`. The new commits are locally verified: typecheck, 100 Vitest tests, `docs:check`, 261 Rust tests, release-bundle verification and Windows metadata. The `main` push and `v0.2.0-rc.1` tag starts the GitHub CI/Release workflows; check their receipts before treating the published assets as final. The earlier run `43200921453` failed only `docs:check` because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the repository-local
   [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md), and
   `scripts/verify-docs.mjs` rejects links into gitignored directories.
-- **Release bundles:** `npm run build:unsigned` produced NSIS `2,271,846` bytes / `16a37822…479f`, MSI `3,330,048` bytes / `3f1e64a7…2630`, and `cyron.exe` `6,918,144` bytes / `95c3f7ef…20d4`. Metadata audit passed; signature verification failed because all three artifacts are unsigned. The NSIS package installed, repaired, relaunched, uninstalled and reinstalled with 0 app-data hash changes. See [the installer receipt](docs/evidence/2026-11-17-installer-release.md).
+- **Release bundles:** `npm run build:unsigned` produced NSIS `2,270,729` bytes / `705b6378…e616`, MSI `3,260,416` bytes / `313a089f…fe57`, and `cyron.exe` `6,918,144` bytes / `ca78b575…ebfa`. Metadata audit passed; signature verification failed because all three artifacts are unsigned. The NSIS package installed (1.56 s), launched (37.1 MB, exit 0), uninstalled (1.25 s) and reinstalled; the 60,024-file app-data tree was unchanged. See [the 0.2.0 receipt](docs/evidence/2026-11-18-release-0.2.0.md).
 
 ## 2. Phase 2 implementation state — 2026-11-16
 
