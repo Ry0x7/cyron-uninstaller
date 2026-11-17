@@ -553,6 +553,62 @@ Acceptance contract recorded before implementation. Existing safety gates above 
   EXPECT: exit 0 and no regression in the existing frontend suite or documentation invariants
   EVIDENCE: PASS. Typecheck exit 0; 100 frontend tests in 12 files passed; full Rust suite 253 passed, 4 ignored, 0 failed; production build exit 0 (562.28 kB JS / 127.63 kB CSS, chunk-size warning only); `DOCS_CHECK: PASSED` over 79 Markdown files; `build:desktop` produced `src-tauri/target/debug/cyron.exe`; native smoke run exercised every destination and the keyboard/dialog checks above. Full command ledger in the [design-system receipt](docs/evidence/2026-11-17-design-system.md). GitHub Actions run [43953411889](https://github.com/Ry0x7/cyron-uninstaller/actions/runs/43953411889) passed both jobs on commit `2eeb91f`: frontend typecheck, 100 tests, `docs:check`, production build, Rust tests, security, cleanup-stress, cleanup fixture and RC1 E2E fixture.
 
+## Phase 6 UI — complete workflow UX — 2026-11-17
+
+Acceptance covered the five destinations and their critical flows in the production desktop build. Earlier safety gates above remain authoritative.
+
+- [x] G90: every primary destination, Settings and the Hunter flow are reachable in the real desktop build, with no dead navigation or placeholder control.
+  CHECK: production desktop build driven through WebView2 remote debugging at 1320x860 and 1000x680
+  EXPECT: Home, Applications, Storage & Cleanup, Performance, History & Recovery, Settings and Find by window all open and render real content
+  EVIDENCE: PASS. Home showed this machine's real volumes, 179 applications and 39 measured cache locations. Applications showed the same 179 entries with search, filters, sorting, selection and uninstall actions. Storage & Cleanup showed both tabs, Cleanup and Projects; Performance showed a live sample and startup/task inventory; History & Recovery showed Activity and Recovery with the real cleanup log. Settings opened from the footer. Find by window opened the Hunter confirmation. No route led to a blank or placeholder page. See [Home](docs/evidence/phase6/01-home-light.png), [Applications](docs/evidence/phase6/02-applications-light.png), [Storage](docs/evidence/phase6/08-storage-loaded-light.png), [Performance](docs/evidence/phase6/03-performance-light.png) and [Settings](docs/evidence/phase6/07-settings-startup-light.png).
+
+- [x] G91: loading, empty, error and partial states describe what is happening and never claim work that has not happened.
+  CHECK: source and native review of the Cleaner first measurement, preview drawer, Activity, Recovery log and Settings
+  EXPECT: initial measurement identifies its scope; preview explains that nothing moves; a stop or failure after moved files is recorded as partial, not completed
+  EVIDENCE: PASS. The first Cleaner load said **Measuring known cache folders on C:, D:, E:…**, showed skeletons in the final layout, disabled **Scan selected drives** while the first measurement ran, and displayed **Not checked yet** until it finished. The preview drawer was cleared on open, showed a spinner with **Reading the selected locations…** and **Cancel preview**, and never displayed a stale list. `cleanup_status` now returns `partial` when a cancellation or failure already quarantined files, and `cancelled_and_failed_cleanups_get_honest_statuses` covers cancellation with moved files, cancellation with none, total failure and partial failure. See [initial measurement](docs/evidence/phase6/04-storage-loading-light.png) and [Recovery log](docs/evidence/phase6/06-recovery-light.png).
+
+- [x] G92: minimum window width and dark theme do not clip outcomes, actions or content.
+  CHECK: native captures and a layout probe at a 984 px client width
+  EXPECT: 0 horizontal document overflow; cleanup outcomes and actions remain visible; the shell does not scroll independently of the content
+  EVIDENCE: PASS after fixes. The page probe returned 0 horizontal overflow on all five destinations and Settings; document scroll height stayed 641 px, equal to the viewport, after the `html` fix. The Recovery log now keeps its outcome under the operation title at 1000 px, so failed or partial runs no longer collapse to a bare badge. Home's fifth system item spans the spare row instead of leaving a gap. See [Home min](docs/evidence/phase6/10-home-min.png), [Applications min](docs/evidence/phase6/11-applications-min.png), [Recovery min](docs/evidence/phase6/14-recovery-min.png), [Settings min](docs/evidence/phase6/15-settings-min.png), [Storage dark](docs/evidence/phase6/18-storage-dark.png) and [Home dark](docs/evidence/phase6/19-home-dark.png).
+
+- [x] G93: reversible and destructive surfaces explain their effect, and existing keyboard and dialog behaviour still works inside every workflow.
+  CHECK: native review of startup toggles, cleanup preview, Hunter dialog, uninstall confirmation and permanent-deletion review
+  EXPECT: effects and reversal are stated; Escape closes dialogs and returns focus; no action runs without its confirmation plan
+  EVIDENCE: PASS. Settings now states that disabling a startup app preserves its entry and can be reversed; the native probe loaded 23 startup rows and showed **Copied**, then **Copy** after two seconds (the clipboard API was stubbed to avoid changing this machine's clipboard). The cleanup preview retains the read-only notice, exact targets, quarantine destination and required confirmation. Find by window retains its scope and protected-process explanation before tracking begins. The uninstall wizard and Force Delete review retain their existing plan-bound confirmations. These are native surfaces from the production build; no destructive action was executed.
+
+- [x] G94: typecheck, frontend tests, documentation, production build, desktop build and the full Rust suite pass after the workflow changes.
+  CHECK: `npm run typecheck`, `npm test`, `npm run docs:check`, `npm run build`, `npm run build:desktop`, `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml`
+  EXPECT: exit 0; no regression in safety or documentation gates
+  EVIDENCE: PASS. Typecheck exit 0; 100 frontend tests in 12 files passed; production build exit 0 (563.72 kB JS / 128.05 kB CSS, chunk-size advisory only); `DOCS_CHECK: PASSED` over 80 Markdown files; `build:desktop` produced `src-tauri/target/debug/cyron.exe`; full Rust suite 253 passed, 4 ignored, 0 failed. Full command ledger and limitations in the [workflow receipt](docs/evidence/2026-11-17-workflow-ux.md).
+
+## Phase 7 real desktop E2E — 2026-11-17
+
+Acceptance used the compiled Tauri executable and a real WebView2 WebDriver session, not JSX,
+Vitest, static screenshots or a browser preview. The harness and its evidence are described
+in [the desktop E2E receipt](docs/evidence/2026-11-17-desktop-e2e.md).
+
+- [x] G95: the real Windows Tauri application can be built and driven through WebView2 with a supported driver, and fixtures use real IPC rather than mocked results.
+  CHECK: `npm run test:desktop`
+  EXPECT: `tauri-driver` + `msedgedriver` create a session against `src-tauri/target/debug/cyron.exe`; fixture HKCU applications, startup entry, project, analyzer files and cache file are created; teardown leaves no fixture keys or app-data residue
+  EVIDENCE: PASS. Sessions were created against the compiled app through `@wdio/tauri-service` with matching `msedgedriver 157.0.4341.46`. Fixture setup/teardown ran in the real profile; app data was backed up and restored; stale fixture keys from interrupted runs are removed on setup. `DESKTOP_E2E_OK`.
+- [x] G96: first launch, every destination, search/filter/sort/selection, single and batch uninstall, and broken-entry removal with registry backup/restore pass as desktop journeys.
+  CHECK: `tests/desktop/01-core.spec.mjs`
+  EXPECT: real inventory rows change with search/filter; fixture uninstaller markers are written; HKCU keys are deleted only after a plan; a verified `.reg` backup restores the ghost key
+  EVIDENCE: PASS. Four disposable applications appeared; broken-filter and name-sort assertions passed; batch results were `1 still registered`, `1 cancelled`, `0 failed`; single uninstall removed the fixture key and the row; broken-entry cleanup removed the key and **Restore Registry Now** restored 1 key and 4 values.
+- [x] G97: minimum 1000×680 and 1440×960 windows, light and dark themes, and a real reload persist settings without horizontal document overflow.
+  CHECK: `tests/desktop/02-secondary.spec.mjs` visual matrix and Settings persistence journey
+  EXPECT: 0 horizontal overflow on every destination at both sizes; theme changes reach `data-theme`; Light remains pressed after reload
+  EVIDENCE: PASS. All six destinations (five plus Settings) reported no horizontal document overflow at 1000×680; light captures were taken for all six at 1440×960; dark Home was captured; Light survived a real `browser.refresh()`.
+- [x] G98: Storage, Performance, History, startup provenance and Hunter Mode render measured desktop states and preserve confirmation/exit semantics.
+  CHECK: secondary spec journeys against real IPC
+  EXPECT: Disk-space idle state opens; Performance shows real CPU/memory/startup evidence; History renders recorded operations; the disposable startup entry is enabled for this user; Hunter requires confirmation, enters targeting and Escape returns to Applications
+  EVIDENCE: PASS. The disk-space view showed **Choose a drive to map everything on it**; Performance rendered measured CPU, available memory and startup counts plus the startup guide; History rendered recorded operations; the fixture startup entry showed **Enabled** and **This user**; Hunter opened its confirmation, entered **Move over any desktop window**, and Escape returned to Applications.
+- [x] G99: desktop evidence records named screenshots, machine-readable results, logs and the exact tested revision, while unexercised paths are reported as UNVERIFIED rather than inferred.
+  CHECK: committed [desktop E2E receipt](docs/evidence/2026-11-17-desktop-e2e.md), `docs/evidence/phase7/*.png`, `results.json`, `revision.json`
+  EXPECT: revision and environment are recorded; every passing journey has a named capture; scaling, native ask, installer/relaunch, real cache execution, duplicate/treemap and Store/MSI gaps are explicit
+  EVIDENCE: PASS with explicit gaps. Exact revision `3d9f2daddb527492afc578c43dc70c1a7a7ce6f2` plus the Phase 7 working tree, WebView2 `157.0.4341.46`, Node `v24.18.0` and the real interactive session are recorded. 125%/150% OS scaling, the native startup confirmation, installer/upgrade/relaunch, real cache cleanup, AI/project cleanup, duplicate/treemap interaction, Explorer verbs and Store/MSI remain UNVERIFIED.
+
 ## Not gated
 
 - [ ] Real cleanup of a user cache on this machine: deliberately not performed during verification;
@@ -584,3 +640,38 @@ Task-specific acceptance was recorded before implementation in the local `.unlaz
   EVIDENCE: 92 frontend tests passed across 11 files; TypeScript passed. Full Rust suite passed (207 passed, 4 ignored); the ignored interactive Recycle Bin fixture was separately invoked and passed. Documentation, MSVC desktop debug build, isolated cleanup/recovery fixture and eight-scenario uninstall/process/registry/recovery fixture passed. Signing, installer bundles and release metadata were not rerun for this change. The committed [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md) records the command ledger.
 - [x] G61: actual UI reviewed at representative window sizes with loading, empty, error, progress and result evidence; unexercised vendor/Store-specific scenarios named explicitly.
   EVIDENCE: Eight scoped visual/interaction checks recorded in the committed [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md); the local integrity manifest was verified at recording time (76 files, including 59 source hashes). Those hashes describe commit `e38ea5c`, not the current tree, because this audit changed source files afterwards. Inspected 1320x860 and minimum 1000x680 client windows and expanded Uninstaller. Covered Cleaner loading/C-only scan/inaccessible warning/session-remnant empty state, Uninstaller empty search/clear-filter recovery/Store guidance, and Analyzer protected-target refusal/review/live progress/cancel/result/rescan. A disposable 4000-file folder stopped with 2115 files deleted and an independently counted 1885 preserved; unrelated siblings remained. No real vendor uninstall, real cache cleanup, full screen-reader traversal or exhaustive provider/state matrix was exercised.
+
+## Phase 8 independent audit, packaging and installer — 2026-11-17
+
+This pass audited the current working tree, produced the release bundles, and exercised the real
+per-user installer. The final PASS/FAIL/UNVERIFIED matrix is in
+[the release audit](docs/RELEASE_AUDIT_2026-11-17.md#final-pass-fail-unverified-feature-matrix).
+
+- [x] G100: all local suites pass on the final tree.
+  CHECK: `npm run typecheck`; `npm test`; `npm run docs:check`; `cargo test`; `verify-cleanup`; `verify-e2e`; `verify-hunter-perf`; `npm run test:desktop`
+  EXPECT: exit 0 and named fixture markers
+  EVIDENCE: PASS. Typecheck exit 0; 100 frontend tests in 12 files; `DOCS_CHECK: PASSED`; 261 Rust tests passed, 4 ignored, 0 failed; `CLEANUP_FIXTURE_OK`; `RC1_E2E_FIXTURE_OK`; `HUNTER_BENCHMARK_OK`; 10/10 real desktop journeys with `results.json` under [docs/evidence/phase8](docs/evidence/phase8/).
+- [x] G101: the real desktop matrix covers all destinations, minimum and large windows, light/dark, Settings reload, measured Storage/Performance/History states and Hunter lifecycle.
+  CHECK: `npm run test:desktop`
+  EXPECT: 10 passed, 0 failed, named captures
+  EVIDENCE: PASS. 18m09s run against the compiled Tauri/WebView2 app; no horizontal overflow at 1000x680; light captures for all six destinations at 1440x960; dark Home; theme survived refresh; startup provenance, measured Performance and Hunter Escape passed. 125%/150% OS scaling remains UNVERIFIED.
+- [x] G102: release bundles build and their Windows metadata is consistent.
+  CHECK: `npm run build:unsigned`; `node scripts/verify-release-bundles.mjs`; `npm run verify:metadata`
+  EXPECT: `RELEASE_BUNDLES_OK` and `WINDOWS_METADATA_OK`
+  EVIDENCE: PASS. NSIS 2,271,846 bytes, MSI 3,330,048 bytes, `cyron.exe` 6,918,144 bytes. ProductName `Cyron Uninstaller`, version `0.1.0`, publisher `Chryypt`, UpgradeCode `{C2BCD648-205F-5904-9E5C-85726E376EC2}`. Hashes are in [the installer receipt](docs/evidence/2026-11-17-installer-release.md).
+- [x] G103: signature integrity is distinguished from public trust, and the release is not described as trusted while unsigned.
+  CHECK: `npm run verify:signatures`
+  EXPECT: negative tests pass; unsigned artifacts fail with `NotSigned`; the audit records the blocker
+  EVIDENCE: PASS with a disclosed FAIL. Negative tests rejected unsigned, tampered and wrong-subject files. All three local artifacts are `NotSigned`; the local `CN=Chryypt Organization` chain is `UntrustedRoot`; the published `v0.1.0` NSIS asset is `NotSigned`. Public trust remains a release blocker.
+- [x] G104: the per-user NSIS installer installs, repairs, relaunches, uninstalls and reinstalls while preserving app data.
+  CHECK: silent `/S` install, repair, launch, uninstall, reinstall; hash the app-data tree and seed quarantine sentinels
+  EXPECT: every step exits 0; install and uninstall registry entry correct; 0 app-data changes; sentinels survive
+  EVIDENCE: PASS. Install 1.07 s, repair 1.02 s, uninstall 1.24 s; `%LOCALAPPDATA%\Cyron Uninstaller` created and removed; HKCU uninstall entry created/removed; installed window titled `Cyron Uninstaller`, responding, clean exit 0; 0 app-data hash changes; root and quarantine sentinels preserved. Capture: [34-installed-launch.png](docs/evidence/phase8/34-installed-launch.png).
+- [x] G105: the MSI limitation is measured rather than assumed.
+  CHECK: `msiexec /i <msi> /qn /norestart` without elevation
+  EXPECT: the per-machine refusal is recorded; no false install claim
+  EVIDENCE: PASS (limited). Exit 1603 with MSI error 1925 (“sufficient privileges … for all users”); nothing installed. An elevated MSI install/uninstall, version-to-version upgrade, downgrade and clean-VM install remain UNVERIFIED.
+- [x] G106: the audit ends with a direct-evidence matrix and an honest release decision.
+  CHECK: review [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md)
+  EXPECT: every area is PASS, FAIL or UNVERIFIED with evidence; production readiness is not claimed
+  EVIDENCE: PASS. Verdict: **NOT PRODUCTION READY — release blocked** on public signing trust, real vendor/MSI/Store removal, elevated diagnostics, DPI/accessibility and unrun competitor comparisons.

@@ -154,6 +154,7 @@ Every build is verified with automated test suites, stress harnesses, and end-to
 ```powershell
 npm run typecheck                                      # TypeScript type validation (0 errors)
 npm test                                               # 100 Vitest frontend tests
+npm run test:desktop                                   # Real Tauri/WebView2 desktop E2E: DESKTOP_E2E_OK
 npm run build                                          # Production frontend bundle
 node scripts/verify-dist.mjs                           # Frontend bundle assertions (DIST_OK)
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
@@ -165,11 +166,16 @@ node scripts/verify-cleanup.mjs                        # Isolated cleanup fixtur
 node scripts/verify-e2e.mjs                            # Complete RC1 E2E fixture: RC1_E2E_FIXTURE_OK
 node scripts/verify-desktop-binary.mjs                 # Desktop binary validation: DESKTOP_BINARY_OK
 node scripts/smoke-desktop.mjs                         # Desktop window launch test: DESKTOP_SMOKE_OK
-node scripts/benchmark-competitive.mjs                 # Competitive scanner benchmark: BENCHMARK_OK
+node scripts/benchmark-competitive.mjs                 # Cyron-only scan benchmark, no competitor figures: BENCHMARK_OK
 node scripts/verify-release-bundles.mjs                # Release bundles check: RELEASE_BUNDLES_OK
 npm run verify:metadata                                # Windows PE & MSI metadata audit: WINDOWS_METADATA_OK
-npm run verify:signatures                              # Authenticode signature & negative checks: SIGNATURES_VERIFIED_OK
+npm run verify:signatures                              # Signed builds: SIGNATURES_VERIFIED_OK. The unsigned RC exits 1 by design.
 ```
+
+The release bundles were also installed and exercised: the per-user NSIS package installs, repairs,
+relaunches, uninstalls and reinstalls with app data preserved. The MSI is per-machine and requires
+elevation. Hashes, timings and limitations are in
+[docs/evidence/2026-11-17-installer-release.md](docs/evidence/2026-11-17-installer-release.md).
 
 ---
 
@@ -178,9 +184,11 @@ npm run verify:signatures                              # Authenticode signature 
 - **Store / MSIX Uninstallation**: Current-user Microsoft Store packages can be removed through a server-held plan and the native Windows Runtime package manager. Cyron never calls `RemoveForAllUsers`, deprovisions machine-wide, elevates automatically or launches `winget`/PowerShell. Machine-wide or provisioned packages require Windows Settings or an administrator-managed tool. Live Store removal through the desktop UI is UNVERIFIED as of 2026-11-16.
 - **Performance Trace & Elevated Boot Impact**: The Performance page is read-only unless you toggle a startup entry. Recording a Windows Performance Recorder trace and reading per-app boot impact require an administrator session; the unelevated UI explains and disables both. Those elevated paths are UNVERIFIED. Cyron does not measure temperature, fan speed or guarantee any speed improvement.
 - **Portable Applications**: Discovered via explainable heuristics; standard uninstaller commands are disabled because portable apps lack registry uninstallers. Leftover and disk analysis are available.
-- **Code Signing Architecture**: Official Authenticode code signing under the Chryypt Organization:
-  - `CHRYYPT_SIGNED`: Releases and installers signed by Chryypt Organization (`CN=Chryypt Organization`, RSA 3072, SHA-256) via `npm run build:signed` (`scripts/sign-build.ps1`).
-  - Unsigned builds remain clearly labeled `UNSIGNED_RC` for private testing. Real SmartScreen reputation builds progressively with download volume and user trust.
+- **Code Signing Architecture**: Local Authenticode signing under the Chryypt Organization:
+  - `CHRYYPT_SIGNED`: builds signed with the **self-signed** `CN=Chryypt Organization` certificate (RSA 3072, SHA-256) via `npm run build:signed` (`scripts/sign-build.ps1`). Integrity is verifiable; public trust is not. The certificate chain reports `UntrustedRoot`.
+  - Unsigned builds remain clearly labeled `UNSIGNED_RC` for private testing. The published v0.1.0 NSIS asset and all current local release artifacts are `NotSigned`. A self-signed certificate does not earn SmartScreen reputation; expect an unknown-publisher warning.
+  - The 2026-11-17 audit blocks a public release on this and the other open items in [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md).
+- **Installer Scope**: The NSIS package is a verified per-user install. The WiX MSI is per-machine, requires administrator elevation, and its elevated install/uninstall path is UNVERIFIED. A version-to-version upgrade and clean-VM install were not executed; the NSIS same-version reinstall path passed with app data preserved.
 
 ---
 
@@ -195,7 +203,11 @@ npm run verify:signatures                              # Authenticode signature 
 - [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md): Detailed verification ledger and test counts.
 - [docs/SECURITY.md](docs/SECURITY.md): Threat model, security boundaries, and confirmation plan safety.
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): End-user walkthrough of Explorer integration, scanning, cleaning, and uninstallation.
-- [docs/BENCHMARKS.md](docs/BENCHMARKS.md): Measured performance, working set, and architectural comparison against WinDirStat/WizTree.
+- [docs/BENCHMARKS.md](docs/BENCHMARKS.md): Cyron-only measured scan time and working set, with explicit methodology and limitations.
+- [docs/COMPETITOR_COMPARISON.md](docs/COMPETITOR_COMPARISON.md): Documentation-based capability comparison; competitor scenarios are marked NOT RUN.
+- [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md): Independent PASS/FAIL/UNVERIFIED matrix, adversarial review, blockers and evidence.
+- [docs/evidence/2026-11-17-installer-release.md](docs/evidence/2026-11-17-installer-release.md): Release artifact hashes, NSIS install/repair/uninstall/reinstall results, MSI elevation result and signature trust.
+- [docs/RELEASE_NOTES_NEXT.md](docs/RELEASE_NOTES_NEXT.md): Unreleased next-release notes.
 - [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): Release packaging and VM verification steps.
 - [docs/BUILD_AND_SIGNING.md](docs/BUILD_AND_SIGNING.md): Build instructions, installer targets, WebView2 requirements, and code signing architecture.
 - [CONTRIBUTING.md](CONTRIBUTING.md): Code standards, safety invariants, and contribution workflow.

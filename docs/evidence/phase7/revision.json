@@ -1,0 +1,70 @@
+{
+  "testedAt": "2026-11-17T01:15:59.438Z",
+  "head": "3d9f2daddb527492afc578c43dc70c1a7a7ce6f2",
+  "branch": "main",
+  "dirty": true,
+  "status": "passed",
+  "os": "Windows 11 Pro (10.0.26200)",
+  "node": "v24.18.0",
+  "webView2": "157.0.4341.46",
+  "fixtures": {
+    "analyzer": {
+      "duplicateA": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\analyzer\\alpha\\one.bin",
+      "duplicateB": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\analyzer\\beta\\nested\\one-copy.bin",
+      "root": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\analyzer"
+    },
+    "apps": {
+      "broken": {
+        "installLocation": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\apps\\broken",
+        "key": "CyronDesktopE2E_43892-1794877551309_broken",
+        "marker": null,
+        "name": "Cyron Desktop E2E Broken"
+      },
+      "cancelled": {
+        "installLocation": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\apps\\cancelled",
+        "key": "CyronDesktopE2E_43892-1794877551309_cancelled",
+        "marker": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\markers\\cancelled.txt",
+        "name": "Cyron Desktop E2E Cancelled"
+      },
+      "remaining": {
+        "installLocation": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\apps\\remaining",
+        "key": "CyronDesktopE2E_43892-1794877551309_remaining",
+        "marker": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\markers\\remaining.txt",
+        "name": "Cyron Desktop E2E Remaining"
+      },
+      "removable": {
+        "installLocation": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\apps\\removable",
+        "key": "CyronDesktopE2E_43892-1794877551309_removable",
+        "marker": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\markers\\removable.txt",
+        "name": "Cyron Desktop E2E Removable"
+      }
+    },
+    "cache": {
+      "cacheExisted": true,
+      "file": "C:\\Users\\Pahente\\AppData\\Local\\Yarn\\Cache\\cyron-desktop-e2e-43892-1794877551309.tgz",
+      "label": "Yarn Package cache",
+      "path": "C:\\Users\\Pahente\\AppData\\Local\\Yarn\\Cache",
+      "yarnExisted": true
+    },
+    "explorer": {
+      "file": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\explorer\\sample.txt",
+      "folder": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\explorer\\sample-folder"
+    },
+    "project": {
+      "dist": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project\\dist",
+      "env": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project\\.env",
+      "git": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project\\.git",
+      "keepFile": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project\\src\\index.ts",
+      "nodeModules": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project\\node_modules",
+      "root": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project",
+      "source": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\project\\src\\index.ts"
+    },
+    "runId": "43892-1794877551309",
+    "startup": {
+      "command": "\"C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\bin\\cyron-e2e-uninstaller.exe\" --startup-fixture",
+      "name": "CyronDesktopE2EStartup_43892-1794877551309"
+    },
+    "uninstaller": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097\\bin\\cyron-e2e-uninstaller.exe",
+    "workspace": "C:\\Users\\Pahente\\AppData\\Local\\Temp\\cyron-desktop-e2e-58244-1794877550097"
+  }
+}

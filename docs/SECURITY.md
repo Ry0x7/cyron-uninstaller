@@ -129,7 +129,8 @@ Child processes are strictly controlled:
 
 There is no application network or telemetry code. Scanned paths, duplicate hashes, quarantine
 manifests, performance baselines and traces, and the cleanup log remain local. Cyron contains no
-network feature.
+network feature. Tauri's dependency graph includes HTTP crates transitively, so “no network stack”
+is not literally true at the linked-library level; no Cyron code calls them.
 
 ## Gates satisfied across Phases 3 and 4
 

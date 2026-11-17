@@ -23,7 +23,7 @@ Cyron is a Windows desktop application (Tauri v2 + Rust backend, React 19 + Type
 7. **Leftovers & Multi-Type Registry Backup:** Registry subkey deletion requires an automated, recursive `.reg` export supporting all 6 value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`). System roots and shared vendor keys (`Software\Microsoft`, `Software\Google`, etc.) are protected.
 8. **App Discovery:** Win32 (HKLM/HKCU 64/32-bit), Microsoft Store (`AppModel\Repository\Packages`, read-only inventory), Steam (`libraryfolders.vdf`), and portable heuristics (`%LOCALAPPDATA%\Programs`). Store apps display guidance to Windows Settings / `winget`.
 9. **Shell Integration (`explorer.rs`):** Per-user shell verbs registered under `HKCU\Software\Classes` without elevation. CLI startup routes (`--analyze`, `--duplicates`, `--storage`, etc.) route to views; they never execute destructive actions directly.
-10. **Zero Telemetry:** The application contains no network stack or tracking code.
+10. **Zero Telemetry:** No Cyron application code initializes a network client, resolves an address, or sends telemetry. Tauri's dependency graph may link HTTP crates transitively; that is not an application network call.
 11. **Performance Diagnostics Are Read-Only:** `perf.rs` samples CPU, memory, physical-disk counters, processes and startup/task inventory with bounded Windows APIs. It never clears standby memory, disables services, deletes Prefetch, changes the page file, disables Defender or updates, or applies registry/driver tweaks. Reversible startup toggling goes through the existing `StartupApproved` path and a native confirmation; advanced WPR tracing is optional, local, and requires the user to relaunch elevated.
 
 ## Git Workflow: Strict No-Rebase Policy
@@ -38,6 +38,7 @@ npm run dev:desktop        # Desktop window with Vite dev server
 npm run build:desktop      # Standalone debug executable (no bundle)
 npm run typecheck          # TypeScript check (0 errors)
 npm test                   # Frontend Vitest suite
+npm run test:desktop       # Real Tauri/WebView2 desktop E2E (10 journeys)
 npm run docs:check         # Verify documentation integrity
 npm run build:unsigned     # Unsigned release bundles (NSIS & MSI)
 npm run build:signed       # Build and sign with Chryypt Organization certificate

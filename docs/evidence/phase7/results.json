@@ -1,0 +1,112 @@
+{
+  "generatedAt": "2026-11-17T01:15:59.898Z",
+  "testedAt": "2026-11-17T01:15:59.438Z",
+  "head": "3d9f2daddb527492afc578c43dc70c1a7a7ce6f2",
+  "branch": "main",
+  "dirty": true,
+  "reports": [
+    "wdio-0-0-json-reporter.json"
+  ],
+  "summary": {
+    "specs": 1,
+    "suites": 1,
+    "tests": 5,
+    "passed": 5,
+    "failed": 0,
+    "skipped": 0,
+    "pending": 0
+  },
+  "suites": [
+    {
+      "name": "Cyron desktop secondary journeys and visual matrix",
+      "duration": 597486,
+      "start": "2026-11-17T01:06:00.158Z",
+      "end": "2026-11-17T01:15:57.644Z",
+      "sessionId": "9991f532bd4ee804db70e732b57b158a",
+      "tests": [
+        {
+          "name": "light and dark destinations fit the minimum and a large window",
+          "start": "2026-11-17T01:06:00.176Z",
+          "end": "2026-11-17T01:11:23.817Z",
+          "duration": 323641,
+          "state": "passed"
+        },
+        {
+          "name": "Settings persists the chosen theme across a real reload",
+          "start": "2026-11-17T01:11:23.996Z",
+          "end": "2026-11-17T01:13:04.695Z",
+          "duration": 100699,
+          "state": "passed"
+        },
+        {
+          "name": "Storage disk-space, Performance evidence and History render measured content",
+          "start": "2026-11-17T01:13:04.877Z",
+          "end": "2026-11-17T01:14:35.497Z",
+          "duration": 90620,
+          "state": "passed"
+        },
+        {
+          "name": "startup inventory shows real provenance for the disposable entry",
+          "start": "2026-11-17T01:14:35.676Z",
+          "end": "2026-11-17T01:15:13.351Z",
+          "duration": 37675,
+          "state": "passed"
+        },
+        {
+          "name": "Hunter asks for confirmation, enters targeting and exits with Escape",
+          "start": "2026-11-17T01:15:13.524Z",
+          "end": "2026-11-17T01:15:57.467Z",
+          "duration": 43943,
+          "state": "passed"
+        }
+      ],
+      "hooks": [
+        {
+          "start": "2026-11-17T01:11:23.818Z",
+          "end": "2026-11-17T01:11:23.996Z",
+          "duration": 178,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "light and dark destinations fit the minimum and a large window",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T01:13:04.695Z",
+          "end": "2026-11-17T01:13:04.877Z",
+          "duration": 182,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "Settings persists the chosen theme across a real reload",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T01:14:35.497Z",
+          "end": "2026-11-17T01:14:35.676Z",
+          "duration": 179,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "Storage disk-space, Performance evidence and History render measured content",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T01:15:13.351Z",
+          "end": "2026-11-17T01:15:13.524Z",
+          "duration": 173,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "startup inventory shows real provenance for the disposable entry",
+          "state": "passed"
+        },
+        {
+          "start": "2026-11-17T01:15:57.468Z",
+          "end": "2026-11-17T01:15:57.644Z",
+          "duration": 176,
+          "title": "\"after each\" hook for Cyron desktop secondary journeys and visual matrix",
+          "associatedSuite": "Cyron desktop secondary journeys and visual matrix",
+          "associatedTest": "Hunter asks for confirmation, enters targeting and exits with Escape",
+          "state": "passed"
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,14 @@
 
 Cyron is a modern, transparent Windows uninstaller, disk space analyzer, and developer cache cleaner built with Tauri v2, Rust, and React. It combines the deep uninstallation of Revo Uninstaller, the visual disk exploration of WinDirStat/WizTree, and the bloat cleanup of BleachBit with safety-first guardrails, clear indications, and crash-consistent recovery.
 
+> [!CAUTION]
+> **Historical release notes — audited 2026-11-17.** The test counts, benchmark wording and
+> “verified asset” claims below describe the original v0.1.0 hand-off, not the current tree. The
+> published v0.1.0 installers are **NotSigned**; the Chryypt certificate is self-signed and not
+> publicly trusted. The current release status, corrected measurements and outstanding blockers are
+> in [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md). Do not reuse the
+> “Verified Release Assets” table as evidence for a new build.
+
 > [!NOTE]
 > **Publisher Metadata:** `Chryypt`  
 > Complete Windows PE VERSIONINFO and WiX MSI properties verified under publisher **Chryypt** (Product Name: `Cyron Uninstaller`, Version: `0.1.0`, UpgradeCode: `{C2BCD648-205F-5904-9E5C-85726E376EC2}`).
