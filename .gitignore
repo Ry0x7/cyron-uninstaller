@@ -15,4 +15,5 @@ src-tauri/target/
 *.log
 /tmp/
 /screenshots/
+/test-results/
 src-tauri/*-bench.txt
