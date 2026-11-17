@@ -73,12 +73,18 @@ jobs:
               if (Test-Path $mainExe) {
                   $allFiles += (Get-Item $mainExe)
               }
+              # GitHub replaces spaces in uploaded asset names with periods, so the
+              # checksum entries must match the names users actually download.
               $hashLines = foreach ($item in $allFiles) {
                   $hash = (Get-FileHash -Path $item.FullName -Algorithm SHA256).Hash.ToLower()
-                  "$hash  $($item.Name)"
+                  $assetName = $item.Name.Replace(' ', '.')
+                  "$hash  $assetName"
               }
-              $hashLines | Out-File -Encoding utf8 -FilePath "$bundleDir/SHA256SUMS.txt"
-              Get-Content "$bundleDir/SHA256SUMS.txt"
+              # LF endings and no BOM keep `sha256sum -c` working on every platform.
+              $sumPath = [System.IO.Path]::GetFullPath("$bundleDir/SHA256SUMS.txt")
+              $text = ($hashLines -join "`n") + "`n"
+              [System.IO.File]::WriteAllText($sumPath, $text, (New-Object System.Text.UTF8Encoding($false)))
+              Get-Content $sumPath
           }
 
       - name: Publish Release Assets
