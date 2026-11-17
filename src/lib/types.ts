@@ -862,6 +862,34 @@ export interface DiskIoMetrics {
   note: string | null;
 }
 
+export interface DriverInfo {
+  class: "Display" | "Storage" | "Network";
+  name: string;
+  version: string | null;
+  /** ISO date (YYYY-MM-DD) recorded by the driver package. */
+  date: string | null;
+}
+
+export interface DriverAnalysis {
+  items: DriverInfo[];
+  note: string | null;
+}
+
+export interface SystemEvent {
+  observedAt: string;
+  source: string;
+  eventId: number;
+  level: "critical" | "error" | "warning";
+  category: "display" | "storage" | "hardware" | "power" | "driver" | "service" | "system";
+  summary: string;
+}
+
+export interface SystemEventAnalysis {
+  status: "available" | "denied" | "unavailable";
+  note: string;
+  items: SystemEvent[];
+}
+
 export interface ProcessUsage {
   pid: number;
   name: string;
@@ -983,6 +1011,8 @@ export interface PerformanceSnapshot {
   cpu: CpuMetrics;
   memory: MemoryMetrics;
   diskIo: DiskIoMetrics;
+  drivers: DriverAnalysis;
+  systemEvents: SystemEventAnalysis;
   volumes: VolumeInfo[];
   processes: ProcessUsage[];
   processCount: number;

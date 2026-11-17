@@ -20,9 +20,9 @@ communication for non-technical users.
 | Frontend | React 19 + TypeScript, Vite 7, no router |
 | Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
 | Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json`, `recovery_journal.jsonl` and `quarantine/` in the Tauri app-data dir |
-| Frontend tests | Vitest, 100 tests in 12 files |
+| Frontend tests | Vitest, 112 tests in 14 files |
 | Desktop E2E | WebdriverIO + `@wdio/tauri-service` + `tauri-driver` + matching `msedgedriver`, driving the compiled Tauri/WebView2 window; 10 journeys in 2 spec files |
-| Backend tests | `cargo test`: 261 passed (218 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
+| Backend tests | `cargo test`: 265 passed (222 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
 
 Native APIs used by the backend:
 
@@ -50,7 +50,7 @@ src/
   features/storage/           Storage & Cleanup destination shell and page tabs
   features/activity/          History & Recovery → Activity
   features/history/          History & Recovery destination shell, Recovery and cleanup log
-  features/performance/       live metrics, startup evidence, guided checks, baselines, optional trace
+  features/performance/       live metrics, 20-second spike capture, kernel/driver/event evidence, startup checks, baselines, optional trace
   features/settings/          theme, scan scope, exclusions, startup apps, Explorer integration, safety
   lib/api.ts                  typed invoke wrapper + cached cache-inventory request
   lib/types.ts                shared IPC contract (camelCase)
@@ -115,7 +115,7 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `uninstall.rs` | Resolves vendor commands server-side from live registry keys, creates expiring single-use plans (`UninstallPlan`, `BatchUninstallPlan`), tokenizes commands safely, normalizes MSI invocations, and reconciles exit codes: 1605/1614 become removal only when a complete inventory confirms absence, 1602 is cancellation, 3010/1641 require restart, and exit 0 with the product still registered remains `remaining`. A bounded post-exit inventory poll reduces races with vendor cleanup. |
 | `store.rs` | Enumerates current-user main packages through `PackageManager::FindPackagesByUserSecurityId`, filters frameworks, resources, bundles and system packages, and removes one reviewed package through `RemovePackageAsync(...).join()`. It never uses `RemoveForAllUsers` or machine-wide deprovisioning, and maps access-denied, in-use and not-found failures to truthful messages. No shell or `winget` wrapper is launched. |
 | `app_history.rs` | Persists a bounded (2,000-record) installed/removed lifecycle at `<app_data_dir>/app-history.json` with durable atomic replacement. A complete inventory can retire a missing record; a partial inventory never marks anything removed. Records are descriptive and never authorize cleanup. |
-| `perf.rs` | Samples system CPU times, memory and commit charge, PDH physical-disk counters, per-process CPU/working-set/I/O counters, fixed-volume capacity, startup registrations and boot/logon scheduled tasks. Reads the Diagnostics-Performance event log only when Windows grants access, records local baselines at `<app_data>\performance-baselines.json`, and optionally starts/stops a local WPR trace. It never changes services, memory, the page file, Defender, updates or the registry. |
+| `perf.rs` | Samples system CPU times, memory and commit charge, PDH physical-disk counters, per-process CPU/working-set/I/O counters, fixed-volume capacity, startup registrations and boot/logon scheduled tasks. Reads the Diagnostics-Performance boot log and the recent System driver/device events only when Windows grants access, lists display/storage/network driver versions and package dates from the read-only class registry, records local baselines at `<app_data>\performance-baselines.json`, and optionally starts/stops a local WPR trace. A kernel-dominant sample is reported as kernel-mode activity without naming a driver it cannot attribute. It never changes services, memory, the page file, Defender, updates, drivers or the registry. |
 | `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. Name-only file, shortcut and registry matches are `caution` and unselected; only exact install-location or exact registration identity is preselected as `safe`. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
@@ -189,7 +189,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `get_system_specs` | — | `SystemSpecs` | Five-second cache. |
 | `list_startup_items` | — | `StartupItem[]` | HKCU/HKLM Run/RunOnce, WOW6432Node and Startup folders. |
 | `set_startup_item_enabled` | `id`, `enabled` | `StartupItem` | Windows `StartupApproved` 0x02/0x03; rejects protected entries. |
-| `capture_performance_snapshot` | `forceStartup?` | `PerformanceSnapshot` | Read-only 700 ms sample; `forceStartup` bypasses the 120 s startup-evidence cache for a manual refresh. |
+| `capture_performance_snapshot` | `forceStartup?` | `PerformanceSnapshot` | Read-only 700 ms sample plus cached driver inventory and recent System events; `forceStartup` bypasses the 120 s startup/device-evidence caches for a manual refresh. |
 | `list_performance_baselines` | — | `PerformanceBaseline[]` | Local baselines, newest first, capped at 50. |
 | `record_performance_baseline` | `label` | `PerformanceBaseline` | Captures a fresh snapshot and stores compareable figures locally. |
 | `start_performance_trace` | — | `PerformanceTraceStatus` | Optional WPR trace; refuses when already recording, unavailable or unelevated. |
@@ -654,7 +654,7 @@ bounded but slower; neither is a WizTree comparison.
 - `tests/cleanup_stress.rs` — wide cleanup fixture with a bounded preview, locked file, cancelled run, consecutive batches and empty/missing targets.
 - `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` — end-to-end plan → quarantine → restore → purge against `%TEMP%\cyron-cleanup-<pid>`, printing `CLEANUP_FIXTURE_OK`.
 - `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep nesting, access-denied folders, exclusion subtree and cancellation.
-- `tests/performance.rs` and `perf::tests` — live read-only snapshot consistency, CPU accounting, command parsing, exact executable-to-boot-event matching, scheduled-task provenance, evidence on every recommendation, an idle-disk/high-process-I/O non-recommendation, and baseline persistence.
+- `tests/performance.rs` and `perf::tests` — live read-only snapshot consistency, CPU accounting, command parsing, exact executable-to-boot-event matching, scheduled-task provenance, driver-date/event classification, the kernel-share threshold, evidence on every recommendation, an idle-disk/high-process-I/O non-recommendation, and baseline persistence.
 - `tests/desktop/*.spec.mjs` + `scripts/desktop-e2e.mjs` — real Windows desktop E2E. Builds the disposable fixture, starts `tauri-driver`/`msedgedriver`, drives the compiled Tauri WebView2 window, exercises real IPC and destructive plans, and records named screenshots, JSON results and the tested revision. `npm run test:desktop` runs the suite; `node scripts/desktop-uia.ps1` exposes Windows UI Automation for native dialogs.
 - `.github/workflows/ci.yml` & `release.yml` — Windows CI for typecheck, Vitest, frontend build, `cargo test`, security and cleanup-stress suites, release packaging, checksum generation, and GitHub release automation.
 - `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, `verify-release-bundles.mjs`, `bench-scan.mjs` — artefact verification, desktop launch smoke checks, and release bundle verification.

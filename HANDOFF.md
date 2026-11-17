@@ -76,20 +76,22 @@ Performance diagnostics are read-only sampling plus one existing reversible star
 - **Recommendations:** every recommendation requires a measured threshold and carries evidence, expected effect, risk and verification. Per-process I/O is not treated as disk pressure because Windows includes network, pipe and device transfers; the native run exposed that exact false positive and the gate is now physical-disk busy + queue only.
 - **Guides, baselines and trace:** five symptom guides filter recommendations; up to 50 labeled local baselines compare CPU, memory, available memory, commit, disk busy and recorded boot time with an association-not-causation note; the optional WPR trace invokes only `%SystemRoot%\System32\wpr.exe` with fixed arguments, requires administrator rights, stays local and never self-elevates.
 - **Freshness:** manual **Refresh** calls `capture_performance_snapshot(forceStartup = true)` to bypass the 120-second startup-evidence cache; live sampling keeps the cache.
+- **Short-spike capture:** **Record 20 seconds** takes 20 one-second samples through the same read-only command, keeps the peak CPU, kernel, memory and physical-disk values plus the process at the CPU peak, and labels the burst process-, kernel-, disk-, mixed- or idle-dominated. It is cancellable, writes nothing to disk and stops when the page is left. `spikeAnalysis.test.ts` covers every verdict.
+- **Kernel and driver evidence:** the snapshot adds display, storage and network driver names, versions and package dates from the class registry, and classified driver/device/storage/power/service errors from the System log over the last seven days. `kernel >= 20%` and `>= 60%` of busy CPU produces a `system` recommendation that states the kernel share and the application CPU it does not explain. It never names a driver as the cause: the counters do not attribute DPC/ISR time. A denied event log is reported as unavailable, not empty.
 
 ### Performance diagnostics verification (this tree)
 
 | Check | Command | Observed |
 |---|---|---|
-| Targeted unit tests | `cargo test --lib perf::tests` | 8 passed, including the idle-disk/high-process-I/O regression and fixed System32 path validation |
-| Live snapshot | `cargo test --test performance -- --nocapture` | passed on this machine |
+| Targeted unit tests | `cargo test --lib perf::tests` | 10 passed, including the idle-disk/high-process-I/O regression, kernel-share gating, driver/event normalization and fixed System32 path validation |
+| Live snapshot | `cargo test --test performance -- --nocapture` | passed on this machine; asserts the kernel/driver and recent-event fields |
 | TypeScript | `npm run typecheck` | exit 0 |
-| Frontend tests | `npm test` | 98 passed in 12 files |
-| Full Rust suite | `cargo test --manifest-path src-tauri/Cargo.toml` | 253 passed, 4 ignored, 0 failed |
+| Frontend tests | `npm test` | 112 passed in 14 files (includes `spikeAnalysis.test.ts`) |
+| Full Rust suite | `cargo test --manifest-path src-tauri/Cargo.toml` | 255 passed, 4 ignored, 0 failed |
 | Documentation | `npm run docs:check` | `DOCS_CHECK: PASSED` |
 | Native Performance workflow | UIA against the native Tauri debug app | PASS on 2026-11-17: 702 ms sample / 179 processes, 15% CPU, 37% memory, 1.1% disk busy; guide switching; 23 startup entries; disposable startup Cancel/Disable/Enable round trip with 0x03→0x02 bytes; two baselines compared; trace correctly disabled unelevated. See [the receipt](docs/evidence/2026-11-17-performance-diagnostics.md). |
 
-The native run found and fixed two defects: the manual Refresh was served stale startup evidence for two minutes, and a disk recommendation fired from process I/O while the physical disk was idle. UNVERIFIED remains: an elevated Diagnostics-Performance boot-impact reading and a real WPR trace recording/opening.
+The native run found and fixed two defects: the manual Refresh was served stale startup evidence for two minutes, and a disk recommendation fired from process I/O while the physical disk was idle. The 2026-11-18 kernel/driver evidence and 20-second capture were verified by Rust tests, `spikeAnalysis.test.ts`, typecheck and a live unelevated snapshot; the new Performance controls themselves have not yet been driven in the native window. UNVERIFIED remains: an elevated Diagnostics-Performance boot-impact reading, a real WPR trace recording/opening, and the native UI for the spike capture.
 
 ## 2d. Design-system and navigation rebuild — 2026-11-17
 

@@ -29,6 +29,7 @@ import { api, errorMessage } from "../../lib/api";
 import {
   displayPath,
   formatBytes,
+  formatDate,
   formatDateTime,
   formatDuration,
   formatPercent,
@@ -44,14 +45,16 @@ import type {
   ProcessUsage,
   ScheduledStartupTask,
   StartupEvidence,
+  SystemEvent,
   ViewId,
 } from "../../lib/types";
+import { SpikeCapture } from "./SpikeCapture";
 import "./performance.css";
 
 type SnapshotStatus = "loading" | "ready" | "error";
 type ProcessSort = "cpu" | "memory" | "io";
 type StartupTab = "apps" | "tasks";
-type GuideId = "all" | "startup" | "app" | "disk" | "fan";
+type GuideId = "all" | "startup" | "app" | "kernel" | "disk" | "fan";
 
 const GUIDES: { id: GuideId; label: string; title: string; detail: string }[] = [
   {
@@ -74,6 +77,13 @@ const GUIDES: { id: GuideId; label: string; title: string; detail: string }[] = 
     title: "Find the process that is using the machine while you wait",
     detail:
       "The process table shows the live sample, not a lifetime average. Reproduce the lag, watch CPU and I/O, then compare the same app while idle.",
+  },
+  {
+    id: "kernel",
+    label: "CPU spikes / kernel time",
+    title: "Separate kernel and driver work from applications",
+    detail:
+      "Kernel time has no process row. If it dominates while measured apps are quiet, the cause is kernel-mode work such as a driver, DPC/interrupt handling, storage or a security filter. Use the 20-second capture and the recent driver/event evidence below before changing anything.",
   },
   {
     id: "disk",
@@ -100,6 +110,8 @@ function guideRecommendations(
       return recommendations.filter((item) => item.category === "startup");
     case "app":
       return recommendations.filter((item) => item.category === "cpu" || item.category === "disk");
+    case "kernel":
+      return recommendations.filter((item) => item.category === "system" || item.category === "cpu");
     case "disk":
       return recommendations.filter((item) => item.category === "storage" || item.category === "disk");
     case "fan":
@@ -124,6 +136,24 @@ function bootObservedAt(snapshot: PerformanceSnapshot): number | null {
   if (!raw) return null;
   const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed / 1000 : null;
+}
+
+function eventTimestamp(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed / 1000 : null;
+}
+
+function driverAgeDays(date: string | null): number | null {
+  if (!date) return null;
+  const parsed = Date.parse(`${date}T00:00:00`);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(0, Math.floor((Date.now() - parsed) / 86_400_000));
+}
+
+function eventTone(level: SystemEvent["level"]): "danger" | "caution" | "neutral" {
+  if (level === "critical") return "danger";
+  if (level === "error") return "caution";
+  return "neutral";
 }
 
 function evidenceSourceLabel(source: StartupEvidence["evidenceSource"]): string {
@@ -418,6 +448,10 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
   const snapshotFresh = snapshot ? relativeTime(snapshot.capturedAt) : "Not measured";
   const recommendations = snapshot?.recommendations ?? [];
   const startup = snapshot?.startup;
+  const kernelShare =
+    snapshot && snapshot.cpu.utilizationPercent > 0
+      ? snapshot.cpu.kernelPercent / snapshot.cpu.utilizationPercent
+      : 0;
   const selectedGuide = guides.find((entry) => entry.id === guide) ?? guides[0];
 
   return (
@@ -646,6 +680,132 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
                   <p className="perf-unavailable">No fixed volume with capacity was reported.</p>
                 )}
               </div>
+              </Panel>
+            </section>
+
+            <section className="perf-section">
+              <SectionHeader
+                title="Catch a short spike"
+                description="A burst capture keeps the peak instead of only the latest reading."
+              />
+              <Panel>
+                <SpikeCapture />
+              </Panel>
+            </section>
+
+            <section className="perf-section">
+              <SectionHeader
+                title="Kernel, drivers & recent changes"
+                description="Kernel time has no process row. These read-only sources help correlate a spike with a driver or device event without guessing."
+              />
+              <Panel bodyClassName="perf-diagnostics-panel">
+                <div className="perf-kernel-overview">
+                  <div className="perf-kernel-overview__copy">
+                    <span className="perf-label">Kernel share of busy CPU</span>
+                    <strong>{formatPercent(kernelShare)}</strong>
+                    <p>
+                      {kernelShare >= 0.6 && snapshot.cpu.kernelPercent >= 20
+                        ? "Kernel-mode work is the main source in this sample. Compare the driver dates and System events below, then repeat the spike capture before and after a change."
+                        : "Kernel time is not dominant in this sample. A short spike can still be kernel-heavy; use the 20-second capture while the lag is visible."}{" "}
+                      Windows does not attribute DPC/ISR time to one driver in these counters.
+                    </p>
+                  </div>
+                  <div className="perf-kernel-overview__stats">
+                    <Stat label="Kernel" value={formatPercent(snapshot.cpu.kernelPercent / 100)} />
+                    <Stat label="User" value={formatPercent(snapshot.cpu.userPercent / 100)} />
+                    <Stat
+                      label="Drivers listed"
+                      value={String(snapshot.drivers.items.length)}
+                      meta="Display, storage, network"
+                    />
+                  </div>
+                </div>
+
+                <div className="perf-diagnostics-grid">
+                  <div className="perf-evidence-block">
+                    <div className="perf-evidence-block__head">
+                      <div>
+                        <span className="perf-label">Driver inventory</span>
+                        <h3>Installed display, storage and network drivers</h3>
+                      </div>
+                      <Badge tone="neutral">{snapshot.drivers.items.length}</Badge>
+                    </div>
+                    {snapshot.drivers.items.length === 0 ? (
+                      <p className="perf-note">
+                        {snapshot.drivers.note ?? "Windows did not return any named drivers."}
+                      </p>
+                    ) : (
+                      <ul className="perf-driver-list">
+                        {snapshot.drivers.items.slice(0, 8).map((driver) => {
+                          const age = driverAgeDays(driver.date);
+                          return (
+                            <li key={`${driver.class}-${driver.name}-${driver.version ?? "none"}`}>
+                              <div className="perf-driver__main">
+                                <span className="perf-driver__name">{driver.name}</span>
+                                <span className="perf-source__evidence">
+                                  {driver.class}
+                                  {driver.version ? ` · v${driver.version}` : ""}
+                                </span>
+                              </div>
+                              <div className="perf-driver__date">
+                                <span className="mono small faint">
+                                  {driver.date ? formatDate(driver.date) : "No date"}
+                                </span>
+                                {age !== null && age <= 30 && <Badge tone="caution">Recent</Badge>}
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    <p className="perf-note">
+                      Dates come from the driver package, not the install time. A recent date beside
+                      a new slowdown is a lead, not proof that the driver caused it.
+                    </p>
+                  </div>
+
+                  <div className="perf-evidence-block">
+                    <div className="perf-evidence-block__head">
+                      <div>
+                        <span className="perf-label">System event log</span>
+                        <h3>Driver and device errors from the last 7 days</h3>
+                      </div>
+                      <Badge tone={snapshot.systemEvents.items.length > 0 ? "caution" : "neutral"}>
+                        {snapshot.systemEvents.items.length}
+                      </Badge>
+                    </div>
+                    {snapshot.systemEvents.items.length === 0 ? (
+                      <p className="perf-note">{snapshot.systemEvents.note}</p>
+                    ) : (
+                      <ul className="perf-event-list">
+                        {snapshot.systemEvents.items.slice(0, 8).map((event) => (
+                          <li key={`${event.source}-${event.eventId}-${event.observedAt}`}>
+                            <Badge tone={eventTone(event.level)}>{event.level}</Badge>
+                            <div className="perf-event__main">
+                              <span className="perf-event__summary">{event.summary}</span>
+                              <span className="perf-source__evidence">
+                                {event.source} · Event {event.eventId} · {event.category}
+                              </span>
+                            </div>
+                            <span className="mono small faint">
+                              {formatDateTime(eventTimestamp(event.observedAt))}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {snapshot.systemEvents.items.length > 8 && (
+                      <p className="perf-note">
+                        {snapshot.systemEvents.items.length - 8} more matching events are kept in
+                        the snapshot but not listed here.
+                      </p>
+                    )}
+                    <p className="perf-note">
+                      Only providers Windows recorded are shown. A missing event is not proof that a
+                      driver is healthy. Per-process DPC/ISR attribution requires the advanced trace.
+                    </p>
+                  </div>
+                </div>
               </Panel>
             </section>
 

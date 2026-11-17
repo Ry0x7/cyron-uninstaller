@@ -14,6 +14,8 @@ use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use winreg::enums::HKEY_LOCAL_MACHINE;
+use winreg::RegKey;
 
 const SAMPLE_WINDOW_MS: u64 = 700;
 const MAX_PROCESSES: usize = 4096;
@@ -32,6 +34,12 @@ const FREE_SPACE_WARNING: f64 = 0.10;
 const DISK_BUSY_WARNING: f64 = 70.0;
 const DISK_QUEUE_WARNING: f64 = 2.0;
 const STARTUP_IMPACT_MIN_MS: u64 = 1_000;
+const KERNEL_WARNING_PERCENT: f64 = 20.0;
+const KERNEL_SHARE_WARNING: f64 = 0.60;
+const ENVIRONMENT_TTL_SECS: u64 = 120;
+const MAX_SYSTEM_EVENTS: usize = 30;
+const MAX_SYSTEM_EVENT_SCAN: usize = 240;
+const SYSTEM_EVENT_LOOKBACK_DAYS: u64 = 7;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +50,8 @@ pub struct PerformanceSnapshot {
     pub cpu: CpuMetrics,
     pub memory: MemoryMetrics,
     pub disk_io: DiskIoMetrics,
+    pub drivers: DriverAnalysis,
+    pub system_events: SystemEventAnalysis,
     pub volumes: Vec<volumes::VolumeInfo>,
     pub processes: Vec<ProcessUsage>,
     pub process_count: u32,
@@ -82,6 +92,46 @@ pub struct DiskIoMetrics {
     pub busy_percent: Option<f64>,
     pub queue_length: Option<f64>,
     pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriverAnalysis {
+    pub items: Vec<DriverInfo>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DriverInfo {
+    /// Display, Storage or Network.
+    pub class: String,
+    pub name: String,
+    pub version: Option<String>,
+    /// ISO date (YYYY-MM-DD) as recorded by the driver package.
+    pub date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemEventAnalysis {
+    /// available, denied or unavailable.
+    pub status: String,
+    pub note: String,
+    pub items: Vec<SystemEvent>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemEvent {
+    pub observed_at: String,
+    pub source: String,
+    pub event_id: u32,
+    /// critical, error or warning.
+    pub level: String,
+    /// display, storage, hardware, power, driver, service or system.
+    pub category: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,6 +301,8 @@ pub struct PerformanceBaseline {
 }
 
 static STARTUP_CACHE: Mutex<Option<(Instant, StartupAnalysis)>> = Mutex::new(None);
+static ENVIRONMENT_CACHE: Mutex<Option<(Instant, DriverAnalysis, SystemEventAnalysis)>> =
+    Mutex::new(None);
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -970,6 +1022,327 @@ fn xml_unescape(value: &str) -> String {
         .replace("&apos;", "'")
 }
 
+/* --------------------------------------------------- drivers and system events */
+
+fn normalize_driver_date(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = raw.split(['-', '/']).collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let (year, month, day) = if parts[0].len() == 4 {
+        (parts[0], parts[1], parts[2])
+    } else {
+        (parts[2], parts[0], parts[1])
+    };
+    let year = year.parse::<u32>().ok()?;
+    let month = month.parse::<u32>().ok()?;
+    let day = day.parse::<u32>().ok()?;
+    if !(1900..=2200).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn is_virtual_driver(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "wan miniport",
+        "kernel debug",
+        "wi-fi direct",
+        "hyper-v",
+        "virtual",
+        "bluetooth device",
+        "wintun",
+        "tap-",
+        "loopback",
+        "microsoft basic display",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn read_driver_inventory() -> DriverAnalysis {
+    const CLASSES: [(&str, &str); 3] = [
+        ("Display", "{4d36e968-e325-11ce-bfc1-08002be10318}"),
+        ("Storage", "{4d36e967-e325-11ce-bfc1-08002be10318}"),
+        ("Network", "{4d36e972-e325-11ce-bfc1-08002be10318}"),
+    ];
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let mut items = Vec::new();
+    let mut readable = false;
+    for (class, guid) in CLASSES {
+        let Ok(base) = hklm.open_subkey(format!(r"SYSTEM\CurrentControlSet\Control\Class\{guid}"))
+        else {
+            continue;
+        };
+        readable = true;
+        for sub_key in base.enum_keys().flatten() {
+            if !sub_key.chars().all(|character| character.is_ascii_digit()) {
+                continue;
+            }
+            let Ok(key) = base.open_subkey(&sub_key) else {
+                continue;
+            };
+            let Ok(name) = key.get_value::<String, _>("DriverDesc") else {
+                continue;
+            };
+            let name = name.trim().to_string();
+            if name.is_empty() || is_virtual_driver(&name) {
+                continue;
+            }
+            let version = key.get_value::<String, _>("DriverVersion").ok();
+            let date = key
+                .get_value::<String, _>("DriverDate")
+                .ok()
+                .and_then(|value| normalize_driver_date(&value));
+            if items.iter().any(|existing: &DriverInfo| {
+                existing.name.eq_ignore_ascii_case(&name) && existing.version == version
+            }) {
+                continue;
+            }
+            items.push(DriverInfo {
+                class: class.into(),
+                name,
+                version,
+                date,
+            });
+        }
+    }
+    items.sort_by(|left, right| right.date.cmp(&left.date));
+    items.truncate(12);
+    DriverAnalysis {
+        note: if readable {
+            None
+        } else {
+            Some(
+                "Windows did not expose its driver class registry, so driver versions and dates are unavailable."
+                    .into(),
+            )
+        },
+        items,
+    }
+}
+
+fn provider_name(xml: &str) -> Option<String> {
+    let marker = "<Provider Name=\"";
+    let start = xml.find(marker)? + marker.len();
+    let end = xml[start..].find('"')?;
+    Some(xml_unescape(&xml[start..start + end]))
+}
+
+fn tag_text_any(xml: &str, tag: &str) -> Option<String> {
+    let marker = format!("<{tag}");
+    let start = xml.find(&marker)?;
+    let content_start = start + xml[start..].find('>')? + 1;
+    let close = format!("</{tag}>");
+    let end = xml[content_start..].find(&close)? + content_start;
+    Some(xml_unescape(xml[content_start..end].trim()))
+}
+
+fn event_level(level: u32) -> &'static str {
+    match level {
+        1 => "critical",
+        2 => "error",
+        _ => "warning",
+    }
+}
+
+fn classify_system_event(source: &str, event_id: u32) -> Option<(&'static str, String)> {
+    let source = source.to_ascii_lowercase();
+    if source.contains("amd")
+        || source.contains("nvld")
+        || source.contains("nvidia")
+        || source.contains("display")
+        || source.contains("igfx")
+        || event_id == 4101
+    {
+        let summary = match event_id {
+            4101 => "A display driver stopped responding and recovered (TDR).".to_string(),
+            _ => "A display driver reported an error.".to_string(),
+        };
+        return Some(("display", summary));
+    }
+    if source.contains("whea") {
+        return Some((
+            "hardware",
+            "Windows recorded a hardware error (WHEA).".to_string(),
+        ));
+    }
+    if source.contains("kernel-power") || source.contains("bugcheck") || event_id == 41 || event_id == 6008 {
+        return Some((
+            "power",
+            "Windows recorded an unexpected shutdown or bug check.".to_string(),
+        ));
+    }
+    if source.contains("storahci")
+        || source.contains("nvme")
+        || source.contains("disk")
+        || source.contains("ntfs")
+        || source.contains("volmgr")
+    {
+        let summary = match event_id {
+            7 => "The disk reported a bad block.",
+            51 => "A paging operation failed.",
+            129 => "The storage controller was reset.",
+            153 => "A storage request was retried.",
+            55 => "NTFS detected file-system corruption.",
+            _ => "Storage reported a device or controller error.",
+        };
+        return Some(("storage", summary.to_string()));
+    }
+    if source.contains("kernel-pnp") || source.contains("plug and play") {
+        return Some((
+            "driver",
+            "A device driver failed to load or start.".to_string(),
+        ));
+    }
+    if source.contains("service control manager") {
+        return Some((
+            "service",
+            "A Windows service failed to start or stopped unexpectedly.".to_string(),
+        ));
+    }
+    if source.contains("windowsupdateclient") && matches!(event_id, 19 | 20) {
+        return Some((
+            "system",
+            "A Windows update failed to install.".to_string(),
+        ));
+    }
+    None
+}
+
+fn read_system_events() -> SystemEventAnalysis {
+    use windows_sys::Win32::System::EventLog::{
+        EvtClose, EvtNext, EvtQuery, EvtQueryChannelPath, EvtQueryReverseDirection,
+    };
+
+    let channel = wide("System");
+    let lookback_ms = SYSTEM_EVENT_LOOKBACK_DAYS * 24 * 60 * 60 * 1_000;
+    let query = wide(&format!(
+        "*[System[(Level=1 or Level=2 or Level=3) and TimeCreated[timediff(@SystemTime) <= {lookback_ms}]]]"
+    ));
+    let result = unsafe {
+        EvtQuery(
+            0,
+            channel.as_ptr(),
+            query.as_ptr(),
+            EvtQueryChannelPath | EvtQueryReverseDirection,
+        )
+    };
+    if result == 0 {
+        let code = get_last_error();
+        let (status, note) = if code == 5 {
+            (
+                "denied",
+                "Windows did not allow Cyron to read the System event log, so recent driver and device errors are unavailable.",
+            )
+        } else {
+            (
+                "unavailable",
+                "The Windows System event log could not be read; no driver or device-error claim is made.",
+            )
+        };
+        return SystemEventAnalysis {
+            status: status.into(),
+            note: note.into(),
+            items: Vec::new(),
+        };
+    }
+
+    let mut items = Vec::new();
+    let mut scanned = 0usize;
+    loop {
+        let mut events = [0isize; 16];
+        let mut returned = 0u32;
+        let ok = unsafe {
+            EvtNext(
+                result,
+                events.len() as u32,
+                events.as_mut_ptr(),
+                1_000,
+                0,
+                &mut returned,
+            )
+        };
+        if ok == 0 {
+            break;
+        }
+        for event in events.iter().take(returned as usize) {
+            scanned += 1;
+            if let Some(xml) = event_xml(*event) {
+                let source = provider_name(&xml).unwrap_or_else(|| "Windows".into());
+                let event_id = tag_text_any(&xml, "EventID")
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .unwrap_or(0);
+                let level = tag_text_any(&xml, "Level")
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .unwrap_or(3);
+                if let Some((category, summary)) = classify_system_event(&source, event_id) {
+                    items.push(SystemEvent {
+                        observed_at: event_time(&xml).unwrap_or_default(),
+                        source,
+                        event_id,
+                        level: event_level(level).into(),
+                        category: category.into(),
+                        summary,
+                    });
+                }
+            }
+            unsafe {
+                EvtClose(*event);
+            }
+            if items.len() >= MAX_SYSTEM_EVENTS || scanned >= MAX_SYSTEM_EVENT_SCAN {
+                break;
+            }
+        }
+        if items.len() >= MAX_SYSTEM_EVENTS || scanned >= MAX_SYSTEM_EVENT_SCAN || returned == 0 {
+            break;
+        }
+    }
+    unsafe {
+        EvtClose(result);
+    }
+
+    SystemEventAnalysis {
+        status: "available".into(),
+        note: if items.is_empty() {
+            format!(
+                "No matching driver, storage, power, hardware or service errors were recorded in the System log over the last {SYSTEM_EVENT_LOOKBACK_DAYS} days."
+            )
+        } else {
+            format!(
+                "{} relevant System events from the last {} days. Windows records only what its providers logged, so absence is not proof of health.",
+                items.len(),
+                SYSTEM_EVENT_LOOKBACK_DAYS
+            )
+        },
+        items,
+    }
+}
+
+fn environment_analysis(force: bool) -> (DriverAnalysis, SystemEventAnalysis) {
+    if !force {
+        if let Ok(cache) = ENVIRONMENT_CACHE.lock() {
+            if let Some((at, ref drivers, ref events)) = *cache {
+                if at.elapsed() < Duration::from_secs(ENVIRONMENT_TTL_SECS) {
+                    return (drivers.clone(), events.clone());
+                }
+            }
+        }
+    }
+    let drivers = read_driver_inventory();
+    let events = read_system_events();
+    if let Ok(mut cache) = ENVIRONMENT_CACHE.lock() {
+        *cache = Some((Instant::now(), drivers.clone(), events.clone()));
+    }
+    (drivers, events)
+}
+
 /* ------------------------------------------------------------ startup items */
 
 fn expand_environment(value: &str) -> String {
@@ -1353,6 +1726,12 @@ fn duration(ms: u64) -> String {
     }
 }
 
+fn kernel_dominates(cpu: &CpuMetrics) -> bool {
+    cpu.utilization_percent > 0.0
+        && cpu.kernel_percent >= KERNEL_WARNING_PERCENT
+        && cpu.kernel_percent / cpu.utilization_percent >= KERNEL_SHARE_WARNING
+}
+
 fn build_recommendations(
     cpu: &CpuMetrics,
     memory: &MemoryMetrics,
@@ -1360,6 +1739,8 @@ fn build_recommendations(
     volumes_list: &[volumes::VolumeInfo],
     processes: &[ProcessUsage],
     startup: &StartupAnalysis,
+    drivers: &DriverAnalysis,
+    events: &SystemEventAnalysis,
 ) -> Vec<Recommendation> {
     let mut recommendations = Vec::new();
     let user_processes: Vec<&ProcessUsage> = processes
@@ -1386,6 +1767,88 @@ fn build_recommendations(
         .iter()
         .map(|process| process.io_read_bytes_per_sec + process.io_write_bytes_per_sec)
         .sum();
+
+    if kernel_dominates(cpu) {
+        let application_cpu: f64 = processes
+            .iter()
+            .filter(|process| !process.is_cyron)
+            .map(|process| process.cpu_percent)
+            .sum();
+        let latest_relevant = events.items.iter().find(|event| {
+            matches!(
+                event.category.as_str(),
+                "display" | "driver" | "hardware" | "storage"
+            )
+        });
+        let display_driver = drivers
+            .items
+            .iter()
+            .find(|driver| driver.class == "Display");
+        let mut evidence_items = vec![
+            evidence("Kernel time", percent(cpu.kernel_percent)),
+            evidence("User time", percent(cpu.user_percent)),
+            evidence(
+                "Kernel share of busy CPU",
+                percent(cpu.kernel_percent / cpu.utilization_percent * 100.0),
+            ),
+            evidence(
+                "Measured application CPU",
+                format!("{:.1}% across {} processes", application_cpu, processes.len()),
+            ),
+        ];
+        if let Some(driver) = display_driver {
+            evidence_items.push(evidence(
+                "Display driver",
+                format!(
+                    "{}{}{}",
+                    driver.name,
+                    driver
+                        .version
+                        .as_deref()
+                        .map(|version| format!(" · v{version}"))
+                        .unwrap_or_default(),
+                    driver
+                        .date
+                        .as_deref()
+                        .map(|date| format!(" · dated {date}"))
+                        .unwrap_or_default()
+                ),
+            ));
+        }
+        evidence_items.push(evidence(
+            "Relevant System events",
+            latest_relevant
+                .map(|event| {
+                    format!(
+                        "{} · {} · Event {} · {}",
+                        event.summary, event.source, event.event_id, event.observed_at
+                    )
+                })
+                .unwrap_or_else(|| events.note.clone()),
+        ));
+        let mut recommendation_action = action("page", "Open Reliability Monitor");
+        recommendation_action.page = Some("reliability-monitor".into());
+        recommendations.push(recommendation(
+            "kernel-driver-activity",
+            "system",
+            if cpu.kernel_percent >= 40.0 || latest_relevant.is_some() {
+                "attention"
+            } else {
+                "review"
+            },
+            "Kernel time is driving the CPU load".into(),
+            format!(
+                "Kernel time was {} of the sample while measured application processes together accounted for {:.1}%. The gap points to kernel-mode work such as a driver, interrupt/DPC handling, storage or a security filter. Windows does not attribute that time to a specific driver in this sample.",
+                percent(cpu.kernel_percent),
+                application_cpu
+            ),
+            evidence_items,
+            "If the pattern began after a driver or Windows update, returning to the previous driver is the cleanest experiment. Otherwise, a short trace can show which driver or kernel path is consuming the time. Cyron does not uninstall drivers or change kernel settings.",
+            "Rolling back or replacing a display, storage or network driver can break boot, graphics or connectivity. Use Windows Device Manager or System Restore and keep a recovery option available. Cyron never performs the rollback itself.",
+            "Record a 20-second spike before and after the change and compare peak kernel time. Check whether the driver or device error in the System event list disappears at the same time.",
+            recommendation_action,
+        ));
+    }
 
     if cpu.utilization_percent >= CPU_WARNING_PERCENT {
         let mut evidence_items = vec![
@@ -1652,6 +2115,8 @@ fn build_findings(
     disk: &DiskIoMetrics,
     startup: &StartupAnalysis,
     volumes_list: &[volumes::VolumeInfo],
+    drivers: &DriverAnalysis,
+    events: &SystemEventAnalysis,
 ) -> Vec<Finding> {
     let mut findings = vec![Finding {
         id: "cpu".into(),
@@ -1669,6 +2134,29 @@ fn build_findings(
             cpu.logical_cores
         ),
     }];
+    let relevant_events = events
+        .items
+        .iter()
+        .filter(|event| matches!(event.category.as_str(), "display" | "driver" | "hardware" | "storage"))
+        .count();
+    findings.push(Finding {
+        id: "kernel".into(),
+        tone: if kernel_dominates(cpu) {
+            "attention".into()
+        } else if cpu.kernel_percent >= KERNEL_WARNING_PERCENT {
+            "watch".into()
+        } else {
+            "ok".into()
+        },
+        title: "Kernel / driver time".into(),
+        detail: format!(
+            "{} kernel, {} user. {} driver(s) and {} relevant System event(s) are available as context; the sample cannot attribute DPC/ISR time to one driver.",
+            percent(cpu.kernel_percent),
+            percent(cpu.user_percent),
+            drivers.items.len(),
+            relevant_events
+        ),
+    });
     let available_ratio = if memory.total_bytes > 0 {
         memory.available_bytes as f64 / memory.total_bytes as f64
     } else {
@@ -1770,8 +2258,12 @@ pub fn capture_snapshot(force_startup_refresh: bool) -> PerformanceSnapshot {
         if let Ok(mut cache) = STARTUP_CACHE.lock() {
             *cache = None;
         }
+        if let Ok(mut cache) = ENVIRONMENT_CACHE.lock() {
+            *cache = None;
+        }
     }
     let volumes_list = volumes::list_volumes();
+    let (drivers, system_events) = environment_analysis(force_startup_refresh);
 
     let disk_query = DiskQuery::start();
     let cpu_start = read_system_times();
@@ -1809,9 +2301,25 @@ pub fn capture_snapshot(force_startup_refresh: bool) -> PerformanceSnapshot {
     let mut startup = startup_analysis();
     annotate_live_startup_usage(&mut startup, &processes);
 
-    let recommendations =
-        build_recommendations(&cpu, &memory, &disk_io, &volumes_list, &processes, &startup);
-    let findings = build_findings(&cpu, &memory, &disk_io, &startup, &volumes_list);
+    let recommendations = build_recommendations(
+        &cpu,
+        &memory,
+        &disk_io,
+        &volumes_list,
+        &processes,
+        &startup,
+        &drivers,
+        &system_events,
+    );
+    let findings = build_findings(
+        &cpu,
+        &memory,
+        &disk_io,
+        &startup,
+        &volumes_list,
+        &drivers,
+        &system_events,
+    );
 
     let mut limitations = vec![
         format!(
@@ -1830,6 +2338,10 @@ pub fn capture_snapshot(force_startup_refresh: bool) -> PerformanceSnapshot {
     if let Some(note) = memory_note {
         limitations.push(note);
     }
+    if let Some(note) = drivers.note.clone() {
+        limitations.push(note);
+    }
+    limitations.push(system_events.note.clone());
     if startup.event_log_status != "available" {
         limitations.push(startup.event_log_note.clone());
     }
@@ -1842,6 +2354,8 @@ pub fn capture_snapshot(force_startup_refresh: bool) -> PerformanceSnapshot {
         cpu,
         memory,
         disk_io,
+        drivers,
+        system_events,
         volumes: volumes_list,
         processes,
         process_count,
@@ -2071,6 +2585,7 @@ pub fn open_supported_tool(page: &str) -> Result<(), String> {
         "storage" => ("explorer.exe", Some("ms-settings:storagesense")),
         "task-manager" => ("System32\\taskmgr.exe", None),
         "resource-monitor" => ("System32\\resmon.exe", None),
+        "reliability-monitor" => ("System32\\perfmon.exe", Some("/rel")),
         _ => return Err("That Windows page is not supported by Cyron.".into()),
     };
     let mut command = windows_command(binary)?;
@@ -2088,6 +2603,21 @@ pub fn open_supported_tool(page: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_drivers() -> DriverAnalysis {
+        DriverAnalysis {
+            items: Vec::new(),
+            note: None,
+        }
+    }
+
+    fn empty_events() -> SystemEventAnalysis {
+        SystemEventAnalysis {
+            status: "available".into(),
+            note: String::new(),
+            items: Vec::new(),
+        }
+    }
 
     fn sample_startup(
         id: &str,
@@ -2261,8 +2791,16 @@ mod tests {
             is_critical: false,
             is_cyron: false,
         }];
-        let recommendations =
-            build_recommendations(&cpu, &memory, &disk, &[], &processes, &startup);
+        let recommendations = build_recommendations(
+            &cpu,
+            &memory,
+            &disk,
+            &[],
+            &processes,
+            &startup,
+            &empty_drivers(),
+            &empty_events(),
+        );
         assert!(recommendations.iter().any(|item| item.category == "cpu"));
         assert!(recommendations.iter().any(|item| item.category == "memory"));
         assert!(recommendations.iter().any(|item| item.category == "disk"));
@@ -2273,6 +2811,116 @@ mod tests {
             assert!(!item.verification.is_empty());
             assert!(!item.summary.to_ascii_lowercase().contains("guaranteed"));
         }
+    }
+
+    #[test]
+    fn kernel_time_needs_kernel_share_before_it_becomes_a_driver_signal() {
+        let kernel_heavy = CpuMetrics {
+            utilization_percent: 60.0,
+            user_percent: 8.0,
+            kernel_percent: 52.0,
+            idle_percent: 40.0,
+            logical_cores: 16,
+        };
+        assert!(kernel_dominates(&kernel_heavy));
+
+        let app_heavy = CpuMetrics {
+            utilization_percent: 60.0,
+            user_percent: 50.0,
+            kernel_percent: 10.0,
+            idle_percent: 40.0,
+            logical_cores: 16,
+        };
+        assert!(!kernel_dominates(&app_heavy));
+
+        let drivers = DriverAnalysis {
+            items: vec![DriverInfo {
+                class: "Display".into(),
+                name: "Fixture GPU".into(),
+                version: Some("32.0.1".into()),
+                date: Some("2026-11-01".into()),
+            }],
+            note: None,
+        };
+        let events = SystemEventAnalysis {
+            status: "available".into(),
+            note: String::new(),
+            items: vec![SystemEvent {
+                observed_at: "2026-11-17T00:00:00Z".into(),
+                source: "Display".into(),
+                event_id: 4101,
+                level: "error".into(),
+                category: "display".into(),
+                summary: "A display driver stopped responding and recovered (TDR).".into(),
+            }],
+        };
+        let memory = MemoryMetrics {
+            total_bytes: 16 * 1024 * 1024 * 1024,
+            available_bytes: 8 * 1024 * 1024 * 1024,
+            used_percent: 50.0,
+            commit_used_bytes: 4 * 1024 * 1024 * 1024,
+            commit_limit_bytes: 16 * 1024 * 1024 * 1024,
+            commit_percent: 25.0,
+        };
+        let disk = DiskIoMetrics {
+            status: "measured".into(),
+            busy_percent: Some(1.0),
+            queue_length: Some(0.0),
+            note: None,
+        };
+        let startup = StartupAnalysis {
+            items: Vec::new(),
+            scheduled_tasks: Vec::new(),
+            boot: None,
+            offenders: Vec::new(),
+            event_log_status: "available".into(),
+            event_log_note: String::new(),
+            enabled_count: 0,
+            total_count: 0,
+        };
+        let processes = vec![ProcessUsage {
+            pid: 10,
+            name: "editor.exe".into(),
+            path: None,
+            cpu_percent: 5.0,
+            working_set_bytes: 100 * 1024 * 1024,
+            private_bytes: 50 * 1024 * 1024,
+            io_read_bytes_per_sec: 0.0,
+            io_write_bytes_per_sec: 0.0,
+            is_critical: false,
+            is_cyron: false,
+        }];
+        let recommendations = build_recommendations(
+            &kernel_heavy,
+            &memory,
+            &disk,
+            &[],
+            &processes,
+            &startup,
+            &drivers,
+            &events,
+        );
+        let kernel = recommendations
+            .iter()
+            .find(|item| item.id == "kernel-driver-activity")
+            .expect("kernel pressure must produce a recommendation");
+        assert!(kernel.evidence.iter().any(|item| item.label == "Display driver"));
+        assert!(kernel.evidence.iter().any(|item| item.label == "Relevant System events"));
+        assert_eq!(kernel.action.page.as_deref(), Some("reliability-monitor"));
+    }
+
+    #[test]
+    fn driver_dates_and_event_sources_are_normalized_without_guessing() {
+        assert_eq!(normalize_driver_date("8-17-2026").as_deref(), Some("2026-08-17"));
+        assert_eq!(normalize_driver_date("2026-08-17").as_deref(), Some("2026-08-17"));
+        assert_eq!(normalize_driver_date("not a date"), None);
+
+        let display = classify_system_event("Display", 4101).expect("display event");
+        assert_eq!(display.0, "display");
+        assert!(display.1.contains("TDR"));
+        let storage = classify_system_event("storahci", 129).expect("storage event");
+        assert_eq!(storage.0, "storage");
+        assert!(classify_system_event("DistributedCOM", 10016).is_none());
     }
 
     #[test]
@@ -2328,8 +2976,16 @@ mod tests {
             is_critical: false,
             is_cyron: false,
         }];
-        let recommendations =
-            build_recommendations(&cpu, &memory, &disk, &[], &processes, &startup);
+        let recommendations = build_recommendations(
+            &cpu,
+            &memory,
+            &disk,
+            &[],
+            &processes,
+            &startup,
+            &empty_drivers(),
+            &empty_events(),
+        );
         assert!(
             !recommendations.iter().any(|item| item.category == "disk"),
             "process I/O alone must not become a physical-disk recommendation: {:?}",

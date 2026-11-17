@@ -53,7 +53,8 @@ The Applications destination provides transparent management of all desktop soft
   - Name-only matches are shown as caution and are not preselected. Only the exact recorded install folder or the exact registration entry is treated as owned evidence.
   - Cleaner’s **Known removed applications** also lists persistent removal history and offers an explicit name/path scan for apps removed before Cyron was installed; those matches always require review.
 - **Sequential Batch Uninstallation**:
-  - Queue multiple applications for unattended sequential uninstallation.
+  - Queue multiple applications for unattended sequential uninstallation. Only applications with a registered Win32 vendor uninstaller can be selected; Store packages, Steam games, portable applications and broken registrations stay out of the queue.
+  - The batch is refused as a whole if any selected application is not eligible, instead of silently running a subset.
   - Provides failure isolation: if one uninstaller fails or cancels, remaining applications continue.
   - Residual cleanup always requires a separate, explicit review.
 
@@ -173,12 +174,14 @@ Open **Performance** and use the startup section to manage programs configured t
 
 Open **Performance** in the sidebar. Cyron samples CPU, memory, physical-disk pressure, fixed-volume free space, process usage and startup evidence every ten seconds while the page is visible; **Pause** stops the automatic refresh and **Refresh** takes a new sample immediately.
 
-- **Why is my PC slow?**: choose the symptom that matches what you see. Cyron filters the evidence and shows only a recommendation the sample supports. If nothing supports a change, it says so instead of inventing one. A short sample cannot explain every slowdown.
+- **Why is my PC slow?**: choose the symptom that matches what you see, including **CPU spikes / kernel time**. Cyron filters the evidence and shows only a recommendation the sample supports. If nothing supports a change, it says so instead of inventing one. A short sample cannot explain every slowdown.
+- **Catch a short spike**: a normal sample lasts 700 ms and can miss a brief lag. **Record 20 seconds** takes about 20 one-second readings and keeps the peak CPU, kernel and physical-disk values, plus the process using the most CPU at that point. The report says whether the spike was process-, kernel- or disk-dominated. You can stop early; nothing is written to disk, and leaving the page ends the capture.
+- **Kernel, drivers and recent changes**: kernel time has no process row. When it dominates, Cyron shows the kernel share of busy CPU, the application CPU it does not explain, installed display/storage/network driver versions and package dates, and matching driver, storage, power or service errors from the Windows System log over the last seven days. A recent driver date beside a new slowdown is a lead, not proof of cause. Windows does not attribute DPC/ISR time to one driver in these counters; the optional trace is how you inspect that detail. **Open Reliability Monitor** shows the Windows reliability history without changing anything.
 - **Startup and scheduled tasks**: each startup entry shows its exact command, source and state. Boot impact comes only from Windows' administrator-only Diagnostics-Performance log; without that access the page says **Unavailable**. Enabling or disabling an entry is reversible, preserves the registration, and asks for confirmation in a native dialog. Machine-wide entries need administrator rights and stay unavailable otherwise. Scheduled tasks are listed read-only; Cyron never disables or runs them.
 - **Before and after**: record a labeled measurement, make the change you want to evaluate, then record another. The page compares CPU, memory, commit, disk busy and recorded boot time. Two samples show association, not causation, and Cyron does not claim a guaranteed speed gain.
-- **Advanced diagnostic trace**: only helpful when the basic metrics cannot explain the lag. It requires Windows Performance Recorder and an administrator session, stays on this PC, and is never uploaded. Cyron does not elevate itself; reopen it with **Run as administrator** if you choose to trace.
+- **Advanced diagnostic trace**: only helpful when the basic metrics and the 20-second capture cannot explain the lag. It requires Windows Performance Recorder and an administrator session, stays on this PC, and is never uploaded. Cyron does not elevate itself; reopen it with **Run as administrator** if you choose to trace.
 
-Cyron does not offer RAM boosters, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling or driver tweaks. Those are not supported performance fixes. Recommendations carry their measured evidence, expected effect, risk and a way to verify the result.
+Cyron does not offer RAM boosters, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling or driver tweaks. Those are not supported performance fixes. Driver dates and event-log records are evidence for your own troubleshooting; Cyron never installs, rolls back or removes a driver. Recommendations carry their measured evidence, expected effect, risk and a way to verify the result.
 
 ---
 
