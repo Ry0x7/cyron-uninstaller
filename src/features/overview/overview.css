@@ -400,16 +400,25 @@
 
 @media (max-width: 1120px) {
   .home-system {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .home-system__item:nth-child(4) {
+  .home-system__item {
+    border-top: 1px solid var(--line);
+  }
+
+  .home-system__item:nth-child(1),
+  .home-system__item:nth-child(2) {
+    border-top: 0;
+  }
+
+  .home-system__item:nth-child(odd) {
     border-left: 0;
-    border-top: 1px solid var(--line);
   }
 
+  /* Uptime is the fifth item; let it use the spare row instead of leaving a gap. */
   .home-system__item:nth-child(5) {
-    border-top: 1px solid var(--line);
+    grid-column: 1 / -1;
   }
 
   .home-storage,

@@ -176,13 +176,15 @@ pub fn validate_provider(provider: &CleanupProviderDef) -> Result<(), ProviderVa
         "\\WSL",
     ];
 
-    if provider.risk == SAFE {
-        for marker in &sensitive_markers {
-            if upper.contains(marker) {
-                return Err(ProviderValidationError::ProtectedDataViolation(format!(
-                    "Location '{template}' matches sensitive pattern '{marker}' and cannot be marked safe"
-                )));
-            }
+    // A definition must never make conversation history, credentials, model
+    // data or Windows update state cleanable, regardless of how it is labelled.
+    // Only an explicit PROTECTED classification may target these paths, and the
+    // catalog refuses PROTECTED entries as cleanup targets.
+    for marker in &sensitive_markers {
+        if upper.contains(marker) && provider.risk != PROTECTED {
+            return Err(ProviderValidationError::ProtectedDataViolation(format!(
+                "Location '{template}' matches sensitive pattern '{marker}' and must be marked protected"
+            )));
         }
     }
 
@@ -549,6 +551,17 @@ mod tests {
         let mut p = get_default_providers()[0].clone();
         p.path_template = r"%USERPROFILE%\.claude\projects".into();
         p.risk = SAFE.into(); // Projects contains conversation history!
+        assert!(matches!(
+            validate_provider(&p),
+            Err(ProviderValidationError::ProtectedDataViolation(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_caution_risk_for_protected_data() {
+        let mut p = get_default_providers()[0].clone();
+        p.path_template = r"%USERPROFILE%\.claude\projects".into();
+        p.risk = CAUTION.into();
         assert!(matches!(
             validate_provider(&p),
             Err(ProviderValidationError::ProtectedDataViolation(_))

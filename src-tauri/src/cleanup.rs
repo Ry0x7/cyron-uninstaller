@@ -1135,6 +1135,7 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
     let dir = batch_dir(root, run_id)?;
     let mut manifest = read_manifest(&dir)
         .ok_or_else(|| format!("No quarantine batch named {run_id} was found."))?;
+    let canonical_dir = fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
 
     let mut report = RestoreReport {
         run_id: manifest.run_id.clone(),
@@ -1148,6 +1149,17 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
     for item in manifest.items.clone() {
         let original = PathBuf::from(&item.original_path);
         let stored = PathBuf::from(&item.stored_path);
+        if !original.is_absolute() {
+            report.failed += 1;
+            if report.errors.len() < MAX_ERRORS {
+                report.errors.push(format!(
+                    "Refusing to restore to a relative path: {}",
+                    original.display()
+                ));
+            }
+            remaining.push(item);
+            continue;
+        }
         if original.exists() {
             report.skipped += 1;
             if report.errors.len() < MAX_ERRORS {
@@ -1165,6 +1177,35 @@ pub fn restore_batch(root: &Path, run_id: &str) -> Result<RestoreReport, String>
                 report
                     .errors
                     .push(format!("Missing quarantined file: {}", stored.display()));
+            }
+            remaining.push(item);
+            continue;
+        }
+        // A manifest or journal entry is data on disk. Never let a forged or
+        // corrupted storedPath move an arbitrary file out of the machine just
+        // because it was named in a batch.
+        let stored_canonical = match fs::canonicalize(&stored) {
+            Ok(path) => path,
+            Err(error) => {
+                report.failed += 1;
+                if report.errors.len() < MAX_ERRORS {
+                    report.errors.push(format!(
+                        "Could not verify quarantined path {}: {error}",
+                        stored.display()
+                    ));
+                }
+                remaining.push(item);
+                continue;
+            }
+        };
+        if stored_canonical == canonical_dir || !is_within(&stored_canonical, &canonical_dir) {
+            report.failed += 1;
+            if report.errors.len() < MAX_ERRORS {
+                report.errors.push(format!(
+                    "Refusing to restore a path outside quarantine batch {}: {}",
+                    run_id,
+                    stored.display()
+                ));
             }
             remaining.push(item);
             continue;
@@ -2539,6 +2580,49 @@ mod tests {
                 "{id} must be refused"
             );
         }
+    }
+
+    #[test]
+    fn restore_refuses_a_manifest_entry_outside_its_batch() {
+        let root = std::env::temp_dir().join(format!(
+            "cyron-restore-scope-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let quarantine = root.join("quarantine");
+        let batch = quarantine.join("run-test");
+        let outside = root.join("outside.txt");
+        let original = root.join("restored.txt");
+        fs::create_dir_all(&batch).expect("batch");
+        fs::write(&outside, b"must stay").expect("outside fixture");
+        write_manifest(
+            &batch,
+            &BatchManifest {
+                run_id: "run-test".into(),
+                created_at: 0,
+                expires_at: 0,
+                target_ids: Vec::new(),
+                items: vec![ManifestItem {
+                    original_path: original.to_string_lossy().to_string(),
+                    stored_path: outside.to_string_lossy().to_string(),
+                    size: 9,
+                }],
+                registry_backup: None,
+                registry_key_path: None,
+                hive: None,
+                subkey_name: None,
+                app_id: None,
+                backup_sha256: None,
+                backup_size_bytes: None,
+            },
+        )
+        .expect("manifest");
+
+        let result = restore_batch(&quarantine, "run-test");
+        assert!(result.is_err() || result.unwrap().failed > 0, "outside entry must fail");
+        assert!(outside.exists(), "outside file must stay in place");
+        assert!(!original.exists(), "outside file must not be restored");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

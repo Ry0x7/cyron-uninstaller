@@ -100,11 +100,10 @@ function historyIcon(kind: string): (props: IconProps) => ReactNode {
 }
 
 function StatusBadge({ entry }: { entry: HistoryEntry }) {
-  const tone =
-    entry.status === "completed" ? "safe" : entry.status === "cancelled" ? "caution" : "danger";
-  const label =
-    entry.status === "completed" ? "Done" : entry.status === "cancelled" ? "Cancelled" : "Failed";
-  return <Badge tone={tone}>{label}</Badge>;
+  if (entry.status === "completed") return <Badge tone="safe">Done</Badge>;
+  if (entry.status === "partial") return <Badge tone="caution">Partial</Badge>;
+  if (entry.status === "cancelled") return <Badge tone="caution">Cancelled</Badge>;
+  return <Badge tone="danger">Failed</Badge>;
 }
 
 function formatUptime(seconds: number): string {

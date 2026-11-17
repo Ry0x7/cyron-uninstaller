@@ -643,10 +643,18 @@ fn cleanup_run_id(at: u64, nanos: u32) -> String {
 }
 
 fn cleanup_status(report: &cleanup::CleanupReport) -> &'static str {
+    // A stop or a failure is only "partial" when some files already moved.
+    // Reporting those runs as fully completed would hide the per-item failures.
     if report.cancelled {
-        "cancelled"
+        if report.quarantined > 0 {
+            "partial"
+        } else {
+            "cancelled"
+        }
     } else if report.quarantined == 0 && report.failed > 0 {
         "failed"
+    } else if report.failed > 0 {
+        "partial"
     } else {
         "completed"
     }
@@ -727,6 +735,7 @@ fn cleanup_history_entry(log: &cleanup::CleanupLogEntry) -> history::HistoryEntr
         status: match log.status.as_str() {
             "cancelled" => "cancelled",
             "failed" => "failed",
+            "partial" => "partial",
             _ => "completed",
         }
         .into(),
@@ -3270,13 +3279,24 @@ mod tests {
     #[test]
     fn cancelled_and_failed_cleanups_get_honest_statuses() {
         let mut cancelled = report();
+        cancelled.quarantined = 0;
+        cancelled.files = 0;
         cancelled.cancelled = true;
         assert_eq!(cleanup_status(&cancelled), "cancelled");
 
+        let mut partial = report();
+        partial.cancelled = true;
+        assert_eq!(cleanup_status(&partial), "partial");
+
         let mut failed = report();
         failed.quarantined = 0;
+        failed.files = 0;
         failed.failed = 3;
         assert_eq!(cleanup_status(&failed), "failed");
+
+        let mut partly_failed = report();
+        partly_failed.failed = 1;
+        assert_eq!(cleanup_status(&partly_failed), "partial");
         assert_eq!(
             cleanup_history_entry(&cleanup_log_entry(&failed, 1)).status,
             "failed"

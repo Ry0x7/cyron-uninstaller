@@ -301,7 +301,7 @@ export interface HistoryEntry {
   at: number;
   bytes: number;
   items: number;
-  status: "completed" | "cancelled" | "failed";
+  status: "completed" | "partial" | "cancelled" | "failed";
 }
 
 export const SCAN_EVENT = "cyron-scan-progress";
@@ -482,7 +482,7 @@ export interface CleanupLogEntry {
   quarantined: number;
   skipped: number;
   failed: number;
-  status: "completed" | "cancelled" | "failed" | "blocked";
+  status: "completed" | "partial" | "cancelled" | "failed" | "blocked";
   detail: string;
 }
 

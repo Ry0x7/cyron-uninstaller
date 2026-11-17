@@ -364,6 +364,79 @@ pub fn discover_app_processes(
     discover_app_processes_with_candidates(app_id, &roots)
 }
 
+/// A process handle held across identity verification and termination. Holding
+/// the handle keeps Windows from reusing the PID for another process while the
+/// graceful-close wait or a force termination is in flight.
+#[derive(Debug)]
+struct VerifiedProcess {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+impl VerifiedProcess {
+    fn open(pid: u32, expected_creation_time: u64) -> Result<Self, String> {
+        use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
+        use windows_sys::Win32::System::Threading::{
+            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            PROCESS_SYNCHRONIZE,
+        };
+
+        if expected_creation_time == 0 {
+            return Err("Process creation time was not verified when this plan was built.".into());
+        }
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
+        if handle.is_null() {
+            return Err(format!(
+                "Could not open process {pid} to verify its identity: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut creation = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut exit = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut kernel = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let mut user = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let ok = unsafe { GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) };
+        if ok == 0 {
+            unsafe { CloseHandle(handle) };
+            return Err(format!(
+                "Could not read process {pid} creation time: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let actual = ((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64;
+        if actual == 0 || actual != expected_creation_time {
+            unsafe { CloseHandle(handle) };
+            return Err(
+                "Process creation time mismatch (process identity recycled). Aborted.".into(),
+            );
+        }
+        Ok(Self { handle })
+    }
+}
+
+impl Drop for VerifiedProcess {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
+    }
+}
+
 /// Controlled termination for a list of process IDs with re-validation against a verified snapshot.
 /// Refuses to terminate any critical process or any process not belonging to the verified snapshot.
 /// First attempts graceful window closing, falling back to TerminateProcess only when forced.
@@ -486,6 +559,23 @@ pub fn terminate_processes_verified(
             });
             continue;
         }
+
+        // Hold the verified handle through the graceful wait and the force
+        // fallback. A closed handle would let Windows reuse the PID and could
+        // make the wait or TerminateProcess address a different process.
+        let _verified = match VerifiedProcess::open(pid, expected.creation_time) {
+            Ok(handle) => handle,
+            Err(error) => {
+                results.push(ProcessTerminateResult {
+                    pid,
+                    name,
+                    success: false,
+                    graceful: false,
+                    error: Some(error),
+                });
+                continue;
+            }
+        };
 
         // Attempt 1: Graceful window close via WM_CLOSE
         let graceful_success = attempt_graceful_close(pid);
@@ -655,16 +745,18 @@ pub fn terminate_single_process(
             ),
         };
     }
-    let current_time = get_process_creation_time(pid).unwrap_or(0);
-    if current_time == 0 || current_time != expected_creation_time {
-        return ProcessTerminateResult {
-            pid,
-            name,
-            success: false,
-            graceful: false,
-            error: Some("Process creation time mismatch (process identity recycled). Aborted.".into()),
-        };
-    }
+    let _verified = match VerifiedProcess::open(pid, expected_creation_time) {
+        Ok(handle) => handle,
+        Err(error) => {
+            return ProcessTerminateResult {
+                pid,
+                name,
+                success: false,
+                graceful: false,
+                error: Some(error),
+            };
+        }
+    };
 
     let graceful_success = attempt_graceful_close(pid);
     if graceful_success {
@@ -849,6 +941,12 @@ mod tests {
             "unexpected error: {:?}",
             result.error
         );
+    }
+
+    #[test]
+    fn verified_handle_rejects_a_wrong_creation_time() {
+        let error = VerifiedProcess::open(std::process::id(), 1).expect_err("wrong time");
+        assert!(error.contains("creation time mismatch"), "{error}");
     }
 
     #[test]

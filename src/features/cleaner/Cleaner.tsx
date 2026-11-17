@@ -16,6 +16,7 @@ import {
   Segmented,
   Select,
   Skeleton,
+  Spinner,
   Stat,
   ViewHeader,
 } from "../../components/ui";
@@ -353,6 +354,7 @@ export function Cleaner({
     if (ids.length === 0) return;
     const ticket = ++previewRequest.current;
     setPreviewLoading(true);
+    setPreview(null);
     setPreviewError(null);
     setReport(null);
     setRunError(null);
@@ -390,6 +392,8 @@ export function Cleaner({
     if (running) return;
     previewRequest.current += 1;
     setPreviewOpen(false);
+    setPreview(null);
+    setPreviewLoading(false);
     setConfirmed(false);
     setPreviewError(null);
   };
@@ -439,7 +443,7 @@ export function Cleaner({
 
   const lastChecked = inventory
     ? `${error ? "Last successful check" : "Checked"} ${relativeTime(inventory.scannedAt)}${error ? " · stale" : ""}`
-    : "not yet";
+    : "Not checked yet";
   const warnings = inventory?.warnings ?? [];
   const confirmReady =
     preview !== null &&
@@ -462,8 +466,8 @@ export function Cleaner({
       <Button
         size="sm"
         icon={<IconRefresh size={14} />}
-        loading={refreshing}
-        disabled={scanDrives.length === 0}
+        loading={refreshing || (status === "loading" && !inventory)}
+        disabled={scanDrives.length === 0 || (status === "loading" && !inventory)}
         onClick={() => void load(true)}
       >
         Scan selected drives
@@ -602,7 +606,7 @@ export function Cleaner({
         )}
 
         {tab === "cleanup" && status === "loading" && !inventory ? (
-          <CleanerSkeleton />
+          <CleanerSkeleton drives={scanDrives} />
         ) : tab === "cleanup" && status === "error" && !inventory ? (
           <EmptyState
             icon={IconCleaner}
@@ -1025,7 +1029,7 @@ export function Cleaner({
           ) : (
             <div className="cl-drawer-foot">
               <Button onClick={closePreview} disabled={running}>
-                Cancel
+                {previewLoading && !preview ? "Cancel preview" : "Cancel"}
               </Button>
               <Button
                 variant="primary"
@@ -1040,7 +1044,15 @@ export function Cleaner({
         }
       >
         {previewLoading && !preview ? (
-          <div className="cl-skeleton">
+          <div className="cl-skeleton" role="status" aria-live="polite">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Spinner size={14} />
+              <strong>Reading the selected locations…</strong>
+            </div>
+            <p className="cl-muted">
+              Cyron is checking paths and sizes. Nothing moves until you review this list and
+              confirm.
+            </p>
             {[0, 1, 2, 3].map((index) => (
               <div className="cl-skeleton__row" key={index}>
                 <Skeleton width={160} height={11} />
@@ -1300,9 +1312,12 @@ function CleanupResult({
   );
 }
 
-function CleanerSkeleton() {
+function CleanerSkeleton({ drives }: { drives: string[] }) {
   return (
     <>
+      <p className="cl-muted" role="status" aria-live="polite">
+        Measuring known cache folders{drives.length > 0 ? ` on ${drives.map((drive) => `${drive}:`).join(", ")}` : ""}…
+      </p>
       <Panel title="Measured storage by risk">
         <div className="cl-skeleton">
           <div className="cl-skeleton__stats">

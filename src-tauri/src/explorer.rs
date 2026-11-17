@@ -178,6 +178,18 @@ pub struct LockingProcessInfo {
     pub creation_time: u64,
 }
 
+/// Identity captured from a handle at preview time. It is intentionally not
+/// sent to the webview; execution binds to it so a different file at the same
+/// pathname cannot be substituted after the user confirms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileIdentity {
+    pub volume_serial: u32,
+    pub file_index: u64,
+    pub creation_time: u64,
+    pub size_bytes: u64,
+    pub attributes: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTargetInspection {
@@ -195,6 +207,8 @@ pub struct FileTargetInspection {
     pub owner: Option<String>,
     pub reasons_for_failure: Vec<String>,
     pub sample_items: Vec<String>,
+    #[serde(skip)]
+    pub identity: Option<FileIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -263,7 +277,10 @@ pub fn sanitize_target_path(raw: &str) -> Option<PathBuf> {
     if !path.exists() {
         return None;
     }
-    std::fs::canonicalize(path).ok().or_else(|| Some(path.to_path_buf()))
+    // Preserve the caller's path instead of resolving it. Force Delete must see
+    // a junction or symlink itself and refuse it, not silently retarget the
+    // deletion at whatever the link points to.
+    Some(path.to_path_buf())
 }
 
 fn normalize_path_for_guard(path: &Path) -> String {
@@ -331,7 +348,26 @@ pub fn is_protected_delete_target(path: &Path) -> Result<(), String> {
         }
     }
 
-    // 6. Critical boot and memory files
+    // 6. AppData roots and the temporary directory. Deleting these roots
+    // removes every application's state, not one disposable item.
+    for variable in ["APPDATA", "LOCALAPPDATA", "TEMP", "TMP"] {
+        if let Ok(value) = std::env::var(variable) {
+            let key = normalize_path_for_guard(Path::new(&value));
+            if lower == key || raw_lower == key {
+                return Err(format!(
+                    "The {variable} directory root cannot be deleted."
+                ));
+            }
+        }
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        let appdata = normalize_path_for_guard(&Path::new(&profile).join("AppData"));
+        if lower == appdata || raw_lower == appdata {
+            return Err("The AppData directory root cannot be deleted.".into());
+        }
+    }
+
+    // 7. Critical boot and memory files
     let file_name = canonical
         .file_name()
         .or_else(|| path.file_name())
@@ -352,7 +388,7 @@ pub fn is_protected_delete_target(path: &Path) -> Result<(), String> {
         return Err(format!("The critical Windows system file '{file_name}' is protected and cannot be deleted."));
     }
 
-    // 7. System Volume Information, $Recycle.Bin
+    // 8. System Volume Information, $Recycle.Bin
     if file_name == "system volume information" || file_name == "$recycle.bin" {
         return Err(format!("The system directory '{file_name}' is protected and cannot be deleted."));
     }
@@ -585,6 +621,57 @@ pub fn clear_readonly_recursive(root: &Path) {
     }
 }
 
+/// Reads the stable identity of a file or directory from an opened handle.
+/// `FILE_FLAG_OPEN_REPARSE_POINT` keeps a link itself from being resolved.
+fn file_identity(path: &Path) -> Result<FileIdentity, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, OPEN_EXISTING,
+    };
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            FILE_READ_ATTRIBUTES,
+            7,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(format!(
+            "Could not read the identity of {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    let read = unsafe { GetFileInformationByHandle(handle, &mut info) };
+    unsafe { CloseHandle(handle) };
+    if read == 0 {
+        return Err(format!(
+            "Could not read the identity of {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(FileIdentity {
+        volume_serial: info.dwVolumeSerialNumber,
+        file_index: ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+        creation_time: ((info.ftCreationTime.dwHighDateTime as u64) << 32)
+            | info.ftCreationTime.dwLowDateTime as u64,
+        size_bytes: ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64,
+        attributes: info.dwFileAttributes,
+    })
+}
+
 /// Comprehensive inspection of a file or folder target for deletion review.
 pub fn inspect_target(target_path: &Path) -> Result<FileTargetInspection, String> {
     if !target_path.exists() {
@@ -612,7 +699,12 @@ pub fn inspect_target(target_path: &Path) -> Result<FileTargetInspection, String
                 for entry in entries.flatten() {
                     let p = entry.path();
                     if let Ok(m) = std::fs::symlink_metadata(&p) {
-                        if m.is_dir() {
+                        if is_reparse_entry(&m) {
+                            // Never walk into a junction or symlink while
+                            // preparing a deletion. The link is counted as one
+                            // entry and is never treated as its target's tree.
+                            file_count += 1;
+                        } else if m.is_dir() {
                             dir_count += 1;
                             if dir_count < 50_000 {
                                 stack.push(p.clone());
@@ -663,6 +755,7 @@ pub fn inspect_target(target_path: &Path) -> Result<FileTargetInspection, String
     };
 
     let owner = query_file_owner(&canonical);
+    let identity = file_identity(&canonical).ok();
 
     let mut reasons = Vec::new();
     if is_readonly {
@@ -690,6 +783,7 @@ pub fn inspect_target(target_path: &Path) -> Result<FileTargetInspection, String
         owner,
         reasons_for_failure: reasons,
         sample_items,
+        identity,
     })
 }
 
@@ -1040,6 +1134,14 @@ pub fn prepare_force_delete_plan(target_path_str: &str) -> Result<ForceDeletePla
     if !raw_path.exists() {
         return Err(format!("The specified target does not exist: {target_path_str}"));
     }
+    let link_meta = std::fs::symlink_metadata(&raw_path)
+        .map_err(|e| format!("Cannot inspect target path: {e}"))?;
+    if is_reparse_entry(&link_meta) {
+        return Err(
+            "Force Delete refuses junctions and symbolic links: resolving one could delete its target. Remove the link itself in Explorer instead."
+                .into(),
+        );
+    }
     let canonical = raw_path
         .canonicalize()
         .map_err(|e| format!("Cannot resolve target path: {e}"))?;
@@ -1220,9 +1322,16 @@ fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), String> {
     for entry in entries.flatten() {
         let path = entry.path();
         let target = dest.join(entry.file_name());
-        let meta = entry.metadata().map_err(|e| format!("Metadata error: {e}"))?;
+        // A link cannot be represented by a plain copy. Refuse the whole
+        // cross-volume quarantine instead of dropping the link from the
+        // recovered tree and later reporting a successful deletion.
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|e| format!("Metadata error for {}: {e}", path.display()))?;
         if is_reparse_entry(&meta) {
-            continue;
+            return Err(format!(
+                "{} is a junction or symbolic link. Cross-volume quarantine cannot preserve links; nothing was moved.",
+                path.display()
+            ));
         }
         if meta.is_dir() {
             copy_dir_recursive(&path, &target)?;
@@ -1263,6 +1372,46 @@ pub fn execute_force_delete(
     }
 
     is_protected_delete_target(&plan.canonical_path)?;
+
+    // Bind execution to the exact object the user reviewed. A pathname alone is
+    // a TOCTOU hole: a sync tool, installer or another process can replace the
+    // file or folder while the confirmation dialog is open.
+    let current_meta = std::fs::symlink_metadata(&plan.canonical_path)
+        .map_err(|e| format!("Could not re-read the target before deletion: {e}"))?;
+    if is_reparse_entry(&current_meta) {
+        return Err(
+            "The target became a junction or symbolic link after preview. Nothing was deleted; review it again."
+                .into(),
+        );
+    }
+    let expected_identity = plan
+        .inspection
+        .identity
+        .as_ref()
+        .ok_or("This plan has no verified file identity. Review and confirm the target again.")?;
+    let current_identity = file_identity(&plan.canonical_path)?;
+    if &current_identity != expected_identity {
+        return Err(
+            "The target was replaced or changed after preview. Nothing was deleted; review it again."
+                .into(),
+        );
+    }
+    if plan.is_directory {
+        let current = inspect_target(&plan.canonical_path)?;
+        if current.file_count != plan.inspection.file_count
+            || current.dir_count != plan.inspection.dir_count
+            || current.size_bytes != plan.inspection.size_bytes
+        {
+            return Err(
+                "The folder contents changed after preview. Nothing was deleted; review the new contents first."
+                    .into(),
+            );
+        }
+    } else if current_meta.len() != plan.inspection.size_bytes {
+        return Err(
+            "The file size changed after preview. Nothing was deleted; review it again.".into(),
+        );
+    }
 
     let target_name = plan
         .canonical_path
@@ -1629,6 +1778,125 @@ mod tests {
         let check = is_protected_delete_target(&temp_dir);
         let _ = std::fs::remove_dir(&temp_dir);
         assert!(check.is_ok());
+    }
+
+    #[test]
+    fn refuses_appdata_and_temp_roots() {
+        for variable in ["APPDATA", "LOCALAPPDATA", "TEMP"] {
+            let Ok(value) = std::env::var(variable) else {
+                continue;
+            };
+            assert!(
+                is_protected_delete_target(Path::new(&value)).is_err(),
+                "{variable} root must be protected"
+            );
+        }
+    }
+
+    #[test]
+    fn cross_volume_copy_refuses_a_link_instead_of_dropping_it() {
+        let root = disposable_fixture("copy-link");
+        let source = root.join("source");
+        let target = root.join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(source.join("keep.txt"), b"keep").unwrap();
+        let link = source.join("link");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .status()
+            .expect("mklink");
+        if !status.success() {
+            let _ = std::fs::remove_dir_all(&root);
+            panic!("could not create a junction fixture");
+        }
+
+        let destination = root.join("copy");
+        let result = copy_dir_recursive(&source, &destination);
+        assert!(result.is_err(), "a link must refuse the copy");
+        assert!(source.join("keep.txt").exists(), "source must stay untouched");
+        assert!(target.exists(), "link target must stay untouched");
+        let _ = std::fs::remove_dir_all(&destination);
+
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn force_delete_refuses_a_junction_instead_of_its_target() {
+        let root = disposable_fixture("junction");
+        let target = root.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("keep.txt"), b"keep").unwrap();
+        let link = root.join("link");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .status()
+            .expect("mklink");
+        if !status.success() {
+            let _ = std::fs::remove_dir_all(&root);
+            panic!("could not create a junction fixture");
+        }
+
+        let result = prepare_force_delete_plan(&link.to_string_lossy());
+        assert!(result.is_err(), "a junction must be refused");
+        assert!(target.join("keep.txt").exists(), "the target must stay untouched");
+
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn file_plan(target: &Path) -> StoredForceDeletePlan {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        StoredForceDeletePlan {
+            plan_id: "fd-file-test".into(),
+            target_path: target.to_path_buf(),
+            canonical_path: target.canonicalize().unwrap(),
+            is_directory: false,
+            expires_at: now + 600,
+            inspection: inspect_target(target).unwrap(),
+            locking_processes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn force_delete_refuses_a_file_replaced_after_preview() {
+        let root = disposable_fixture("replaced-file");
+        let target = root.join("reviewed.txt");
+        std::fs::write(&target, b"reviewed").unwrap();
+        let plan = file_plan(&target);
+
+        std::fs::remove_file(&target).unwrap();
+        std::fs::write(&target, b"replacement").unwrap();
+
+        let result = execute_force_delete(&plan, "permanent", &root.join("quarantine"));
+        assert!(result.is_err(), "a replaced file must be refused");
+        assert_eq!(std::fs::read(&target).unwrap(), b"replacement");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn force_delete_refuses_a_folder_that_gained_content_after_preview() {
+        let root = disposable_fixture("changed-folder");
+        let target = root.join("reviewed-folder");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("one.txt"), b"one").unwrap();
+        let plan = directory_plan(&target);
+
+        std::fs::write(target.join("two.txt"), b"two").unwrap();
+
+        let result = execute_force_delete(&plan, "quarantine", &root.join("quarantine"));
+        assert!(result.is_err(), "changed contents must be refused");
+        assert!(target.join("one.txt").exists());
+        assert!(target.join("two.txt").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn disposable_fixture(name: &str) -> PathBuf {
