@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cyron — the uninstaller that shows its work</title>
+    <meta
+      name="description"
+      content="Cyron removes Windows apps, explores disk space, clears the caches left by AI coding tools and diagnoses CPU spikes with evidence. Review-first, recoverable, and measured in the open."
+    />
+    <meta name="theme-color" content="#f5f5f7" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="assets/cyron-icon.png" type="image/png" />
+    <style>
+      /* Paint the correct surface before the stylesheet arrives. The media query
+         also covers the first frame, before the preference script has run. */
+      html[data-theme="dark"] {
+        background: #0a0a0c;
+      }
+      html[data-theme="light"] {
+        background: #f5f5f7;
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme="light"]) {
+          background: #0a0a0c;
+        }
+      }
+    </style>
+    <script>
+      // Runs before first paint so a dark-preference visitor is never flashed white.
+      (function () {
+        var root = document.documentElement;
+        function read(key) {
+          try {
+            return localStorage.getItem(key);
+          } catch (error) {
+            return null;
+          }
+        }
+        var theme = read("cyron-theme");
+        var motion = read("cyron-motion");
+        var dark = theme ? theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+        var reduce = motion
+          ? motion === "reduce"
+          : matchMedia("(prefers-reduced-motion: reduce)").matches;
+        root.dataset.theme = dark ? "dark" : "light";
+        root.dataset.themeChoice = theme === "dark" || theme === "light" ? theme : "system";
+        root.dataset.motion = reduce ? "reduce" : "full";
+        root.dataset.motionChoice = motion === "reduce" || motion === "full" ? motion : "system";
+        root.style.colorScheme = dark ? "dark" : "light";
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", dark ? "#0a0a0c" : "#f5f5f7");
+      })();
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="main.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="scroll-progress" aria-hidden="true"><span></span></div>
+
+    <header class="nav" id="nav">
+      <a class="brand" href="#top" aria-label="Cyron home">
+        <img src="assets/cyron-icon.png" width="30" height="30" alt="" />
+        <span>Cyron</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#safety">Safety</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#vibecode">AI caches</a>
+        <a href="#speed">Speed</a>
+        <a href="#compare">Compare</a>
+      </nav>
+      <div class="nav-tools" role="group" aria-label="Display preferences">
+        <button
+          class="tool"
+          type="button"
+          data-pref="theme"
+          aria-pressed="false"
+          aria-label="Dark appearance"
+          title="Dark appearance"
+        >
+          <svg class="tool-moon" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M16.6 12.4A7 7 0 0 1 7.6 3.4a7 7 0 1 0 9 9Z" />
+          </svg>
+          <svg class="tool-sun" viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="10" cy="10" r="3.3" />
+            <path d="M10 2.2v2M10 15.8v2M2.2 10h2M15.8 10h2M4.5 4.5l1.4 1.4M14.1 14.1l1.4 1.4M15.5 4.5l-1.4 1.4M5.9 14.1l-1.4 1.4" />
+          </svg>
+        </button>
+        <button
+          class="tool"
+          type="button"
+          data-pref="motion"
+          aria-pressed="false"
+          aria-label="Reduce motion"
+          title="Reduce motion"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M6 5.4v9.2l7-4.6-7-4.6Z" />
+            <path d="M15.6 5.6a8.2 8.2 0 0 1 0 8.8" />
+          </svg>
+        </button>
+      </div>
+      <a class="nav-cta" href="#download">Download</a>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="aurora" aria-hidden="true">
+          <span class="orb orb-a"></span>
+          <span class="orb orb-b"></span>
+          <span class="orb orb-c"></span>
+          <span class="grid-glow"></span>
+        </div>
+
+        <div class="wrap hero-copy">
+          <p class="eyebrow reveal">
+            <span class="status-dot" aria-hidden="true"></span>
+            Windows 10/11 x64 · <span data-release-version>v0.2.0-rc.2</span>
+          </p>
+          <h1 class="reveal" style="--delay: 60ms">
+            The uninstaller that<br />
+            <span class="accent">shows its work.</span>
+          </h1>
+          <p class="lede reveal" style="--delay: 120ms">
+            Remove the app, find what it left behind, clear the caches your AI tools quietly
+            filled, and see what your PC is actually doing — before anything changes. One calm
+            utility instead of five noisy ones.
+          </p>
+          <div class="actions reveal" style="--delay: 180ms">
+            <a class="btn btn-primary" href="#download">
+              Download for Windows
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" />
+              </svg>
+            </a>
+            <a class="btn btn-quiet" href="#capabilities">
+              See what it does
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M4 10h12m0 0-4-4m4 4-4 4" />
+              </svg>
+            </a>
+          </div>
+          <p class="fineprint reveal" style="--delay: 240ms">
+            Review-first · recoverable cleanup · AI &amp; IDE cache review · no telemetry · no
+            RAM-booster claims
+          </p>
+        </div>
+
+        <div class="wrap hero-stage reveal" style="--delay: 300ms">
+          <div class="frame glass hero-frame" id="heroFrame">
+            <div class="frame-bar" aria-hidden="true">
+              <span class="traffic"><i></i><i></i><i></i></span>
+              <span class="frame-title">Cyron — Performance</span>
+              <span class="frame-live"><i></i>Live sample</span>
+            </div>
+            <img
+              src="assets/spike-capture.png"
+              width="1320"
+              height="870"
+              alt="Cyron Performance page showing a 20-second spike capture with peak CPU, kernel and disk figures and the process using the most CPU."
+            />
+          </div>
+          <div class="float-card glass float-a" aria-hidden="true">
+            <span class="float-kicker">20-second capture</span>
+            <strong>20 readings</strong>
+            <span>peak, not latest</span>
+          </div>
+          <div class="float-card glass float-b" aria-hidden="true">
+            <span class="float-kicker">Kernel evidence</span>
+            <strong>4 drivers</strong>
+            <span>versions + dates</span>
+          </div>
+        </div>
+
+        <a class="scroll-cue" href="#safety" aria-label="Scroll to safety">
+          <span class="cue-track" aria-hidden="true"><i></i></span>
+          Scroll to explore
+        </a>
+      </section>
+
+      <section class="strip" aria-label="Product principles">
+        <div class="wrap strip-grid">
+          <span><i class="dot dot-blue" aria-hidden="true"></i>Review before every change</span>
+          <span><i class="dot dot-green" aria-hidden="true"></i>Quarantine before deletion</span>
+          <span><i class="dot dot-blue" aria-hidden="true"></i>Read-only diagnostics by default</span>
+          <span><i class="dot dot-green" aria-hidden="true"></i>Zero telemetry by architecture</span>
+        </div>
+      </section>
+
+      <section class="section safety" id="safety">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">Review first</p>
+            <h2>Nothing moves until you say so.</h2>
+            <p>
+              Cyron builds a server-held plan, shows the exact files and registry keys, and
+              executes only after you confirm. Cleanup is recoverable by default.
+            </p>
+          </div>
+
+          <div class="safety-grid">
+            <article class="card glass reveal">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2m-8 0 1 12h8l1-12M10 11v4m4-4v4" /></svg>
+              </span>
+              <h3>Exact targets</h3>
+              <p>Every command, path and registry key is listed before the plan becomes usable.</p>
+            </article>
+            <article class="card glass reveal" style="--delay: 70ms">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.5 3.4 7.6 8 9 4.6-1.4 8-4.5 8-9V7l-8-4Z" /><path d="m9 12 2 2 4-4" /></svg>
+              </span>
+              <h3>Recoverable</h3>
+              <p>Files move to a journaled quarantine with no-overwrite restore, not silent deletion.</p>
+            </article>
+            <article class="card glass reveal" style="--delay: 140ms">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="8" /></svg>
+              </span>
+              <h3>Single-use plans</h3>
+              <p>Confirmations expire, cannot be replayed, and are revalidated against the live system.</p>
+            </article>
+            <article class="card glass reveal" style="--delay: 210ms">
+              <span class="icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 12h4l2-5 4 10 2-5h4" /></svg>
+              </span>
+              <h3>Local only</h3>
+              <p>No account, no analytics, no network client. Your inventory and traces stay on the PC.</p>
+            </article>
+          </div>
+
+          <div class="sequence glass reveal" aria-label="The review sequence">
+            <div class="sequence-step">
+              <span class="sequence-num">01</span>
+              <strong>Measure</strong>
+              <p>The scan reads the filesystem and reports what exists.</p>
+            </div>
+            <span class="sequence-line" aria-hidden="true"></span>
+            <div class="sequence-step">
+              <span class="sequence-num">02</span>
+              <strong>Review</strong>
+              <p>Exact paths, risk and expected effect appear in a plan.</p>
+            </div>
+            <span class="sequence-line" aria-hidden="true"></span>
+            <div class="sequence-step">
+              <span class="sequence-num">03</span>
+              <strong>Quarantine</strong>
+              <p>An approved run journals each move before it happens.</p>
+            </div>
+            <span class="sequence-line" aria-hidden="true"></span>
+            <div class="sequence-step">
+              <span class="sequence-num">04</span>
+              <strong>Restore</strong>
+              <p>Put a batch back at any time; existing files are never overwritten.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section showcase" id="capabilities">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">One utility</p>
+            <h2>Five jobs, one clear point of view.</h2>
+            <p>
+              Uninstall, explore, clean, diagnose and recover without handing your PC to a black box.
+              Scroll through the work.
+            </p>
+          </div>
+
+          <div class="showcase-grid">
+            <div class="steps">
+              <article class="step is-active" data-step="0">
+                <span class="step-index">01</span>
+                <h3>Uninstall without leftovers</h3>
+                <p>
+                  Win32, Store, Steam and portable apps in one inventory. Batch runs only what has a
+                  registered vendor uninstaller, and leftover files are reviewed separately.
+                </p>
+                <ul>
+                  <li>Batch queue refuses Store, Steam and unregistered entries</li>
+                  <li>Registry backup before a broken entry is touched</li>
+                  <li>Exit codes are checked against the live inventory, not trusted alone</li>
+                </ul>
+              </article>
+              <article class="step" data-step="1">
+                <span class="step-index">02</span>
+                <h3>See where every byte went</h3>
+                <p>
+                  A treemap and virtualized tree expose the folders behind a full drive. NTFS MFT
+                  scanning is used when elevated; a streaming walk covers the rest.
+                </p>
+                <ul>
+                  <li>Reparse points are never followed</li>
+                  <li>Hard links are deduplicated so allocation is not double-counted</li>
+                  <li>Duplicate detection uses size, edge hashes and SHA-256</li>
+                </ul>
+              </article>
+              <article class="step" data-step="2">
+                <span class="step-index">03</span>
+                <h3>Clean what you actually own</h3>
+                <p>
+                  Developer and AI caches are mapped to documented provider paths, then shown for
+                  review. Conversation history, credentials and model data stay protected.
+                </p>
+                <ul>
+                  <li>No arbitrary shell or package-manager execution</li>
+                  <li>Nothing is preselected for you</li>
+                  <li>Quarantine keeps the run reversible</li>
+                </ul>
+              </article>
+              <article class="step" data-step="3">
+                <span class="step-index">04</span>
+                <h3>Diagnose the spike, not the vibe</h3>
+                <p>
+                  A 20-second capture keeps the peak instead of the latest reading. Kernel time has
+                  no process row, so Cyron adds driver versions and recent System events.
+                </p>
+                <ul>
+                  <li>Kernel share of busy CPU, with the application time it does not explain</li>
+                  <li>Display, storage and network driver dates from the package</li>
+                  <li>No driver rollback, service disabling or placebo tweaks</li>
+                </ul>
+              </article>
+            </div>
+
+            <div class="showcase-sticky">
+              <div class="frame glass showcase-frame" id="showcaseFrame">
+                <div class="frame-bar" aria-hidden="true">
+                  <span class="traffic"><i></i><i></i><i></i></span>
+                  <span class="frame-title" id="showcaseTitle">Applications</span>
+                  <span class="frame-live"><i></i>Review</span>
+                </div>
+
+                <div class="panels">
+                  <div class="panel is-active" data-panel="0">
+                    <div class="mock">
+                      <div class="mock-head">
+                        <strong>Installed applications</strong>
+                        <span class="pill">Review queue</span>
+                      </div>
+                      <div class="mock-toolbar">
+                        <span class="mock-search">Search apps</span>
+                        <span class="mock-select">All sources</span>
+                      </div>
+                      <ul class="app-list">
+                        <li class="is-selected">
+                          <span class="mock-check" aria-hidden="true"></span>
+                          <span class="app-name"><strong>Adobe Creative Cloud</strong><small>Registered uninstaller</small></span>
+                          <em>Selected</em>
+                        </li>
+                        <li class="is-selected">
+                          <span class="mock-check" aria-hidden="true"></span>
+                          <span class="app-name"><strong>Docker Desktop</strong><small>Registered uninstaller</small></span>
+                          <em>Selected</em>
+                        </li>
+                        <li class="is-disabled">
+                          <span class="mock-check" aria-hidden="true"></span>
+                          <span class="app-name"><strong>Steam</strong><small>Removes through Steam</small></span>
+                          <em>Not queued</em>
+                        </li>
+                        <li class="is-disabled">
+                          <span class="mock-check" aria-hidden="true"></span>
+                          <span class="app-name"><strong>Portable utility</strong><small>No registered uninstaller</small></span>
+                          <em>Forced removal</em>
+                        </li>
+                      </ul>
+                      <div class="mock-foot">
+                        <span>2 selected</span>
+                        <span class="mock-btn">Review batch</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel" data-panel="1">
+                    <div class="mock">
+                      <div class="mock-head">
+                        <strong>Disk space</strong>
+                        <span class="pill">NTFS · C:</span>
+                      </div>
+                      <div class="treemap" aria-hidden="true">
+                        <div class="tile tile-a"><span>Windows</span><small>System</small></div>
+                        <div class="tile tile-b"><span>node_modules</span></div>
+                        <div class="tile tile-c"><span>Media</span></div>
+                        <div class="tile tile-d"><span>Caches</span></div>
+                        <div class="tile tile-e"><span>Apps</span></div>
+                        <div class="tile tile-f"><span>Other</span></div>
+                      </div>
+                      <p class="mock-note">
+                        Illustrative treemap. Allocation is measured; no sizes are claimed here.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="panel" data-panel="2">
+                    <div class="mock">
+                      <div class="mock-head">
+                        <strong>Known cache locations</strong>
+                        <span class="pill">Review</span>
+                      </div>
+                      <ul class="cleaner-list">
+                        <li>
+                          <span class="app-name"><strong>npm cache</strong><small>Package manager cache</small></span>
+                          <em class="review">Review</em>
+                        </li>
+                        <li>
+                          <span class="app-name"><strong>Cargo target</strong><small>Rust build output</small></span>
+                          <em class="review">Review</em>
+                        </li>
+                        <li>
+                          <span class="app-name"><strong>Hugging Face models</strong><small>Model weights</small></span>
+                          <em class="protected">Protected</em>
+                        </li>
+                        <li>
+                          <span class="app-name"><strong>Ollama models</strong><small>Local model store</small></span>
+                          <em class="protected">Protected</em>
+                        </li>
+                        <li>
+                          <span class="app-name"><strong>Docker / WSL disks</strong><small>Virtual disks</small></span>
+                          <em class="protected">Protected</em>
+                        </li>
+                      </ul>
+                      <div class="mock-foot">
+                        <span>Protected data is never offered</span>
+                        <span class="mock-btn">Preview cleanup</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="panel" data-panel="3">
+                    <div class="panel-shot">
+                      <img
+                        src="assets/spike-capture.png"
+                        width="1320"
+                        height="870"
+                        alt="Real Cyron 20-second spike capture showing peak CPU, kernel and disk values and the busiest process."
+                      />
+                      <span class="shot-badge">Real capture · <span data-release-version>v0.2.0-rc.2</span></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="caption">Steps 01–03 are interface illustrations. Step 04 is a real capture.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section vibe" id="vibecode">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">Built for the agent era</p>
+            <h2>Your agent doesn’t clean up after itself.</h2>
+            <p>
+              AI-assisted building leaves a very specific kind of bloat: caches nobody prunes,
+              build output from a branch you abandoned, and model weights you forgot downloading.
+              Cyron maps the locations it can prove — and refuses to touch the ones that are
+              actually your work.
+            </p>
+          </div>
+
+          <div class="vibe-grid">
+            <article class="vibe-card glass reveal">
+              <div class="vibe-head">
+                <span class="pill">AI &amp; IDE caches</span>
+                <span class="vibe-count">Reviewed catalog</span>
+              </div>
+              <ul class="vibe-list">
+                <li>
+                  <span class="app-name"><strong>Claude Code</strong><small>CLI cache · debug logs · shell snapshots</small></span>
+                  <em class="review">Review</em>
+                </li>
+                <li>
+                  <span class="app-name"><strong>Codex CLI</strong><small>CLI logs, recreated on the next run</small></span>
+                  <em class="review">Review</em>
+                </li>
+                <li>
+                  <span class="app-name"><strong>Cursor</strong><small>Code cache · GPU cache · logs</small></span>
+                  <em class="review">Review</em>
+                </li>
+                <li>
+                  <span class="app-name"><strong>Gemini CLI</strong><small>Session history + checkpoints</small></span>
+                  <em class="protected">Protected</em>
+                </li>
+                <li>
+                  <span class="app-name"><strong>Ollama · LM Studio</strong><small>Model weights, measured not offered</small></span>
+                  <em class="protected">Protected</em>
+                </li>
+                <li>
+                  <span class="app-name"><strong>npm · pnpm · yarn · Cargo</strong><small>Package caches and build output</small></span>
+                  <em class="review">Review</em>
+                </li>
+              </ul>
+              <div class="mock-foot">
+                <span>Illustration of the reviewed cache catalog</span>
+                <span class="mock-btn">Preview cleanup</span>
+              </div>
+            </article>
+
+            <aside class="vibe-aside glass reveal" style="--delay: 90ms">
+              <span class="vibe-shield" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.5 3.4 7.6 8 9 4.6-1.4 8-4.5 8-9V7l-8-4Z" /><path d="m8.8 12 2.2 2.2 4.2-4.4" /></svg>
+              </span>
+              <h3>Chats aren’t cache.</h3>
+              <p>
+                The useful part of vibe coding is the context: conversations, prompts, local edit
+                history, model files. Cyron measures those folders and never offers them for
+                removal.
+              </p>
+              <ul class="vibe-protected">
+                <li>Conversation history and agent memory</li>
+                <li>Local file history that may hold unsaved work</li>
+                <li>Model weights and datasets</li>
+                <li>Saved access tokens and configuration presets</li>
+              </ul>
+              <p class="vibe-quote">Protected paths stay visible with a reason, not hidden behind a checkbox.</p>
+            </aside>
+          </div>
+
+          <div class="vibe-strip reveal" aria-label="Tools with reviewed cache paths">
+            <span class="vibe-strip-label">Mapped from documented paths</span>
+            <ul>
+              <li>Claude Code</li>
+              <li>Codex CLI</li>
+              <li>Cursor</li>
+              <li>Gemini CLI</li>
+              <li>VS Code</li>
+              <li>Antigravity</li>
+              <li>Ollama</li>
+              <li>LM Studio</li>
+              <li>Hugging Face</li>
+            </ul>
+          </div>
+
+          <div class="vibe-loop">
+            <div class="vibe-step reveal">
+              <span>01</span>
+              <strong>Scan</strong>
+              <p>Known provider paths are measured read-only. No package manager runs, no shell.</p>
+            </div>
+            <div class="vibe-step reveal" style="--delay: 70ms">
+              <span>02</span>
+              <strong>Review</strong>
+              <p>Each entry shows what it is, why it exists and what happens if it goes.</p>
+            </div>
+            <div class="vibe-step reveal" style="--delay: 140ms">
+              <span>03</span>
+              <strong>Quarantine</strong>
+              <p>Approved files move to a journaled quarantine you can restore.</p>
+            </div>
+            <div class="vibe-step reveal" style="--delay: 210ms">
+              <span>04</span>
+              <strong>Rebuild</strong>
+              <p>Your tools repopulate what they need — without the mystery folder you never found.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section speed dark" id="speed">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">Measured, not marketed</p>
+            <h2>Fast where it counts.</h2>
+            <p>
+              A directory walk is Cyron's fallback when the MFT is unavailable, and it is still
+              quick. These are the actual medians from one Windows machine, published with the
+              method.
+            </p>
+          </div>
+
+          <div class="speed-grid">
+            <div class="bench-hero glass-dark reveal">
+              <span class="bench-kicker" data-bench-kicker>C:\Windows\System32</span>
+              <div class="bench-big">
+                <span class="bench-number" data-count="0.21" data-decimals="2">0.21</span><span class="bench-unit">s</span>
+              </div>
+              <p class="bench-sub" data-bench-sub>to count <strong>20,557 files</strong> and 12.1 GiB</p>
+              <span class="bench-chip" data-bench-chip>Median of 3 runs · directory walk</span>
+              <span class="bench-scan" aria-hidden="true"></span>
+            </div>
+
+            <div class="bench-panel">
+              <div class="bench-list" id="benchList" aria-live="polite"></div>
+              <p class="method">
+                Warm OS cache, unelevated, median of <span data-bench-runs>3</span> runs. These are Cyron-only measurements;
+                no competitor was installed or timed. Bar length is the measured median.
+                <a data-benchmark-source href="https://github.com/Ry0x7/cyron-uninstaller/blob/v0.2.0-rc.2/docs/BENCHMARKS.md">Method and environment →</a>
+              </p>
+            </div>
+          </div>
+
+          <div class="speed-facts">
+            <div class="fact reveal">
+              <strong>NTFS MFT</strong>
+              <span>when elevated and available</span>
+            </div>
+            <div class="fact reveal" style="--delay: 60ms">
+              <strong>Streaming walk</strong>
+              <span>automatic fallback, no elevation</span>
+            </div>
+            <div class="fact reveal" style="--delay: 120ms">
+              <strong data-bench-peaks>5.5–11.1 MiB</strong>
+              <span>peak working set in these runs</span>
+            </div>
+            <div class="fact reveal" style="--delay: 180ms">
+              <strong>Read-only</strong>
+              <span>scanning never changes the tree</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section compare" id="compare">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">Honest comparison</p>
+            <h2>Different tools. One honest table.</h2>
+            <p>
+              Revo, BCUninstaller, WizTree and BleachBit are good at their jobs. This is a
+              documentation-based capability table, not a speed ranking.
+            </p>
+          </div>
+
+          <div class="callout glass reveal">
+            <span class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 8v5m0 3h.01" /><circle cx="12" cy="12" r="9" /></svg>
+            </span>
+            <div>
+              <strong>No competitor benchmark exists.</strong>
+              <p>
+                We did not install or time Revo, BCUninstaller, WizTree, TreeSize, BleachBit,
+                Microsoft PC Manager or Sysinternals. The only timed column below is Cyron.
+              </p>
+            </div>
+          </div>
+
+          <p class="compare-hint">Swipe or scroll the table to see every tool →</p>
+          <div class="compare-scroll" tabindex="0" role="region" aria-label="Capability comparison table">
+            <table id="compareTable">
+              <caption class="sr-only">
+                Documented capability comparison between Cyron and four other Windows utilities. A
+                documented feature is not proof that it works on this machine, and no competitor
+                timing was measured.
+              </caption>
+            </table>
+          </div>
+          <p class="compare-note">
+            Legend: <strong>Yes</strong> = documented or implemented, <strong>Partial</strong> = limited
+            or needs configuration, <strong>Reported</strong> = third-party report, not verified from the
+            official page, <strong>Not verified</strong> = not established from the cited source,
+            <strong>Not run</strong> = no same-machine test. Cyron cells describe this repository and
+            its evidence, not a claim of superiority.
+          </p>
+        </div>
+      </section>
+
+      <section class="section diagnose">
+        <div class="wrap diagnose-grid">
+          <div class="diagnose-copy reveal">
+            <p class="eyebrow">For the late-night spike</p>
+            <h2>When the lag is kernel-deep.</h2>
+            <p class="lede">
+              Kernel time has no process row. Cyron shows the kernel share of busy CPU, the
+              application time it does not explain, driver versions and recent System events.
+            </p>
+            <ul class="check-list">
+              <li>A 20-second capture keeps the peak and the busiest process.</li>
+              <li>Drivers are read from the class registry with package dates.</li>
+              <li>A denied event log is reported as unavailable — never as “no problems”.</li>
+              <li>The counters cannot attribute DPC/ISR time to one driver. Cyron says so.</li>
+            </ul>
+            <a
+              class="btn btn-primary"
+              href="https://github.com/Ry0x7/cyron-uninstaller/blob/main/docs/evidence/2026-11-18-desktop-performance.md"
+            >
+              Read the native verification
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4" /></svg>
+            </a>
+          </div>
+          <div class="diagnose-visual reveal" style="--delay: 100ms">
+            <div class="frame glass diagnose-frame">
+              <div class="frame-bar" aria-hidden="true">
+                <span class="traffic"><i></i><i></i><i></i></span>
+                <span class="frame-title">Performance — kernel evidence</span>
+                <span class="frame-live"><i></i>Read-only</span>
+              </div>
+              <img
+                src="assets/driver-evidence.png"
+                width="1320"
+                height="870"
+                alt="Cyron driver evidence panel listing AMD, Intel and TP-Link drivers with package dates and recent Windows System events."
+              />
+            </div>
+            <div class="float-card glass float-c" aria-hidden="true">
+              <span class="float-kicker">Evidence, not a verdict</span>
+              <strong>Dates + events</strong>
+              <span>correlate, don’t guess</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section download" id="download">
+        <div class="wrap">
+          <div class="download-card glass reveal">
+            <span class="aurora-download" aria-hidden="true"></span>
+            <p class="eyebrow">Windows 10/11 x64</p>
+            <h2>See what your PC is really doing.</h2>
+            <p class="lede">
+              Cyron <span data-release-number>0.2.0-rc.2</span>
+              <span data-release-channel>is a testing candidate.</span> Download it, review the plan, and keep the
+              quarantine until you are sure.
+            </p>
+            <div class="actions">
+              <a
+                class="btn btn-primary"
+                data-release-download
+                href="https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.0-rc.2"
+              >
+                <span data-release-label>Download unsigned prerelease</span>
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" /></svg>
+              </a>
+              <a
+                class="btn btn-quiet"
+                data-release-notes
+                href="https://github.com/Ry0x7/cyron-uninstaller/blob/v0.2.0-rc.2/docs/RELEASE_NOTES_v0.2.0-rc.2.md"
+              >
+                Release notes
+              </a>
+            </div>
+            <p class="fineprint warning" data-release-warning>
+              Unsigned testing candidate. Windows may warn and SmartScreen has no reputation for it.
+              This is not a publicly trusted production release.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap footer-grid">
+        <a class="brand" href="#top" aria-label="Back to top">
+          <img src="assets/cyron-icon.png" width="26" height="26" alt="" />
+          <span>Cyron</span>
+        </a>
+        <nav class="footer-links" aria-label="Footer">
+          <a href="https://github.com/Ry0x7/cyron-uninstaller">GitHub</a>
+          <a href="https://github.com/Ry0x7/cyron-uninstaller/blob/main/docs/USER_GUIDE.md">User guide</a>
+          <a href="https://github.com/Ry0x7/cyron-uninstaller/blob/main/docs/RELEASE_AUDIT_2026-11-17.md">Release audit</a>
+        </nav>
+        <p>Source-available · built with Rust, Tauri and React</p>
+      </div>
+      <div class="wrap footer-prefs" role="group" aria-label="Display preferences">
+        <span class="footer-prefs-title">Display</span>
+        <button type="button" data-pref="theme" aria-pressed="false">Dark appearance</button>
+        <button type="button" data-pref="motion" aria-pressed="false">Reduce motion</button>
+        <button type="button" data-pref="system" class="footer-reset">Follow system</button>
+      </div>
+      <p class="wrap footer-note">Preferences are stored in this browser only.</p>
+    </footer>
+
+    <noscript>
+      <p class="noscript-note">
+        This page uses JavaScript for the benchmark table, comparison and scroll reveals. The
+        download links and all written content remain available without it.
+      </p>
+    </noscript>
+
+    <div class="stress-toggle" id="stressToggle" hidden>
+      <span>Dev data</span>
+      <button type="button" data-mode="demo" aria-pressed="true">Demo</button>
+      <button type="button" data-mode="stress" aria-pressed="false">Worst case</button>
+    </div>
+  </body>
+</html>
