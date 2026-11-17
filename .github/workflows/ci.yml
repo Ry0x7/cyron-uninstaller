@@ -24,6 +24,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run docs:check
+      - run: npm run landing:check
       - run: npm run build
 
   rust:
