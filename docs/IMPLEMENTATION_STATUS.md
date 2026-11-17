@@ -1,6 +1,6 @@
 # Cyron — Implementation Status
 
-Last updated: 2026-11-18 (0.2.0 release-candidate build and NSIS verification; Phase 8 independent release audit; workflow UX completion; design-system rebuild, performance diagnostics and startup evidence, implementation ledger)
+Last updated: 2026-11-18 (v0.2.0-rc.1 unsigned prerelease published after green release and CI workflows; 0.2.0 release-candidate build and NSIS verification; Phase 8 independent release audit; workflow UX completion; design-system rebuild, performance diagnostics and startup evidence, implementation ledger)
 
 ## Summary
 
@@ -23,7 +23,7 @@ Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x6
 - Local Chryypt Organization self-signed signing pipeline. Cryptographic integrity is separate from public trust: the published `v0.1.0` installer and the 0.2.0 RC1 artifacts are `NotSigned`, and the certificate is self-signed.
 - Evidence-bound performance diagnostics: live CPU, memory, PDH disk, process, startup and scheduled-task evidence; reversible startup toggles behind a native confirmation; local before/after baselines; optional administrator-only WPR trace; no placebo tuning.
 - Five-destination Windows-native interface (Home, Applications, Storage & Cleanup, Performance, History & Recovery) with Settings in the sidebar footer, a shared token/primitive system, keyboard-visible focus, dialog focus trapping and reduced-motion support.
-- Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`). The 0.2.0 RC1 per-user NSIS package was installed, launched, uninstalled and reinstalled with app data preserved; same-version repair was verified on 0.1.0. The MSI is per-machine and still requires an elevated install test.
+- Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`). The 0.2.0 RC1 per-user NSIS package was installed, launched, uninstalled and reinstalled with app data preserved; same-version repair was verified on 0.1.0. The MSI is per-machine and still requires an elevated install test. `v0.2.0-rc.1` is published as an unsigned GitHub prerelease; release workflow `44146575399` and `main` CI run `44150254690` are green.
 
 Historical narratives and early acceptance logs for Phases 1–3 are preserved in [docs/archive/PHASE_HISTORY.md](archive/PHASE_HISTORY.md).
 

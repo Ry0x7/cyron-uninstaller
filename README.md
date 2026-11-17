@@ -5,6 +5,8 @@ duplicate detection, and developer/AI cache cleaning. It provides a modern, revi
 Revo Uninstaller, WinDirStat/WizTree, BleachBit, and Bulk Crap Uninstaller (BCUninstaller) with plain-language
 risk labels, built for everyday users and developers alike.
 
+> **Release status:** [`v0.2.0-rc.1`](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.0-rc.1) is published as an **unsigned prerelease** for Windows 10/11 x64. It is a testing candidate, not a trusted production release; see the [release notes](docs/RELEASE_NOTES_v0.2.0-rc.1.md) and [Phase 8 audit](docs/RELEASE_AUDIT_2026-11-17.md).
+
 > **Review-first safety & durable recovery.** Cyron measures files and caches, displays every single file and
 > registry subkey it plans to touch, and executes modifications only after an explicit confirmation.
 > Protected data — conversation histories, AI model weights, configurations, credentials, Docker/WSL virtual disks,
