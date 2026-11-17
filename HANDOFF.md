@@ -1,11 +1,12 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-17 (Phase 5 design-system rebuild; Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
+Updated: 2026-11-17 (Phase 8 independent release audit, release bundles and NSIS installer verification; Phase 7 real desktop E2E, Phase 6 workflow UX, Phase 5, Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
 
 ## 1. Current Verified State
 
-- **Branch:** `main`. The prior audit is committed and pushed as `d5e5afc` with documentation follow-up `4cf4059`; the Phase 5 design-system rebuild is uncommitted in this tree. No rebase or release was made.
-- **Version:** `0.1.0`. `v0.1.0` is published with NSIS, MSI, portable EXE, and `SHA256SUMS.txt`.
+- **Branch:** `main`. Phase 5 is committed as `2eeb91f` with documentation follow-up `3d9f2da`; the Phase 6 workflow completion, Phase 7 desktop E2E harness and Phase 8 safety hardening are uncommitted in this tree. No rebase or release was made.
+- **Phase 8 verdict:** **NOT PRODUCTION READY — release blocked.** The full audit, evidence and blockers are in [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md). The NSIS installer path is now verified end to end; signing trust and real vendor/MSI/Store removal are the remaining release blockers.
+- **Version:** `0.1.0`. `v0.1.0` is published with NSIS, MSI, portable EXE, and `SHA256SUMS.txt`. The published NSIS asset is `NotSigned` and predates the current tree.
 - **IPC surface:** 72 commands registered in `src-tauri/src/lib.rs` (including Phase 2
   `list_app_history`, `prepare_store_uninstall`, `execute_store_uninstall`, Phase 3
   `scan_developer_storage`, `preview_developer_cleanup`, `verify_developer_cleanup`, and Phase 4
@@ -17,13 +18,10 @@ Updated: 2026-11-17 (Phase 5 design-system rebuild; Phase 4, Phase 3, Phase 2 an
   `NotSigned`. The `CN=Chryypt Organization` certificate is self-signed (Subject == Issuer), so a
   locally signed build is cryptographically intact but not publicly trusted and earns no SmartScreen
   reputation. See [docs/CODE_SIGNING_POLICY.md](docs/CODE_SIGNING_POLICY.md).
-- **CI:** green. Phase 5 run `43953411889` (commit `2eeb91f`, 2026-11-17) passed both jobs:
-  typecheck, 100 Vitest tests, `docs:check` over 79 Markdown files, frontend build, full Rust suite,
-  security and cleanup-stress suites, cleanup fixture and RC1 E2E fixture. The prior audit run
-  `43930569278` (commit `d5e5afc`) also passed both jobs. Run `43200921453` failed only `docs:check`
-  because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the repository-local
+- **CI:** the last committed revision (`3d9f2da`) is green in run `43954491263`: typecheck, 100 Vitest tests, `docs:check`, frontend build, full Rust suite, security and cleanup-stress suites, cleanup fixture and RC1 E2E fixture. The current working tree is uncommitted, so it has no CI run yet; its local Phase 8 checks are in the release audit. Run `43200921453` failed only `docs:check` because `HANDOFF.md` linked into gitignored `.unlazy/`; that link now points to the repository-local
   [capability verification receipt](docs/evidence/2026-11-09-capability-verification.md), and
   `scripts/verify-docs.mjs` rejects links into gitignored directories.
+- **Release bundles:** `npm run build:unsigned` produced NSIS `2,271,846` bytes / `16a37822…479f`, MSI `3,330,048` bytes / `3f1e64a7…2630`, and `cyron.exe` `6,918,144` bytes / `95c3f7ef…20d4`. Metadata audit passed; signature verification failed because all three artifacts are unsigned. The NSIS package installed, repaired, relaunched, uninstalled and reinstalled with 0 app-data hash changes. See [the installer receipt](docs/evidence/2026-11-17-installer-release.md).
 
 ## 2. Phase 2 implementation state — 2026-11-16
 
@@ -120,6 +118,90 @@ Phase 5 replaces the old dashboard surface with a calmer Windows-native utility 
 
 UNVERIFIED in this tree: screen-reader traversal, forced-colors visuals, 200% OS text scaling and a clean-VM installer run. The screenshots show this machine's real 179-application inventory; no real user cache or project was cleaned.
 
+## 2e. Workflow UX completion — 2026-11-17
+
+Phase 6 applied the Phase 5 system to every workflow and fixed the state and layout gaps found in the production desktop build. No Rust safety plan, quarantine rule or IPC permission changed.
+
+- **Home:** real system, volume, application, cleanup and recent-activity measurements; no health score. At 1000 px the five-item system summary uses two columns with Uptime spanning the spare row instead of leaving a blank cell.
+- **Cleaner:** the first measurement now says **Measuring known cache folders on C:, D:, E:…**, disables the redundant scan action while it runs, and shows **Not checked yet** before results. Opening a preview clears the previous preview, shows a spinner, explains that nothing moves, and labels dismissal **Cancel preview**.
+- **Storage & Cleanup:** the header now says **Review before cleanup** instead of the internal read-only phrasing.
+- **History & Recovery:** at 1000 px the cleanup log keeps each outcome under its operation title instead of hiding failed and partial runs. A stop or failure that already moved files is recorded as **partial**, not completed or a bare cancellation; Activity, Home and the Recovery log render the fourth state.
+- **Settings:** the startup section explains that disabling an entry preserves it and can be reversed; Copy now confirms **Copied** for two seconds.
+- **Shell:** `html` is fixed so a stray focus or programmatic scroll cannot shift the whole window onto blank space. Each view slot remains the only scroll container.
+- **Evidence:** native captures at 1320x860 and 1000x680, light/dark, and the full command ledger are in [docs/evidence/2026-11-17-workflow-ux.md](docs/evidence/2026-11-17-workflow-ux.md).
+
+### Phase 6 verification (this tree)
+
+| Check | Command | Observed |
+|---|---|---|
+| TypeScript | `npm run typecheck` | exit 0 |
+| Frontend tests | `npm test` | 100 passed in 12 files |
+| Production frontend | `npm run build` | exit 0 (563.72 kB JS, 128.05 kB CSS; chunk-size warning only) |
+| Documentation | `npm run docs:check` | `DOCS_CHECK: PASSED`, 80 Markdown files |
+| Full Rust suite | `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml` | 253 passed, 4 ignored, 0 failed |
+| Desktop build | `npm run build:desktop` | exit 0; debug executable built |
+| Native layout probe | WebView2 evaluation at 984 px client width | 0 horizontal overflow on all five destinations and Settings; document scroll height stayed 641 px |
+| Native workflow review | WebView2 against the production desktop build | All five destinations, Settings, Hunter dialog, cleanup preview and Recovery log opened; no dead route or placeholder control |
+
+UNVERIFIED in this tree: real cache/project/application mutation, screen-reader traversal, forced-colors visuals, 200% text scaling and a clean-VM installer run. The per-item destructive paths remain covered by fixtures and the Rust suite.
+
+## 2g. Real desktop E2E — 2026-11-17
+
+Phase 7 adds a real Windows desktop acceptance harness. It does not weaken or change any production
+safety plan; it drives the compiled Tauri window through WebView2/WebDriver against disposable
+HKCU, project and cache fixtures.
+
+- **Harness:** `npm run test:desktop` builds `desktop_e2e_fixture`, starts `tauri-driver` with the
+  matching `msedgedriver`, runs WebdriverIO through `@wdio/tauri-service`, restores app data and
+  removes fixture keys. Named screenshots, `results.json` and the exact revision are written under
+  `docs/evidence/phase7/`; the full run log stays in gitignored `test-results/desktop/run.log`.
+- **Journeys:** first launch and every destination; inventory search/filter/sort/select; batch and
+  single uninstall; broken-entry registry backup/delete/restore; 1000×680 and 1440×960 light/dark
+  overflow checks; Settings theme persistence across reload; Storage disk-space state; Performance
+  evidence; startup provenance; History records; Hunter confirmation/targeting/Escape.
+- **Real IPC:** no operation result is mocked. Fixture uninstallers are executed, HKCU keys are read
+  back independently, and the registry restore is asserted from the Windows registry.
+- **Fixes:** display-scaled pointer coordinates, stale HKCU fixture residue, a malformed fixture
+  uninstaller command, redirected-profile WebView2 startup and an invalid UIA condition were fixed in
+  the harness.
+
+### Phase 7 verification (this tree)
+
+| Check | Command | Observed |
+|---|---|---|
+| Real desktop suite | `npm run test:desktop` | `DESKTOP_E2E_OK`; 10 journeys passed, 0 failed |
+| Desktop harness build | built automatically by the suite | `desktop_e2e_fixture` example compiled with MSVC |
+| Tested revision | `git rev-parse HEAD` | `3d9f2daddb527492afc578c43dc70c1a7a7ce6f2` plus Phase 7 working tree |
+| Evidence | `docs/evidence/2026-11-17-desktop-e2e.md` | named captures, `results.json`, `revision.json` and explicit limitations |
+
+UNVERIFIED by this harness: 125%/150% OS scaling, the native startup `ask` dialog under WebDriver,
+real cache cleanup and quarantine execution, AI/project cleanup, duplicate/treemap interaction,
+Explorer verbs and Store/MSI removal. The dedicated UIA helper exists, but those native/external
+windows were not completed in this run. See the receipt for the exact list. Installer/relaunch was
+closed separately in the Phase 8 packaging pass below.
+
+## 2h. Phase 8 independent audit, packaging and installer verification — 2026-11-17
+
+The final audit compiled and packaged the current tree, then exercised the real per-user installer.
+The packaging pass added no application behavior; the audit's separately tested safety fixes are
+listed in [the release audit](docs/RELEASE_AUDIT_2026-11-17.md#defects-found-and-fixed-in-this-audit).
+Signing and real application removal remain release blockers.
+
+- **Suites:** 100 frontend tests in 12 files, typecheck, `DOCS_CHECK`, 261 Rust tests (4 ignored),
+  cleanup and 8-scenario RC1 fixtures, Hunter benchmark, and 10/10 real WebView2 desktop journeys.
+- **Bundles:** `build:unsigned` exit 0; `RELEASE_BUNDLES_OK`; `WINDOWS_METADATA_OK`; all three
+  artifacts `NotSigned` (`verify:signatures` exits 1 by design for this RC). The local Chryypt
+  certificate chain is `UntrustedRoot`. The published `v0.1.0` NSIS hash matches its
+  `SHA256SUMS.txt` but the asset is `NotSigned`.
+- **Installer:** NSIS install 1.07 s, repair 1.02 s, uninstall 1.24 s; install directory and HKCU
+  uninstall entry created and removed correctly; installed app launched, responded and exited 0;
+  reinstall after uninstall succeeded; 0 app-data hash changes and quarantine sentinels preserved.
+- **MSI:** unelevated `msiexec /qn` returned 1603 / error 1925. The per-machine package needs an
+  elevated install test; it did not install anything unelevated.
+- **Evidence:** [installer receipt](docs/evidence/2026-11-17-installer-release.md),
+  [installed-app capture](docs/evidence/phase8/34-installed-launch.png), and
+  [final matrix](docs/RELEASE_AUDIT_2026-11-17.md#final-pass-fail-unverified-feature-matrix).
+
 ## 3. Verification — Phase 1 tree, 2026-11-16
 
 | Check | Command | Observed |
@@ -170,9 +252,10 @@ installer test remain unexercised.
    Either obtain a publicly trusted Authenticode certificate or label every artifact explicitly as
    unsigned/self-signed in release notes. Files: `docs/BUILD_AND_SIGNING.md`,
    `docs/CODE_SIGNING_POLICY.md`, `scripts/sign-build.ps1`, `.github/workflows/release.yml`.
-2. **Re-run release verification after the next build.** The published bundles predate the fixes in
-   this audit and the Phase 2/3 changes. Run `build:unsigned`, `verify:signatures`, `verify:metadata`,
-   and `verify-release-bundles.mjs`, then test install/uninstall on a clean Windows VM.
+2. **Run an elevated MSI and clean-VM/version-upgrade test.** The NSIS current-user install,
+   repair and uninstall path passed on this machine, but the WiX MSI is per-machine and returned
+   error 1925 without elevation. Test the MSI elevated, then a version-to-version upgrade and a
+   clean Windows VM install. Files: `src-tauri/tauri.conf.json`, `docs/RELEASE_CHECKLIST.md`.
 3. **Verify native Store and MSI removal end to end.** Use a disposable Windows profile and a
    disposable MSI package. Confirm the Store plan revalidates identity, `RemovePackageAsync`
    reports truthfully, a denied current-user removal is not escalated, and 1605/1614 do not become
@@ -227,9 +310,10 @@ installer test remain unexercised.
 
 ## 6. Next step
 
-The combined tree now passes typecheck, 100 frontend tests, the full Rust suite, documentation checks,
-the production frontend build and the native design-system/Performance/Projects reviews recorded above.
-Remaining release blockers are the unexercised live Store/MSI paths and signing trust. Commit and push
-this tree so CI can prove the documentation and design gates on a clean clone, then run the release
-checks; do not call Store/MSIX removal or elevated performance tracing verified until those runs are
-recorded.
+The combined tree now passes typecheck, 100 frontend tests, 261 Rust tests, documentation checks, the
+production frontend build, ten real desktop journeys, and the NSIS install/repair/uninstall/reinstall
+path. Remaining release blockers are public signing trust and the unexercised live vendor/MSI/Store
+paths; elevated MSI, cross-version upgrade, 125%/150% scaling and elevated performance tracing are
+still UNVERIFIED. Commit and push this tree so CI can prove the gates on a clean clone, then obtain a
+publicly trusted certificate and run the remaining native release checks. Do not call Store/MSIX
+removal, elevated performance tracing or the MSI install path verified until those runs are recorded.

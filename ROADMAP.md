@@ -95,6 +95,20 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 - Added keyboard-visible focus, dialog focus trapping, Escape return, reduced-motion support, responsive minimum-width layouts and intentional long-value truncation.
 - Consolidated the design rules in [docs/DESIGN.md](docs/DESIGN.md) and committed selected native evidence in [the design receipt](docs/evidence/2026-11-17-design-system.md).
 
+### Phase 6 UI — Workflow UX Completion (`[x]`)
+- Applied the shared shell and components to Home, Applications, Storage & Cleanup, Performance, History & Recovery, Settings and Hunter.
+- Made initial measurement and preview states describe their real scope, disabled redundant actions while work runs, and removed stale preview content.
+- Recorded cleanup stops and failures that already moved files as **partial**, with rendering in Activity, Home and the Recovery log.
+- Fixed the document-level scroll trap, the hidden Recovery outcome at minimum width and the gap in Home's system summary.
+- Added reversible-startup explanation and copy confirmation in Settings; committed native minimum-width and dark-theme captures in [the workflow receipt](docs/evidence/2026-11-17-workflow-ux.md).
+
+### Phase 7 UI — Real Desktop E2E and Visual Acceptance (`[x]`)
+- Added `npm run test:desktop`: WebdriverIO + `@wdio/tauri-service` + `tauri-driver` driving the compiled Tauri/WebView2 executable.
+- Added disposable HKCU, startup, project, analyzer and cache fixtures with app-data backup/restore and deterministic teardown.
+- Exercised first launch, all destinations, inventory controls, single and batch uninstall, broken-entry registry backup/restore, Settings persistence, Storage/Performance/History states, startup provenance and Hunter Mode.
+- Verified 1000×680 and 1440×960, light/dark, and no horizontal document overflow; captured named evidence and machine-readable results.
+- Recorded unverified paths explicitly: 125%/150% OS scaling, native startup confirmation, installer/relaunch, real cache/project cleanup, duplicate/treemap interaction, Explorer verbs and Store/MSI removal.
+
 ---
 
 ## Upcoming Milestones

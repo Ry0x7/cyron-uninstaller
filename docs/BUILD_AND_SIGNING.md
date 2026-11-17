@@ -55,7 +55,7 @@ npm run verify:metadata
 ```
 
 ### Build Types Explained:
-- **`npm run build:desktop`**: Invokes `tauri build --debug --no-bundle`. Emits `src-tauri/target/debug/cyron.exe`. Because this is a debug build, it targets Tauri's `devUrl` and expects Vite (`npm run dev`) to serve frontend assets.
+- **`npm run build:desktop`**: Invokes `tauri build --debug --no-bundle`. Emits `src-tauri/target/debug/cyron.exe` with embedded production assets; it runs standalone and is the executable used by the desktop E2E suite. The debug profile is not an optimized release build.
 - **`npm run build:unsigned`**: Builds optimized release binaries with embedded frontend assets into NSIS and WiX MSI installers under `src-tauri/target/release/bundle/`. Artifacts are unsigned (`UNSIGNED_RC`).
 - **`npm run build:signed`**: Builds release bundles and invokes `scripts/sign-build.ps1` to sign `cyron.exe`, NSIS setup, and WiX MSI packages with the Chryypt Organization code signing certificate (`CHRYYPT_SIGNED`).
 
@@ -113,9 +113,25 @@ Windows metadata is enforced consistently across all artifacts and audited autom
 - **MSI UpgradeCode**: `{C2BCD648-205F-5904-9E5C-85726E376EC2}`
 
 ### Generated Release Bundles:
-- **NSIS Setup**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.1.0_x64-setup.exe`
-- **WiX MSI Package**: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.1.0_x64_en-US.msi`
+- **NSIS Setup (current user)**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.1.0_x64-setup.exe`
+- **WiX MSI Package (per machine)**: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.1.0_x64_en-US.msi`
 - **Standalone Binary**: `src-tauri/target/release/cyron.exe`
+
+The WiX package is per-machine and its install requires administrator elevation. The NSIS package
+installs per user under `%LOCALAPPDATA%\Cyron Uninstaller` and is the verified per-user path.
+
+### Verified Audit Build (2026-11-17)
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| NSIS setup | 2,271,846 | `16a378226f6162baa93373830817bb20df65c59e3f9ae589f34b15dbbdec479f` |
+| WiX MSI | 3,330,048 | `3f1e64a7594fba9df4fbecfb7537bde36175dd11166ac6fc346ebe88b6612630` |
+| `cyron.exe` | 6,918,144 | `95c3f7effec7ce3ff9a922997f8bc3ccb275ead8df88167d07f7dd0268ca20d4` |
+
+`RELEASE_BUNDLES_OK` and `WINDOWS_METADATA_OK` passed. The NSIS package was installed, repaired,
+relaunched, uninstalled and reinstalled with app data preserved. All three artifacts were
+`NotSigned`, so `verify:signatures` exited 1 by design. See
+[the installer receipt](evidence/2026-11-17-installer-release.md).
 
 ---
 
@@ -129,6 +145,11 @@ Windows metadata is enforced consistently across all artifacts and audited autom
    - Proves unsigned files are rejected.
    - Proves tampered signed files fail cryptographic hash validation.
    - Proves binaries signed with mismatched certificate subjects are rejected.
+
+An unsigned `UNSIGNED_RC` build is expected to fail artifact verification (all three release files
+report `NotSigned`). The 2026-11-17 audit also confirmed that the local `CN=Chryypt Organization`
+certificate chain reports `UntrustedRoot`, and that the published `v0.1.0` NSIS asset is `NotSigned`.
+Passing negative tests do not establish public trust.
 
 ---
 

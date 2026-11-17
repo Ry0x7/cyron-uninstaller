@@ -69,7 +69,7 @@ Rules:
 
 ## States
 
-Every surface must cover the states it can actually reach: loading, empty, error/stale, disabled, in-progress, success and recovery. Loading skeletons should match the final layout. Errors name the problem and the next action. Empty states explain how to fill the surface.
+Every surface must cover the states it can actually reach: loading, empty, error/stale, disabled, in-progress, success, partial and recovery. Loading skeletons should match the final layout. Errors name the problem and the next action. Empty states explain how to fill the surface. A run that moved some files is **partial**; it is never described as completed or as a clean cancellation.
 
 ## Accessibility
 

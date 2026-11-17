@@ -22,7 +22,9 @@ Every public release candidate must satisfy all verification gates before packag
 - [ ] **Desktop Smoke Test**: `node scripts/smoke-desktop.mjs` outputs `DESKTOP_SMOKE_OK`.
 - [ ] **Release Installer Bundles**: `node scripts/verify-release-bundles.mjs` outputs `RELEASE_BUNDLES_OK`.
 - [ ] **Windows Metadata Consistency**: `npm run verify:metadata` outputs `WINDOWS_METADATA_OK`.
-- [ ] **Authenticode Signature & Negative Integrity**: `npm run verify:signatures` outputs `SIGNATURES_VERIFIED_OK`.
+- [ ] **Authenticode Signature & Negative Integrity**: `npm run verify:signatures` outputs `SIGNATURES_VERIFIED_OK` for a signed release. An `UNSIGNED_RC` build is expected to fail with `NotSigned` and must not be published as trusted.
+- [ ] **NSIS Installer Exercise**: install `/S`, relaunch, repair `/S`, uninstall `/S`, reinstall `/S`; confirm the HKCU uninstall entry, install directory and `%APPDATA%\dev.cyron.uninstaller` survive/behave as expected. The 2026-11-17 run passed; see [the installer receipt](evidence/2026-11-17-installer-release.md).
+- [ ] **MSI Elevation Gate**: the WiX package is per-machine. An unelevated `/qn` run correctly returns 1603 / error 1925; an elevated install/uninstall remains required before claiming MSI support.
 
 ---
 
@@ -56,8 +58,8 @@ Cyron generates two distinct Windows installer packages via Tauri v2 bundler:
    - Embeds application metadata, uninstaller hooks, and desktop/start menu shortcuts.
 2. **WiX Windows Installer Package (`.msi`)**:
    - Location: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_<version>_x64_en-US.msi`
-   - Configured for enterprise deployment and Windows Installer management.
-   - UpgradeCode is permanently locked to `{C2BCD648-205F-5904-9E5C-85726E376EC2}` to ensure seamless in-place upgrades.
+   - Configured for per-machine enterprise deployment and Windows Installer management; installation requires administrator elevation.
+   - UpgradeCode is permanently locked to `{C2BCD648-205F-5904-9E5C-85726E376EC2}` for in-place upgrades. The `0.1.0` MSI was not installed or upgrade-tested; only its metadata and unelevated refusal were verified.
 3. **Standalone Portable Executable**:
    - Location: `src-tauri/target/release/cyron.exe`
 
@@ -91,3 +93,4 @@ During in-place upgrades:
   1. Populate mock scan history and a quarantine batch in `%APPDATA%\dev.cyron.uninstaller\`.
   2. Run the `N+1` installer.
   3. Launch Cyron and verify that history, quarantine batches, and settings remain intact.
+- **Current evidence:** the `0.1.0` NSIS same-version repair/reinstall preserved 0 app-data hashes and quarantine sentinels. A real `N` → `N+1` upgrade, downgrade and clean-VM run remain open release gates.

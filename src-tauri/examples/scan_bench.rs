@@ -50,14 +50,16 @@ struct Args {
     method: Method,
     runs: u32,
     json_only: bool,
+    cancel_after_ms: Option<u64>,
 }
 
 fn usage() -> &'static str {
-    "scan_bench --path <absolute path> [--method directory|mft|auto] [--runs N] [--json]\n\
+    "scan_bench --path <absolute path> [--method directory|mft|auto] [--runs N] [--cancel-after-ms N] [--json]\n\
      \n\
      Measures the read-only directory walk and, where supported (NTFS + administrator),\n\
-     the MFT scanner. Emits one JSON object per run on stdout; --json hides the human\n\
-     summary on stderr."
+     the MFT scanner. --cancel-after-ms requests cancellation after N milliseconds and\n\
+     reports the observed return latency. Emits one JSON object per run on stdout;\n\
+     --json hides the human summary on stderr."
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -66,6 +68,7 @@ fn parse_args() -> Result<Args, String> {
     let mut method = Method::Auto;
     let mut runs: u32 = 3;
     let mut json_only = false;
+    let mut cancel_after_ms: Option<u64> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -82,6 +85,16 @@ fn parse_args() -> Result<Args, String> {
                 runs = value
                     .parse::<u32>()
                     .map_err(|_| format!("--runs must be a number, got {value:?}"))?;
+            }
+            "--cancel-after-ms" => {
+                let value = args
+                    .next()
+                    .ok_or("--cancel-after-ms needs a value")?;
+                cancel_after_ms = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| format!("--cancel-after-ms must be a number, got {value:?}"))?,
+                );
             }
             "--json" => json_only = true,
             "--help" | "-h" => {
@@ -104,6 +117,7 @@ fn parse_args() -> Result<Args, String> {
         method,
         runs: runs.clamp(1, 50),
         json_only,
+        cancel_after_ms,
     })
 }
 
@@ -126,18 +140,32 @@ struct Measurement {
     files: u64,
     dirs: u64,
     bytes: u64,
+    allocated: u64,
+    deduped: u64,
+    skipped_reparse: u64,
     elapsed_ms: u64,
     cancelled: bool,
     method_note: Option<String>,
 }
 
-fn measure_directory(path: &Path, job_id: &str) -> Result<Measurement, String> {
+fn measure_directory(
+    path: &Path,
+    job_id: &str,
+    cancel_after_ms: Option<u64>,
+) -> Result<Measurement, String> {
     let options = ScanOptions {
         include_hidden: true,
         collect_tree: true,
         ..ScanOptions::default()
     };
     let cancel = Arc::new(AtomicBool::new(false));
+    if let Some(ms) = cancel_after_ms {
+        let flag = Arc::clone(&cancel);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+    }
     let no_progress = |_progress: ScanProgress| {};
     let started = Instant::now();
     let result = scan::scan_directory(job_id, path, &options, cancel, &no_progress);
@@ -146,19 +174,33 @@ fn measure_directory(path: &Path, job_id: &str) -> Result<Measurement, String> {
         files: result.file_count,
         dirs: result.dir_count,
         bytes: result.total_size,
+        allocated: result.total_allocated,
+        deduped: result.deduped_files,
+        skipped_reparse: result.skipped_reparse,
         elapsed_ms: started.elapsed().as_millis() as u64,
         cancelled: result.cancelled,
         method_note: None,
     })
 }
 
-fn measure_mft(path: &Path, job_id: &str) -> Result<Measurement, String> {
+fn measure_mft(
+    path: &Path,
+    job_id: &str,
+    cancel_after_ms: Option<u64>,
+) -> Result<Measurement, String> {
     let options = ScanOptions {
         include_hidden: true,
         collect_tree: true,
         ..ScanOptions::default()
     };
     let cancel = Arc::new(AtomicBool::new(false));
+    if let Some(ms) = cancel_after_ms {
+        let flag = Arc::clone(&cancel);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+    }
     let no_progress = |_progress: ScanProgress| {};
     let started = Instant::now();
     let outcome = mft::scan(job_id, path, &options, cancel, &no_progress)?;
@@ -167,28 +209,36 @@ fn measure_mft(path: &Path, job_id: &str) -> Result<Measurement, String> {
         files: outcome.file_count,
         dirs: outcome.dir_count,
         bytes: outcome.total_size,
+        allocated: outcome.total_allocated,
+        deduped: outcome.deduped_files,
+        skipped_reparse: outcome.skipped_reparse,
         elapsed_ms: started.elapsed().as_millis() as u64,
         cancelled: outcome.cancelled,
         method_note: None,
     })
 }
 
-fn measure(path: &Path, method: Method, job_id: &str) -> Result<Measurement, String> {
+fn measure(
+    path: &Path,
+    method: Method,
+    job_id: &str,
+    cancel_after_ms: Option<u64>,
+) -> Result<Measurement, String> {
     match method {
-        Method::Directory => measure_directory(path, job_id),
-        Method::Mft => measure_mft(path, job_id),
+        Method::Directory => measure_directory(path, job_id, cancel_after_ms),
+        Method::Mft => measure_mft(path, job_id, cancel_after_ms),
         Method::Auto => match mft::support(path) {
-            Ok(()) => match measure_mft(path, job_id) {
+            Ok(()) => match measure_mft(path, job_id, cancel_after_ms) {
                 Ok(measurement) => Ok(measurement),
                 Err(error) => {
-                    let mut fallback = measure_directory(path, job_id)?;
+                    let mut fallback = measure_directory(path, job_id, cancel_after_ms)?;
                     fallback.method_note =
                         Some(format!("MFT scan failed ({error}); measured directory walk"));
                     Ok(fallback)
                 }
             },
             Err(note) => {
-                let mut fallback = measure_directory(path, job_id)?;
+                let mut fallback = measure_directory(path, job_id, cancel_after_ms)?;
                 fallback.method_note = Some(format!("MFT unavailable ({note}); used directory walk"));
                 Ok(fallback)
             }
@@ -215,7 +265,7 @@ fn main() {
 
     for run in 1..=args.runs {
         let job_id = format!("bench-{}-{run}", std::process::id());
-        let measured = match measure(&args.path, args.method, &job_id) {
+        let measured = match measure(&args.path, args.method, &job_id, args.cancel_after_ms) {
             Ok(measurement) => measurement,
             Err(error) => {
                 eprintln!("scan_bench: run {run} failed: {error}");
@@ -233,9 +283,13 @@ fn main() {
                 "files": measured.files,
                 "dirs": measured.dirs,
                 "bytes": measured.bytes,
+                "allocatedBytes": measured.allocated,
+                "dedupedFiles": measured.deduped,
+                "skippedReparse": measured.skipped_reparse,
                 "elapsedMs": measured.elapsed_ms,
                 "peakWorkingSetBytes": peak,
                 "cancelled": measured.cancelled,
+                "cancelAfterMs": args.cancel_after_ms,
                 "methodNote": measured.method_note,
             })
         );

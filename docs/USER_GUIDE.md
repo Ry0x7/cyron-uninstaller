@@ -111,7 +111,7 @@ Tool cache cleanup for Claude Code, Codex, Gemini CLI, Cursor, VS Code, Antigrav
 
 ## 6. History & Recovery
 
-History & Recovery has two tabs. **Activity** lists past scans and cleanup outcomes; **Recovery** manages quarantined batches and the cleanup log.
+History & Recovery has two tabs. **Activity** lists past scans and cleanup outcomes; **Recovery** manages quarantined batches and the cleanup log. A run that was stopped or failed after moving some files is labelled **Partial**; the files already moved stay in quarantine and can be restored from **Recovery**.
 - **Inspect Batches**: View quarantined files, original paths, file sizes, creation timestamps, and associated `.reg` registry backups.
 - **Restore Batch**: Safely returns quarantined files to their original directories and supports in-app `.reg` registry restoration via verified import. Existing files are never overwritten.
 - **Purge Batch**: Permanently deletes files inside the batch folder and removes the quarantine record once confirmed. This is the only way a quarantine batch is permanently removed.

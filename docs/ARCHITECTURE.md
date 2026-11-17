@@ -21,7 +21,8 @@ communication for non-technical users.
 | Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
 | Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json`, `recovery_journal.jsonl` and `quarantine/` in the Tauri app-data dir |
 | Frontend tests | Vitest, 100 tests in 12 files |
-| Backend tests | `cargo test`: 253 passed (210 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
+| Desktop E2E | WebdriverIO + `@wdio/tauri-service` + `tauri-driver` + matching `msedgedriver`, driving the compiled Tauri/WebView2 window; 10 journeys in 2 spec files |
+| Backend tests | `cargo test`: 261 passed (218 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
 
 Native APIs used by the backend:
 
@@ -249,7 +250,7 @@ CacheInventory     targets[], totalSize, totalSafe, totalCaution, totalProtected
                    scannedAt, warnings[]
 
 HistoryEntry       id, kind, title, detail, at, bytes, items,
-                   status(completed|cancelled|failed)
+                   status(completed|partial|cancelled|failed)
 
 CleanupSpec        id, tool, label, risk, category, note, impact, path      (backend only)
 CleanupPlan        planId, specs[], expiresAt, readOnly, exclusions[], expectedFiles,
@@ -267,7 +268,7 @@ QuarantineBatch    runId, createdAt, expiresAt, bytes, fileCount, dir, targetIds
 RestoreReport      runId, restored, skipped, failed, errors[]
 PurgeReport        runId, removedFiles, freedBytes
 CleanupLogEntry    id, at, title, targets[], bytes, files, quarantined, skipped,
-                   failed, status(completed|cancelled|failed), detail
+                   failed, status(completed|partial|cancelled|failed), detail
 ```
 
 `size` is logical file length. `allocated` is the allocation from the native directory record or
@@ -631,18 +632,18 @@ measurements and are not logged.
 ## Performance characteristics and limits
 
 Scans run off the UI thread via `spawn_blocking`; the UI receives throttled counters and the final
-pruned result. Measured on the development machine (warm cache, one run):
+pruned result. The most recent three-run, unelevated measurements are in
+[docs/BENCHMARKS.md](BENCHMARKS.md). This table reproduces them:
 
-| Target | Method | Time | Peak working set |
+| Target | Method | Median | Peak working set |
 | --- | --- | ---: | ---: |
-| `C:\` | MFT (elevated) | 14.52 s | 655.5 MiB |
-| `C:\` | directory walk | 155.24 s | 50.8 MiB |
-| `C:\Windows\System32` | MFT (elevated, whole-volume filter) | 3.91 s | 571.9 MiB |
-| `C:\Windows\System32` | directory walk | 0.28 s | 7.8 MiB |
+| `C:\Windows\System32` | directory walk | 0.21 s | 8.4 MiB |
+| `node_modules` (repo) | directory walk | 0.36 s | 11.1 MiB |
+| `src` (repo) | directory walk | 0.00 s | 5.5 MiB |
 
-MFT trades memory for speed and only pays off at a drive root. The walk is streaming and bounded
-but slower; neither is a WizTree comparison. Details and caveats are in
-[docs/BENCHMARKS.md](BENCHMARKS.md).
+MFT requires an elevated process and was not measured in that run, so no MFT timing is claimed
+here. MFT trades memory for speed and only pays off at a drive root. The walk is streaming and
+bounded but slower; neither is a WizTree comparison.
 
 ## Testing and CI
 
@@ -654,6 +655,7 @@ but slower; neither is a WizTree comparison. Details and caveats are in
 - `examples/cleanup_fixture.rs` + `scripts/verify-cleanup.mjs` — end-to-end plan → quarantine → restore → purge against `%TEMP%\cyron-cleanup-<pid>`, printing `CLEANUP_FIXTURE_OK`.
 - `tests/stress_scan.rs` — 20,000-file wide directory with exact totals and bounded children, deep nesting, access-denied folders, exclusion subtree and cancellation.
 - `tests/performance.rs` and `perf::tests` — live read-only snapshot consistency, CPU accounting, command parsing, exact executable-to-boot-event matching, scheduled-task provenance, evidence on every recommendation, an idle-disk/high-process-I/O non-recommendation, and baseline persistence.
+- `tests/desktop/*.spec.mjs` + `scripts/desktop-e2e.mjs` — real Windows desktop E2E. Builds the disposable fixture, starts `tauri-driver`/`msedgedriver`, drives the compiled Tauri WebView2 window, exercises real IPC and destructive plans, and records named screenshots, JSON results and the tested revision. `npm run test:desktop` runs the suite; `node scripts/desktop-uia.ps1` exposes Windows UI Automation for native dialogs.
 - `.github/workflows/ci.yml` & `release.yml` — Windows CI for typecheck, Vitest, frontend build, `cargo test`, security and cleanup-stress suites, release packaging, checksum generation, and GitHub release automation.
 - `scripts/verify-dist.mjs`, `verify-desktop-binary.mjs`, `smoke-desktop.mjs`, `verify-release-bundles.mjs`, `bench-scan.mjs` — artefact verification, desktop launch smoke checks, and release bundle verification.
 
