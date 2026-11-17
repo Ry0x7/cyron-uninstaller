@@ -116,6 +116,60 @@ describe("Cyron desktop secondary journeys and visual matrix", () => {
     await screenshot("30-history-records.png");
   });
 
+  it("spike capture and kernel/driver evidence render from live data", async () => {
+    await nav("Performance");
+    await waitText("Catch a short spike", 60_000);
+    await waitText("Kernel, drivers & recent changes", 60_000);
+    await noHorizontalOverflow("Performance diagnostics");
+
+    const evidence = await browser.execute(() => {
+      const overview = document.querySelector(".perf-kernel-overview")?.innerText ?? "";
+      return {
+        overview,
+        drivers: document.querySelectorAll(".perf-driver-list li").length,
+        eventBlock:
+          document.querySelector(".perf-diagnostics-grid .perf-evidence-block:last-child")
+            ?.innerText ?? "",
+      };
+    });
+    const listed = Number(evidence.overview.match(/Drivers listed\s+(\d+)/)?.[1] ?? NaN);
+    assert.ok(Number.isFinite(listed), `driver count not readable: ${evidence.overview}`);
+    assert.equal(evidence.drivers, Math.min(listed, 8));
+    assert.match(evidence.eventBlock, /Driver and device errors from the last 7 days/);
+
+    await browser.execute(() =>
+      document.querySelector(".perf-diagnostics-grid")?.scrollIntoView({ block: "center" }),
+    );
+    await browser.pause(250);
+    await screenshot("34-kernel-driver-evidence.png");
+
+    await clickButton("CPU spikes / kernel time");
+    await waitText("Separate kernel and driver work from applications");
+    await clickButton("Record 20 seconds");
+    await waitText("of 20 readings", 30_000);
+    await browser.waitUntil(
+      async () =>
+        browser.execute(() => document.querySelectorAll(".spike__bar").length > 0),
+      { timeout: 15_000, timeoutMsg: "spike capture produced no readings" },
+    );
+    await clickButton("Stop capture");
+    await waitText("Peak kernel", 15_000);
+
+    const spike = await browser.execute(() => document.querySelector(".spike")?.innerText ?? "");
+    assert.match(spike, /Peak CPU/);
+    assert.match(spike, /Peak kernel/);
+    assert.match(spike, /Largest process/);
+    assert.match(
+      spike,
+      /No material spike|Kernel\/driver activity|accounted for most|physical disk was|no single dominant/,
+    );
+    await browser.execute(() =>
+      document.querySelector(".spike")?.scrollIntoView({ block: "center" }),
+    );
+    await browser.pause(250);
+    await screenshot("35-spike-capture.png");
+  });
+
   it("startup inventory shows real provenance for the disposable entry", async () => {
     await nav("Performance");
     await waitText("Startup and scheduled tasks", 60_000);

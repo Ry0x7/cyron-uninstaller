@@ -675,3 +675,8 @@ per-user installer. The final PASS/FAIL/UNVERIFIED matrix is in
   CHECK: review [docs/RELEASE_AUDIT_2026-11-17.md](docs/RELEASE_AUDIT_2026-11-17.md)
   EXPECT: every area is PASS, FAIL or UNVERIFIED with evidence; production readiness is not claimed
   EVIDENCE: PASS. Verdict: **NOT PRODUCTION READY — release blocked** on public signing trust, real vendor/MSI/Store removal, elevated diagnostics, DPI/accessibility and unrun competitor comparisons.
+
+- [x] G107: the native Performance page drives the 20-second spike capture and the kernel/driver evidence panels against live Windows data.
+  CHECK: `npm run build:desktop`; `npm run test:desktop` with the `spike capture and kernel/driver evidence render from live data` journey
+  EXPECT: the rendered driver rows match the overview count; the System-event panel states its provenance; the capture renders its readings and peak CPU/kernel/disk/process summary with a bounded verdict; no horizontal overflow
+  EVIDENCE: PASS on 2026-11-18. 11/11 desktop journeys passed in 20 m 08 s (`DESKTOP_E2E_OK`); the new journey passed in 55.6 s. The page listed 4 drivers (AMD Radeon RX 9060 XT, Intel Ethernet I225-V, TP-Link USB adapter, disk drive) and the count matched the rows; 0 recent System events were reported as such; the 20-reading capture showed peak CPU 42%, kernel 14%, disk 0.4%, `brave.exe` and a mixed verdict. See [the receipt](docs/evidence/2026-11-18-desktop-performance.md), [driver evidence](docs/evidence/2026-11-18-native/34-kernel-driver-evidence.png) and [spike result](docs/evidence/2026-11-18-native/35-spike-capture.png). Early stop, a live kernel-dominant spike and the elevated paths remain UNVERIFIED.

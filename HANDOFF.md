@@ -1,6 +1,6 @@
 # Cyron — Active Handoff
 
-Updated: 2026-11-18 (v0.2.0-rc.2 published as an unsigned GitHub prerelease after a green release workflow; kernel/driver performance diagnostics and batch-eligibility fix; v0.2.0-rc.1 unsigned prerelease; 0.2.0 version bump, release notes and NSIS install/launch/uninstall/reinstall verification; Phase 6-8 feature commits and audit; Phase 7 real desktop E2E, Phase 6 workflow UX, Phase 5, Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
+Updated: 2026-11-18 (native desktop verification of the spike capture and driver evidence; v0.2.0-rc.2 published as an unsigned GitHub prerelease after a green release workflow; kernel/driver performance diagnostics and batch-eligibility fix; v0.2.0-rc.1 unsigned prerelease; 0.2.0 version bump, release notes and NSIS install/launch/uninstall/reinstall verification; Phase 6-8 feature commits and audit; Phase 7 real desktop E2E, Phase 6 workflow UX, Phase 5, Phase 4, Phase 3, Phase 2 and Phase 1 records preserved)
 
 ## 1. Current Verified State
 
@@ -90,8 +90,9 @@ Performance diagnostics are read-only sampling plus one existing reversible star
 | Full Rust suite | `cargo test --manifest-path src-tauri/Cargo.toml` | 255 passed, 4 ignored, 0 failed |
 | Documentation | `npm run docs:check` | `DOCS_CHECK: PASSED` |
 | Native Performance workflow | UIA against the native Tauri debug app | PASS on 2026-11-17: 702 ms sample / 179 processes, 15% CPU, 37% memory, 1.1% disk busy; guide switching; 23 startup entries; disposable startup Cancel/Disable/Enable round trip with 0x03→0x02 bytes; two baselines compared; trace correctly disabled unelevated. See [the receipt](docs/evidence/2026-11-17-performance-diagnostics.md). |
+| Native desktop diagnostics | WebdriverIO against the compiled Tauri/WebView2 app | PASS on 2026-11-18: 11/11 journeys in 20 m 08 s (`DESKTOP_E2E_OK`); the new journey took 55.6 s. 4 live drivers rendered and the overview count matched; 0 recent System events reported as such; the 20-reading capture showed peak CPU 42%, kernel 14%, disk 0.4%, `brave.exe` and a mixed verdict; no horizontal overflow. See [the receipt](docs/evidence/2026-11-18-desktop-performance.md), [driver evidence](docs/evidence/2026-11-18-native/34-kernel-driver-evidence.png) and [spike result](docs/evidence/2026-11-18-native/35-spike-capture.png). |
 
-The native run found and fixed two defects: the manual Refresh was served stale startup evidence for two minutes, and a disk recommendation fired from process I/O while the physical disk was idle. The 2026-11-18 kernel/driver evidence and 20-second capture were verified by Rust tests, `spikeAnalysis.test.ts`, typecheck and a live unelevated snapshot; the new Performance controls themselves have not yet been driven in the native window. UNVERIFIED remains: an elevated Diagnostics-Performance boot-impact reading, a real WPR trace recording/opening, and the native UI for the spike capture.
+The native run found and fixed two defects: the manual Refresh was served stale startup evidence for two minutes, and a disk recommendation fired from process I/O while the physical disk was idle. The 2026-11-18 desktop run then drove the new controls end to end: the driver count matched the rendered inventory, the System-event panel reported its provenance, the sixth guide answered correctly, and a 20-reading capture rendered its peak CPU/kernel/disk/process summary. UNVERIFIED remains: an elevated Diagnostics-Performance boot-impact reading, a real WPR trace recording/opening, a deterministic early-stop assertion, and a live kernel-dominant spike.
 
 ## 2d. Design-system and navigation rebuild — 2026-11-17
 
