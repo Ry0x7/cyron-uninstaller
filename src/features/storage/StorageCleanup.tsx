@@ -33,7 +33,7 @@ export function StorageCleanup({
       <ViewHeader
         title="Storage & Cleanup"
         description="See where space goes and reclaim what can be rebuilt. Files move to quarantine after a preview; source code, credentials, models and personal data stay untouched."
-        meta={<Badge tone="neutral">Read-only until confirmed</Badge>}
+        meta={<Badge tone="neutral">Review before cleanup</Badge>}
         actions={
           <PageTabs<StorageMode>
             ariaLabel="Storage and cleanup sections"

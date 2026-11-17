@@ -27,7 +27,7 @@ function batchTotal(batches: QuarantineBatch[]): number {
 
 function statusTone(status: CleanupLogEntry["status"]): "safe" | "caution" | "danger" | "neutral" {
   if (status === "completed") return "safe";
-  if (status === "cancelled") return "caution";
+  if (status === "partial" || status === "cancelled") return "caution";
   if (status === "failed") return "danger";
   return "neutral";
 }

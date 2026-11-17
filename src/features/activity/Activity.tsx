@@ -65,6 +65,9 @@ function describeEntry(entry: HistoryEntry): string {
     if (entry.status === "cancelled") {
       return `Stopped early. Files moved before the stop stay in quarantine for 7 days`;
     }
+    if (entry.status === "partial") {
+      return `Stopped before every file was handled. Files that moved stay in quarantine for 7 days`;
+    }
     return "No files were moved. Cyron reported the failure instead of retrying blindly";
   }
   return kindLabel(entry.kind);
@@ -72,12 +75,14 @@ function describeEntry(entry: HistoryEntry): string {
 
 const STATUS_TONE: Record<HistoryEntry["status"], BadgeTone> = {
   completed: "safe",
+  partial: "caution",
   cancelled: "caution",
   failed: "danger",
 };
 
 const STATUS_LABEL: Record<HistoryEntry["status"], string> = {
   completed: "Completed",
+  partial: "Partial",
   cancelled: "Cancelled",
   failed: "Failed",
 };

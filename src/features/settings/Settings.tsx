@@ -244,6 +244,7 @@ export function Settings() {
   const [startupLoading, setStartupLoading] = useState(false);
   const [startupError, setStartupError] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [copiedStartup, setCopiedStartup] = useState<string | null>(null);
 
   const loadStartup = () => {
     setStartupLoading(true);
@@ -297,6 +298,21 @@ export function Settings() {
   useEffect(() => {
     loadStartup();
   }, []);
+
+  useEffect(() => {
+    if (!copiedStartup) return;
+    const timer = window.setTimeout(() => setCopiedStartup(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copiedStartup]);
+
+  const copyStartupCommand = async (item: StartupItem) => {
+    try {
+      await navigator.clipboard.writeText(item.command);
+      setCopiedStartup(item.id);
+    } catch (err) {
+      setStartupError(`Could not copy the command: ${errorMessage(err)}`);
+    }
+  };
 
   const resolved = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme;
   const themeSource = settings.theme === "system" ? "Following system preference" : "Chosen manually";
@@ -484,48 +500,62 @@ export function Settings() {
                     {startupLoading ? "Reading startup entries…" : "No startup applications detected."}
                   </p>
                 ) : (
-                  <ul className="set-startup-list">
-                    {startupItems.map((item) => (
-                      <li className="set-startup-item" key={item.id}>
-                        <div className="set-startup-info">
-                          <div className="set-startup-name">
-                            <span className="set-startup-title">{item.name}</span>
-                            <span className="set-startup-badges">
-                              <Badge tone="neutral">{item.location}</Badge>
-                              <Badge tone={item.enabled ? "safe" : "neutral"}>
-                                {item.enabled ? "Enabled" : "Disabled"}
-                              </Badge>
-                              {item.isProtected && <Badge tone="caution">System protected</Badge>}
+                  <>
+                    <p className="set-note set-note--spaced">
+                      Turning an app off keeps its startup entry and only stops Windows from
+                      launching it. You can turn it back on at any time; nothing is deleted.
+                    </p>
+                    <ul className="set-startup-list">
+                      {startupItems.map((item) => (
+                        <li className="set-startup-item" key={item.id}>
+                          <div className="set-startup-info">
+                            <div className="set-startup-name">
+                              <span className="set-startup-title">{item.name}</span>
+                              <span className="set-startup-badges">
+                                <Badge tone="neutral">{item.location}</Badge>
+                                <Badge tone={item.enabled ? "safe" : "neutral"}>
+                                  {item.enabled ? "Enabled" : "Disabled"}
+                                </Badge>
+                                {item.isProtected && (
+                                  <Badge tone="caution">System protected</Badge>
+                                )}
+                              </span>
+                            </div>
+                            <span className="set-startup-cmd" title={item.command}>
+                              {item.command}
                             </span>
                           </div>
-                          <span className="set-startup-cmd" title={item.command}>
-                            {item.command}
-                          </span>
-                        </div>
-                        <div className="set-startup-actions">
-                          {item.canToggle && (
+                          <div className="set-startup-actions">
+                            {item.canToggle && (
+                              <Button
+                                size="sm"
+                                variant={item.enabled ? "secondary" : "primary"}
+                                loading={togglingId === item.id}
+                                onClick={() => handleToggleStartup(item)}
+                              >
+                                {item.enabled ? "Disable" : "Enable"}
+                              </Button>
+                            )}
                             <Button
                               size="sm"
-                              variant={item.enabled ? "secondary" : "primary"}
-                              loading={togglingId === item.id}
-                              onClick={() => handleToggleStartup(item)}
+                              variant="ghost"
+                              icon={
+                                copiedStartup === item.id ? (
+                                  <IconCheck size={12} />
+                                ) : (
+                                  <IconCopy size={12} />
+                                )
+                              }
+                              title="Copy command line"
+                              onClick={() => void copyStartupCommand(item)}
                             >
-                              {item.enabled ? "Disable" : "Enable"}
+                              {copiedStartup === item.id ? "Copied" : "Copy"}
                             </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            icon={<IconCopy size={12} />}
-                            title="Copy command line"
-                            onClick={() => navigator.clipboard.writeText(item.command)}
-                          >
-                            Copy
-                          </Button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 )}
               </Panel>
             )}

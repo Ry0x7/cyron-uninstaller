@@ -141,10 +141,34 @@
   }
 
   .recovery-log__row {
-    grid-template-columns: 120px minmax(0, 1fr) auto auto;
+    grid-template-columns: 104px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "when title badge"
+      "when detail bytes";
+    align-items: start;
+    row-gap: 2px;
+  }
+
+  .recovery-log__when {
+    grid-area: when;
+  }
+
+  .recovery-log__title {
+    grid-area: title;
   }
 
   .recovery-log__detail {
-    display: none;
+    grid-area: detail;
+    font-size: 11px;
+  }
+
+  .recovery-log__bytes {
+    grid-area: bytes;
+    justify-self: end;
+  }
+
+  .recovery-log__row > .badge {
+    grid-area: badge;
+    justify-self: end;
   }
 }

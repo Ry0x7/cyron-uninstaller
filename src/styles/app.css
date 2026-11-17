@@ -12,6 +12,13 @@ body,
   height: 100%;
 }
 
+/* The shell scrolls inside each view slot. Keep the document itself fixed so a
+   stray focus or programmatic scroll can never shift the window onto blank space. */
+html {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
