@@ -1,8 +1,9 @@
-# Cyron — Next Release Notes (unreleased)
+# Cyron — 0.2.0 Release Candidate 1 Notes
 
-**Status: not released. Version number to be assigned.** The 2026-11-17 audit blocks a public
-release until the items in [the audit](RELEASE_AUDIT_2026-11-17.md#outstanding-issues) are closed.
-Nothing here authorizes publishing the current tree.
+**Status: unsigned release candidate (2026-11-18).** The 2026-11-17 audit's trust and native-path
+gaps are still open; this candidate is for testing and must not be described as a publicly trusted
+or warning-free release. The detailed blockers remain in
+[the audit](RELEASE_AUDIT_2026-11-17.md#outstanding-issues).
 
 ## Safety and correctness
 
@@ -37,16 +38,17 @@ Nothing here authorizes publishing the current tree.
 
 ## Packaging and installation
 
-- **NSIS (current user):** verified install (1.07 s), same-version repair (1.02 s), relaunch,
-  uninstall (1.24 s) and reinstall. The install directory and HKCU uninstall entry are created and
-  removed correctly; 0 app-data hash entries changed and quarantine sentinels survived.
+- **NSIS (current user):** 0.2.0 fresh install (1.56 s), launch, uninstall (1.25 s) and
+  reinstall. The install directory and HKCU uninstall entry were created and removed correctly;
+  the 60,024-file app-data tree was unchanged across uninstall and reinstall. Same-version repair
+  and a 0.1.0 → 0.2.0 upgrade were not rerun.
 - **MSI (per machine):** metadata and bundle structure verified. Unelevated execution returns MSI
   error 1925 and installs nothing; an elevated install/uninstall was not performed.
-- **Artifacts from this tree:** NSIS `2,271,846` bytes / `16a378226f6162baa93373830817bb20df65c59e3f9ae589f34b15dbbdec479f`,
-  MSI `3,330,048` bytes / `3f1e64a7594fba9df4fbecfb7537bde36175dd11166ac6fc346ebe88b6612630`,
-  `cyron.exe` `6,918,144` bytes / `95c3f7effec7ce3ff9a922997f8bc3ccb275ead8df88167d07f7dd0268ca20d4`.
+- **Artifacts from this tree:** NSIS `2,270,729` bytes / `705b63787aac117d8c660024a8dd9560f50b1f8225e89a93fa279647ccb4e616`,
+  MSI `3,260,416` bytes / `313a089fca2530719d91768fd3cc1083b4024592b11ad48fa316f4ef2192fe57`,
+  `cyron.exe` `6,918,144` bytes / `ca78b5757e0c4448da8bfe129314117970ba841ab2cb3a93996098d2bb6cebfa`.
 - Full commands, timings, MSI log excerpts and limitations are in
-  [the installer receipt](evidence/2026-11-17-installer-release.md).
+  [the 0.2.0 release receipt](evidence/2026-11-18-release-0.2.0.md).
 
 ## Measurements
 
@@ -56,7 +58,8 @@ Nothing here authorizes publishing the current tree.
 
 ## Known blockers
 
-Unsigned and self-signed installers (the published `v0.1.0` NSIS asset is also `NotSigned`), no
-clean-VM or version-to-version upgrade test, no elevated MSI install, no real MSI/vendor/Store
-removal, unverified elevated diagnostics, unverified 125%/150% scaling and screen-reader paths.
-The installer must not be described as publicly trusted or warning-free.
+The 0.2.0 RC1 artifacts are unsigned and the local certificate is self-signed; the published
+`v0.1.0` NSIS asset is also `NotSigned`. There was no clean-VM or 0.1.0 → 0.2.0 upgrade test, no
+elevated MSI install, no real MSI/vendor/Store removal, and elevated diagnostics, 125%/150% scaling
+and screen-reader paths remain unverified. The installer must not be described as publicly trusted
+or warning-free.

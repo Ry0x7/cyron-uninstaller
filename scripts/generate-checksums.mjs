@@ -3,8 +3,8 @@ import crypto from "node:crypto";
 import path from "node:path";
 
 const files = [
-  "src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.1.0_x64-setup.exe",
-  "src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.1.0_x64_en-US.msi",
+  "src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.2.0_x64-setup.exe",
+  "src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.2.0_x64_en-US.msi",
   "src-tauri/target/release/cyron.exe"
 ];
 

@@ -115,5 +115,7 @@ For the current feature matrix and verified limitations, see [docs/IMPLEMENTATIO
 
 ### Phase 8 — Trusted Signing & Scale (`[ ]`)
 - [x] **Native WinRT Store Package Removal**: Current-user packages are removed through `PackageManager::RemovePackageAsync` after a server-held plan (live removal remains UNVERIFIED; see [IMPLEMENTATION_STATUS](docs/IMPLEMENTATION_STATUS.md)).
+- [x] **0.2.0 RC1 packaging**: unsigned NSIS, MSI and portable EXE built and metadata-verified; the NSIS install, launch, uninstall and reinstall passed with app data preserved. See [the 0.2.0 receipt](docs/evidence/2026-11-18-release-0.2.0.md).
+- [ ] **Public signing trust**: the artifacts remain `NotSigned` and the local certificate is self-signed; this still blocks a trusted production release.
 - [ ] **Multi-Drive Concurrent Scanning**: Parallelized drive root scanning for workstations with multiple physical NVMe/SSD storage volumes.
 - [ ] **Publicly Trusted Release Signing**: Replace the local self-signed development certificate with a publicly trusted Authenticode certificate, or label every release explicitly as unsigned.

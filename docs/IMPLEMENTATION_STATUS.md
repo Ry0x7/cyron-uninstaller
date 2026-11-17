@@ -1,6 +1,6 @@
 # Cyron — Implementation Status
 
-Last updated: 2026-11-17 (Phase 8 independent release audit, release bundle and NSIS installer verification; workflow UX completion; design-system rebuild, performance diagnostics and startup evidence, implementation ledger)
+Last updated: 2026-11-18 (0.2.0 release-candidate build and NSIS verification; Phase 8 independent release audit; workflow UX completion; design-system rebuild, performance diagnostics and startup evidence, implementation ledger)
 
 ## Summary
 
@@ -20,10 +20,10 @@ Cyron Uninstaller is a verified Tauri v2 desktop application on Windows 10/11 x6
 - Crash-consistent recoverable quarantine with durable write-ahead recovery journal (`recovery_journal.jsonl` with `sync_all`), atomic Win32 `MoveFileExW` no-overwrite restoration, and manifest-scoped purging.
 - Windows Explorer context menu integration (`HKCU\Software\Classes`) with safe argument routing.
 - Standardized Windows PE VERSIONINFO, WiX MSI properties, and NSIS installer headers (`WINDOWS_METADATA_OK`).
-- Local Chryypt Organization self-signed signing pipeline. Cryptographic integrity is separate from public trust: the published `v0.1.0` installer and current local release artifacts are `NotSigned`, and the certificate is self-signed.
+- Local Chryypt Organization self-signed signing pipeline. Cryptographic integrity is separate from public trust: the published `v0.1.0` installer and the 0.2.0 RC1 artifacts are `NotSigned`, and the certificate is self-signed.
 - Evidence-bound performance diagnostics: live CPU, memory, PDH disk, process, startup and scheduled-task evidence; reversible startup toggles behind a native confirmation; local before/after baselines; optional administrator-only WPR trace; no placebo tuning.
 - Five-destination Windows-native interface (Home, Applications, Storage & Cleanup, Performance, History & Recovery) with Settings in the sidebar footer, a shared token/primitive system, keyboard-visible focus, dialog focus trapping and reduced-motion support.
-- Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`). The per-user NSIS package was installed, repaired, relaunched, uninstalled and reinstalled with app data preserved; the MSI is per-machine and still requires an elevated install test.
+- Verified release packaging: NSIS setup installer, WiX MSI package, and standalone executable (`RELEASE_BUNDLES_OK`). The 0.2.0 RC1 per-user NSIS package was installed, launched, uninstalled and reinstalled with app data preserved; same-version repair was verified on 0.1.0. The MSI is per-machine and still requires an elevated install test.
 
 Historical narratives and early acceptance logs for Phases 1–3 are preserved in [docs/archive/PHASE_HISTORY.md](archive/PHASE_HISTORY.md).
 
@@ -33,7 +33,7 @@ The independent audit is recorded in [docs/RELEASE_AUDIT_2026-11-17.md](RELEASE_
 
 - **Passed in this tree:** 100 frontend tests in 12 files; typecheck; `DOCS_CHECK`; 261 Rust tests passed with 4 ignored; cleanup and 8-scenario RC1 fixtures; 10 real desktop WebView2 journeys; Cyron-only three-run scanner measurements.
 - **Fixed:** Force Delete junction retargeting and path-only TOCTOU, cross-volume quarantine dropping links, manifest-scoped restore escape, PID-reuse window during graceful termination, and provider definitions labelling protected data as `caution`.
-- **Packaging and installer:** NSIS setup and WiX MSI built with hashes recorded; metadata audit passed; the per-user NSIS install, same-version repair, relaunch, uninstall and reinstall all passed, with 0 app-data hash changes and quarantine sentinels preserved. The MSI returns MSI error 1925 without elevation and was not installed elevated. See [the installer receipt](evidence/2026-11-17-installer-release.md).
+- **Packaging and installer:** NSIS setup and WiX MSI built with hashes recorded; metadata audit passed. The 0.1.0 audit verified same-version repair; the 0.2.0 RC1 fresh install, launch, uninstall and reinstall passed with the 60,024-file app-data tree unchanged. The MSI returns MSI error 1925 without elevation and was not installed elevated. See [the 0.1.0 installer receipt](evidence/2026-11-17-installer-release.md) and [the 0.2.0 RC1 receipt](evidence/2026-11-18-release-0.2.0.md).
 - **Release blockers:** the local installer is unsigned and not publicly trusted (the published `v0.1.0` NSIS asset is also `NotSigned`); real MSI, vendor and Store/MSIX removal are unverified; elevated MSI and cross-version upgrade/downgrade are unverified; elevated MFT, boot-impact and WPR paths are unverified; 125%/150% scaling and screen-reader traversal are unverified.
 - **Competitors:** no competitor product was installed or run. [docs/COMPETITOR_COMPARISON.md](COMPETITOR_COMPARISON.md) is a documented-capability matrix and marks every comparative scenario **NOT RUN**.
 
