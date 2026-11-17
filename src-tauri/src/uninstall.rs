@@ -473,6 +473,62 @@ pub fn to_public_plan(plan: &StoredUninstallPlan) -> UninstallPlan {
     }
 }
 
+/// Selects the only command a batch may run for an application. The batch
+/// queue is deliberately limited to registered Win32 uninstallers: Store
+/// packages have their own package plan, Steam games are removed by Steam, and
+/// portable or broken entries have no vendor command at all.
+pub fn batch_uninstall_command<'a>(
+    app: &'a crate::apps::InstalledApp,
+    quiet: bool,
+) -> Result<&'a str, String> {
+    if app.is_protected {
+        return Err("Windows-protected applications cannot be batch uninstalled.".into());
+    }
+    match app.source.as_str() {
+        "store" => return Err("Store packages must be removed individually.".into()),
+        "steam" => {
+            return Err("Steam games are removed through Steam, not the batch queue.".into())
+        }
+        "portable" => {
+            return Err(
+                "Portable applications have no registered uninstaller. Use Forced Removal from the application row."
+                    .into(),
+            )
+        }
+        "win32" => {}
+        _ => return Err("This application source is not supported by batch uninstall.".into()),
+    }
+    match app.uninstall_support.as_str() {
+        "store_managed" => return Err("Store-managed packages must be removed individually.".into()),
+        "manual_only" => {
+            return Err(
+                "No uninstaller is registered. Use Forced Removal from the application row.".into(),
+            )
+        }
+        "missing" => {
+            return Err(
+                "No uninstaller is registered. Use the broken-registration cleanup.".into(),
+            )
+        }
+        "silent_only" if !quiet => {
+            return Err(
+                "Only a quiet uninstaller is registered. Enable silent mode or remove it individually."
+                    .into(),
+            )
+        }
+        _ => {}
+    }
+
+    if quiet {
+        if let Some(command) = app.quiet_uninstall_string.as_deref() {
+            return Ok(command);
+        }
+    }
+    app.uninstall_string
+        .as_deref()
+        .ok_or_else(|| "No uninstall command was recorded.".to_string())
+}
+
 /// Creates a single-use batch confirmation plan with server-side validation and 10-minute expiration.
 pub fn create_batch_uninstall_plan(
     selected_apps: &[crate::apps::InstalledApp],
@@ -486,35 +542,30 @@ pub fn create_batch_uninstall_plan(
     }
 
     let mut items = Vec::new();
-    let mut any_valid = false;
 
     for app in selected_apps {
-        let raw_cmd = if quiet && app.quiet_uninstall_string.is_some() {
-            app.quiet_uninstall_string.as_ref().unwrap()
-        } else if app.uninstall_string.is_some() {
-            app.uninstall_string.as_ref().unwrap()
-        } else {
-            items.push(BatchUninstallItemPlan {
-                app_id: app.id.clone(),
-                app_name: app.name.clone(),
-                raw_command: String::new(),
-                executable: String::new(),
-                arguments: Vec::new(),
-                is_msi: false,
-                is_valid: false,
-                rejection_reason: Some("No registered uninstaller command found.".into()),
-            });
-            continue;
+        let raw_cmd = match batch_uninstall_command(app, quiet) {
+            Ok(command) => command,
+            Err(reason) => {
+                items.push(BatchUninstallItemPlan {
+                    app_id: app.id.clone(),
+                    app_name: app.name.clone(),
+                    raw_command: String::new(),
+                    executable: String::new(),
+                    arguments: Vec::new(),
+                    is_msi: false,
+                    is_valid: false,
+                    rejection_reason: Some(reason),
+                });
+                continue;
+            }
         };
 
         let parsed = parse_uninstall_command(raw_cmd);
-        if parsed.is_valid {
-            any_valid = true;
-        }
         items.push(BatchUninstallItemPlan {
             app_id: app.id.clone(),
             app_name: app.name.clone(),
-            raw_command: raw_cmd.clone(),
+            raw_command: raw_cmd.to_string(),
             executable: parsed.executable,
             arguments: parsed.arguments,
             is_msi: parsed.is_msi,
@@ -523,8 +574,34 @@ pub fn create_batch_uninstall_plan(
         });
     }
 
-    if !any_valid {
-        return Err("None of the selected applications have a valid uninstaller command.".into());
+    // A batch must never silently run a subset of what the user selected.
+    if items.iter().any(|item| !item.is_valid) {
+        let rejected = items
+            .iter()
+            .filter(|item| !item.is_valid)
+            .map(|item| {
+                format!(
+                    "{} ({})",
+                    item.app_name,
+                    item.rejection_reason
+                        .as_deref()
+                        .unwrap_or("invalid uninstaller command")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(format!(
+            "Deselect applications without a usable batch uninstaller: {rejected}."
+        ));
+    }
+    if items.is_empty() {
+        return Err(format!(
+            "{} has no usable batch uninstaller.",
+            selected_apps
+                .first()
+                .map(|app| app.name.as_str())
+                .unwrap_or("The selected application")
+        ));
     }
 
     let now = SystemTime::now()
@@ -785,6 +862,84 @@ mod tests {
             2
         ));
         assert_eq!(always, 2);
+    }
+
+    fn batch_app(
+        id: &str,
+        source: &str,
+        support: &str,
+        uninstall: Option<&str>,
+        quiet: Option<&str>,
+    ) -> crate::apps::InstalledApp {
+        crate::apps::InstalledApp {
+            id: id.into(),
+            name: format!("{id}.exe"),
+            version: None,
+            publisher: None,
+            install_location: None,
+            install_date: None,
+            uninstall_string: uninstall.map(str::to_string),
+            quiet_uninstall_string: quiet.map(str::to_string),
+            display_icon: None,
+            estimated_size: None,
+            hive: source.into(),
+            scope: "user".into(),
+            architecture: "x64".into(),
+            is_protected: false,
+            source: source.into(),
+            uninstall_support: support.into(),
+            confidence: "confirmed".into(),
+            detection_reason: None,
+            registry_key_name: None,
+        }
+    }
+
+    #[test]
+    fn batch_accepts_only_registered_win32_uninstallers() {
+        let registered = batch_app(
+            "registered",
+            "win32",
+            "standard",
+            Some(r"C:\Windows\System32\notepad.exe /S"),
+            None,
+        );
+        assert!(batch_uninstall_command(&registered, false).is_ok());
+
+        let quiet_only = batch_app(
+            "quiet",
+            "win32",
+            "silent_only",
+            None,
+            Some(r"C:\Windows\System32\notepad.exe /quiet"),
+        );
+        assert!(batch_uninstall_command(&quiet_only, true).is_ok());
+        assert!(batch_uninstall_command(&quiet_only, false)
+            .unwrap_err()
+            .contains("quiet uninstaller"));
+
+        for app in [
+            batch_app("steam", "steam", "store_managed", Some("steam://uninstall/1"), None),
+            batch_app("portable", "portable", "manual_only", None, None),
+            batch_app("broken", "win32", "missing", None, None),
+        ] {
+            assert!(batch_uninstall_command(&app, true).is_err(), "{} must be refused", app.id);
+        }
+    }
+
+    #[test]
+    fn mixed_batch_is_rejected_instead_of_silently_skipping_invalid_apps() {
+        let registered = batch_app(
+            "registered",
+            "win32",
+            "standard",
+            Some(r"C:\Windows\System32\notepad.exe /S"),
+            None,
+        );
+        let missing = batch_app("missing", "win32", "missing", None, None);
+        let error = create_batch_uninstall_plan(&[registered, missing], false)
+            .expect_err("a mixed batch must not produce a partial plan");
+        assert!(error.contains("missing.exe"), "unexpected error: {error}");
+        assert!(error.contains("broken-registration cleanup"), "unexpected error: {error}");
     }
 
     #[test]

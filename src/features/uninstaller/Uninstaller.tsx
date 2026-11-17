@@ -38,6 +38,7 @@ import {
   IconWindow,
 } from "../../components/Icons";
 import { AppDrawer } from "./AppDrawer";
+import { batchEligibility } from "./batchEligibility";
 import { UninstallWizard, type UninstallMode } from "./UninstallWizard";
 import "./uninstaller.css";
 
@@ -139,6 +140,19 @@ export function Uninstaller({
   const apps = inventory.data?.apps ?? [];
   const warnings = [...new Set(inventory.data?.warnings ?? [])];
 
+  const selectableIds = useMemo(
+    () =>
+      new Set(
+        apps
+          .filter((app) => batchEligibility(app, batchQuiet).selectable)
+          .map((app) => app.id),
+      ),
+    [apps, batchQuiet],
+  );
+
+  // A quiet-mode change or a refreshed inventory can make a selected app
+  // ineligible. Never leave it in the queue or count it in the batch.
+
   useEffect(() => {
     if (initialAppId && apps.length > 0) {
       const match = apps.find((a) => a.id === initialAppId);
@@ -219,22 +233,27 @@ export function Uninstaller({
 
   const loading = inventory.status === "loading" && apps.length === 0;
 
-  const toggleSelectRow = (id: string, e: React.MouseEvent) => {
+  const selectableVisible = useMemo(
+    () => visible.filter((app) => batchEligibility(app, batchQuiet).selectable),
+    [visible, batchQuiet],
+  );
+
+  const toggleSelectRow = (app: InstalledApp, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!batchEligibility(app, batchQuiet).selectable) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(app.id)) next.delete(app.id);
+      else next.add(app.id);
       return next;
     });
   };
 
   const toggleSelectAll = () => {
-    const selectable = visible.filter((a) => !a.isProtected && a.source !== "store");
-    if (selectedIds.size === selectable.length) {
+    if (selectableVisible.every((app) => selectedIds.has(app.id))) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(selectable.map((a) => a.id)));
+      setSelectedIds(new Set(selectableVisible.map((app) => app.id)));
     }
   };
 
@@ -247,8 +266,21 @@ export function Uninstaller({
   };
 
   const selectedApps = useMemo(() => {
-    return apps.filter((a) => selectedIds.has(a.id));
-  }, [apps, selectedIds]);
+    return apps.filter(
+      (app) => selectedIds.has(app.id) && batchEligibility(app, batchQuiet).selectable,
+    );
+  }, [apps, selectedIds, batchQuiet]);
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => selectableIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [selectableIds]);
+
+  useEffect(() => {
+    setBatchConfirm(false);
+  }, [selectedIds, batchQuiet]);
 
   useEffect(() => {
     if (!batchOpen) {
@@ -263,7 +295,7 @@ export function Uninstaller({
     let cancelled = false;
     setBatchPreparing(true);
     setBatchError(null);
-    api.prepareBatchUninstall(Array.from(selectedIds), batchQuiet)
+    api.prepareBatchUninstall(selectedApps.map((app) => app.id), batchQuiet)
       .then((plan) => {
         if (!cancelled) {
           setBatchPlan(plan);
@@ -280,7 +312,7 @@ export function Uninstaller({
     return () => {
       cancelled = true;
     };
-  }, [batchOpen, selectedIds, batchQuiet, batchReport]);
+  }, [batchOpen, selectedApps, batchQuiet, batchReport]);
 
   const runBatchUninstall = async () => {
     if (!batchPlan || !batchConfirm || batchRunning) return;
@@ -502,10 +534,10 @@ export function Uninstaller({
                     <th scope="col" style={{ textAlign: "center" }}>
                       <input
                         type="checkbox"
-                        aria-label="Select all visible non-protected applications"
+                        aria-label="Select all visible batch-eligible applications"
                         checked={
-                          selectedIds.size > 0 &&
-                          selectedIds.size === visible.filter((a) => !a.isProtected).length
+                          selectableVisible.length > 0 &&
+                          selectableVisible.every((app) => selectedIds.has(app.id))
                         }
                         onChange={toggleSelectAll}
                       />
@@ -619,11 +651,11 @@ export function Uninstaller({
                       <td style={{ textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
-                          disabled={app.isProtected || app.source === "store"}
+                          disabled={!batchEligibility(app, batchQuiet).selectable}
                           checked={selectedIds.has(app.id)}
-                          title={app.source === "store" ? "Batch removal does not support Store packages. Remove this app individually." : undefined}
+                          title={batchEligibility(app, batchQuiet).reason ?? "Queue this application for batch uninstall"}
                           onChange={() => {}}
-                          onClick={(e) => toggleSelectRow(app.id, e)}
+                          onClick={(e) => toggleSelectRow(app, e)}
                         />
                       </td>
                       <td>
@@ -801,10 +833,10 @@ export function Uninstaller({
         </Panel>
 
         {/* Selection Bar for Batch Actions */}
-        {selectedIds.size > 0 && (
+        {selectedApps.length > 0 && (
           <div className="un-selection-bar">
             <span className="un-selection-bar__count">
-              {formatCount(selectedIds.size)} application{selectedIds.size === 1 ? "" : "s"} selected
+              {formatCount(selectedApps.length)} application{selectedApps.length === 1 ? "" : "s"} selected
             </span>
             <div className="row" style={{ gap: 8 }}>
               <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
@@ -884,7 +916,14 @@ export function Uninstaller({
                 variant="danger"
                 icon={<IconPlay size={14} />}
                 loading={batchRunning}
-                disabled={!batchConfirm || batchRunning || !batchPlan || batchPreparing || !batchPlan?.items.some((i) => i.isValid)}
+                disabled={
+                  !batchConfirm ||
+                  batchRunning ||
+                  !batchPlan ||
+                  batchPreparing ||
+                  batchPlan.items.length === 0 ||
+                  !batchPlan.items.every((item) => item.isValid)
+                }
                 onClick={runBatchUninstall}
               >
                 {batchRunning ? "Executing queue…" : `Start Batch Uninstall (${selectedApps.length})`}
@@ -898,7 +937,9 @@ export function Uninstaller({
           <div className="stack" style={{ gap: 12 }}>
             <Banner tone="info">
               Applications are uninstalled sequentially. A failure does not halt the queue; stopping
-              takes effect after the current application finishes.
+              takes effect after the current application finishes. Only applications with a
+              registered vendor uninstaller can be queued; Store packages, Steam games, portable
+              apps and broken registrations are handled individually.
             </Banner>
 
             {batchRunning && batchProgress && (
@@ -996,7 +1037,13 @@ export function Uninstaller({
               <input
                 type="checkbox"
                 checked={batchConfirm}
-                disabled={batchRunning || batchPreparing || !batchPlan || !batchPlan.items.some((i) => i.isValid)}
+                disabled={
+                  batchRunning ||
+                  batchPreparing ||
+                  !batchPlan ||
+                  batchPlan.items.length === 0 ||
+                  !batchPlan.items.every((item) => item.isValid)
+                }
                 onChange={(e) => setBatchConfirm(e.target.checked)}
               />
               <span>

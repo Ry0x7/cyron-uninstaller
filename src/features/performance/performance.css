@@ -787,7 +787,266 @@
   }
 }
 
+/* ---------------------------------------------------------- spike capture */
+
+.spike {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.spike__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.spike__head h3 {
+  margin: 2px 0 4px;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.spike__head p {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.spike__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.spike__chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 76px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.spike__bar {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  min-width: 4px;
+  max-width: 22px;
+  overflow: hidden;
+  border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.spike__bar-kernel {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--caution);
+  opacity: 0.9;
+}
+
+.spike__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--line);
+}
+
+.spike__stats .stat {
+  min-width: 0;
+  padding: 12px;
+  border: 0;
+  background: var(--surface);
+}
+
+.spike__legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spike__legend-kernel {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--caution);
+}
+
+/* ------------------------------------------------- drivers and system log */
+
+.perf-diagnostics-panel .panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.perf-kernel-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.perf-kernel-overview__copy strong {
+  display: block;
+  margin: 2px 0 4px;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-kernel-overview__copy p {
+  max-width: 68ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.perf-kernel-overview__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  align-self: start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--line);
+}
+
+.perf-kernel-overview__stats .stat {
+  min-width: 0;
+  padding: 10px;
+  border: 0;
+  background: var(--surface);
+}
+
+.perf-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.perf-evidence-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.perf-evidence-block__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.perf-evidence-block__head h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.perf-driver-list,
+.perf-event-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.perf-driver-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.perf-driver__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.perf-driver__name {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12.5px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.perf-driver__date {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.perf-event-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.perf-event__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.perf-event__summary {
+  color: var(--text-strong);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 @media (max-width: 1000px) {
+  .spike__head {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .spike__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .perf-kernel-overview {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .perf-diagnostics-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
   .perf-guide__answer {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;

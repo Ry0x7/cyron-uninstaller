@@ -2167,9 +2167,14 @@ pub async fn prepare_batch_uninstall(
         let app = inventory.apps.iter().find(|a| a.id == *id).ok_or_else(|| {
             "A selected application is no longer registered. Refresh and review again.".to_string()
         })?;
-        if app.is_protected || app.source == "store" {
-            return Err("Protected and Store applications cannot be batch uninstalled.".into());
+        if app.is_protected {
+            return Err(format!(
+                "{} is a Windows-protected application and cannot be batch uninstalled.",
+                app.name
+            ));
         }
+        uninstall::batch_uninstall_command(app, quiet)
+            .map_err(|reason| format!("{} cannot be batch uninstalled: {reason}", app.name))?;
         selected_apps.push(app.clone());
     }
 

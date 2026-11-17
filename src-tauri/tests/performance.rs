@@ -11,7 +11,7 @@ use cyron_lib::perf;
 fn live_snapshot_is_consistent_and_every_claim_has_evidence() {
     let snapshot = perf::capture_snapshot(true);
     println!(
-        "cpu={:.1}% cores={} mem={}/{} ({:.1}%) commit={:.1}% disk={:?}/{:?} processes={} startup={}/{} scheduled={} eventLog={}",
+        "cpu={:.1}% cores={} mem={}/{} ({:.1}%) commit={:.1}% disk={:?}/{:?} processes={} startup={}/{} scheduled={} eventLog={} drivers={} systemEvents={} ({})",
         snapshot.cpu.utilization_percent,
         snapshot.cpu.logical_cores,
         snapshot.memory.available_bytes,
@@ -24,7 +24,10 @@ fn live_snapshot_is_consistent_and_every_claim_has_evidence() {
         snapshot.startup.enabled_count,
         snapshot.startup.total_count,
         snapshot.startup.scheduled_tasks.len(),
-        snapshot.startup.event_log_status
+        snapshot.startup.event_log_status,
+        snapshot.drivers.items.len(),
+        snapshot.system_events.items.len(),
+        snapshot.system_events.status
     );
 
     assert!(snapshot.cpu.logical_cores >= 1);
@@ -41,6 +44,19 @@ fn live_snapshot_is_consistent_and_every_claim_has_evidence() {
     assert!(!snapshot.volumes.is_empty());
     assert!(snapshot.process_count > 0);
     assert!(!snapshot.limitations.is_empty());
+    assert!(!snapshot.system_events.note.is_empty());
+    assert!(
+        matches!(
+            snapshot.system_events.status.as_str(),
+            "available" | "denied" | "unavailable"
+        ),
+        "unexpected System event status: {}",
+        snapshot.system_events.status
+    );
+    for driver in &snapshot.drivers.items {
+        assert!(!driver.name.is_empty());
+        assert!(matches!(driver.class.as_str(), "Display" | "Storage" | "Network"));
+    }
     assert!(
         snapshot.sample_ms >= 500,
         "sample too short: {}",

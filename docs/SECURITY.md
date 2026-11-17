@@ -109,9 +109,11 @@ Child processes are strictly controlled:
 
 - `perf.rs` samples Windows performance data with read-only APIs: `GetSystemTimes`,
   `GlobalMemoryStatusEx`, PDH physical-disk counters, `GetProcessTimes`,
-  `GetProcessMemoryInfo`, `GetProcessIoCounters`, volume queries and `schtasks` XML. It never clears
-  standby memory, disables services, deletes Prefetch, changes the page file, disables Defender or
-  updates, writes performance registry values, or applies driver/power tweaks.
+  `GetProcessMemoryInfo`, `GetProcessIoCounters`, volume queries, the System event log and `schtasks` XML.
+  It reads display/storage/network driver names, versions and package dates from the class registry;
+  it never writes those values. It never clears standby memory, disables services, deletes Prefetch,
+  changes the page file, disables Defender or updates, writes performance registry values, or applies
+  driver/power tweaks.
 - The only modification on the Performance page is `set_startup_item_enabled`, which uses the
   existing Windows `StartupApproved` path after a native confirmation. It refuses protected entries
   and machine-wide entries when Cyron is not elevated; it never deletes the Run registration.
@@ -119,8 +121,8 @@ Child processes are strictly controlled:
   `%SystemRoot%\System32\wpr.exe` with the fixed `-start GeneralProfile` / `-stop <known path>
   -skipPdbGen` arguments and `CREATE_NO_WINDOW`. There is no shell, no caller-supplied executable and
   no uploaded trace. The ETL file stays under the app-data performance-traces folder.
-- The fixed **Open Task Manager**, **Resource Monitor** and **Windows settings** actions launch only
-  Windows binaries and `ms-settings:` URIs; the renderer cannot supply an arbitrary target.
+- The fixed **Open Task Manager**, **Resource Monitor**, **Reliability Monitor** and **Windows settings**
+  actions launch only Windows binaries and `ms-settings:` URIs; the renderer cannot supply an arbitrary target.
 - Recommendations are generated only from measured sample values with evidence, effect, risk and a
   verification method. Per-process I/O is never labeled as physical-disk pressure because Windows
   combines file, network, pipe and device transfers in that counter.
