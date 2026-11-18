@@ -113,11 +113,11 @@ jobs:
             src-tauri/target/release/cyron.exe
             src-tauri/target/release/bundle/SHA256SUMS.txt
           draft: false
-          # Tags with a suffix such as v0.2.0-rc.1 are prereleases; the
-          # unsigned/unverified paths documented in the release audit must not
-          # be presented as a trusted production release.
           prerelease: ${{ contains(github.ref_name, '-') }}
           name: "Cyron Uninstaller ${{ github.ref_name }}"
+          make_latest: ${{ !contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          body_path: docs/RELEASE_NOTES_${{ github.ref_name }}.md
           generate_release_notes: true
 
   deploy-pages:
