@@ -645,7 +645,7 @@ Task-specific acceptance was recorded before implementation in the local `.unlaz
 
 This pass audited the current working tree, produced the release bundles, and exercised the real
 per-user installer. The final PASS/FAIL/UNVERIFIED matrix is in
-[the release audit](docs/RELEASE_AUDIT_2026-11-17.md#final-pass-fail-unverified-feature-matrix).
+[the release audit](docs/RELEASE_AUDIT_2026-11-17.md).
 
 - [x] G100: all local suites pass on the final tree.
   CHECK: `npm run typecheck`; `npm test`; `npm run docs:check`; `cargo test`; `verify-cleanup`; `verify-e2e`; `verify-hunter-perf`; `npm run test:desktop`
