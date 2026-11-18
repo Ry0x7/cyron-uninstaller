@@ -4,9 +4,9 @@ Cyron is a Windows desktop app for uninstalling software, finding what takes up 
 
 ## Download for Windows
 
-**[Download Cyron 0.2.0-rc.2 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.0-rc.2)**
+**[Download Cyron 0.2.0 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.0)**
 
-Cyron's app version is 0.2.0. The available download is an unsigned release candidate for testing. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [RC2 release notes](docs/RELEASE_NOTES_v0.2.0-rc.2.md)
+Cyron 0.2.0 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.0.md)
 
 Cyron targets Windows 10 (1809 or later) and Windows 11 on x64 and uses the Microsoft Edge WebView2 Runtime.
 
@@ -38,7 +38,7 @@ Cache cleaning starts in read-only mode. After you enable it, review the selecte
 
 *Recovery shows quarantined items and the local cleanup log. Local paths are redacted.*
 
-The **Performance** page shows local CPU, memory, disk and startup measurements. RC2 adds short spike capture and kernel and driver evidence. Elevated tracing and some real-world uninstall paths still have open verification items. [Release audit](docs/RELEASE_AUDIT_2026-11-17.md)
+The **Performance** page shows local CPU, memory, disk and startup measurements. Version 0.2.0 adds short spike capture and kernel and driver evidence. Elevated tracing and some real-world uninstall paths still have open verification items. [Release audit](docs/RELEASE_AUDIT_2026-11-17.md)
 
 ## Documentation
 
