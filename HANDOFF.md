@@ -25,7 +25,7 @@ Updated: 2026-11-18 (native desktop verification of the spike capture and driver
 
 ## 2. Phase 2 implementation state — 2026-11-16
 
-The Phase 2 source changes are uncommitted. They extend the existing safety model; none of them weaken server-held plans, quarantine, protected paths or the no-shell rule.
+This section records the Phase 2 implementation and verification state on 2026-11-16.
 
 - **Store/MSIX:** `store.rs` now reads current-user main packages through `PackageManager` and removes one reviewed package through `RemovePackageAsync(...).join()`. It never calls `RemoveForAllUsers`, deprovisions, elevates automatically or launches a shell. Access-denied, in-use and not-found outcomes are classified. Plans bind full name, family name and publisher ID; execution revalidates all three and checks the live inventory afterward.
 - **Lifecycle history:** `app_history.rs` persists `<app_data_dir>/app-history.json` atomically, newest activity first, capped at 2,000 records. A partial inventory can refresh current apps but can never mark a missing app removed. Records are descriptive and never authorize cleanup.
@@ -187,7 +187,7 @@ closed separately in the Phase 8 packaging pass below.
 
 The final audit compiled and packaged the current tree, then exercised the real per-user installer.
 The packaging pass added no application behavior; the audit's separately tested safety fixes are
-listed in [the release audit](docs/RELEASE_AUDIT_2026-11-17.md#defects-found-and-fixed-in-this-audit).
+listed in [the release audit](docs/RELEASE_AUDIT_2026-11-17.md).
 Signing and real application removal remain release blockers.
 
 - **Suites:** 100 frontend tests in 12 files, typecheck, `DOCS_CHECK`, 261 Rust tests (4 ignored),
@@ -203,7 +203,7 @@ Signing and real application removal remain release blockers.
   elevated install test; it did not install anything unelevated.
 - **Evidence:** [installer receipt](docs/evidence/2026-11-17-installer-release.md),
   [installed-app capture](docs/evidence/phase8/34-installed-launch.png), and
-  [final matrix](docs/RELEASE_AUDIT_2026-11-17.md#final-pass-fail-unverified-feature-matrix).
+  [final matrix](docs/RELEASE_AUDIT_2026-11-17.md).
 
 ## 3. Verification — Phase 1 tree, 2026-11-16
 

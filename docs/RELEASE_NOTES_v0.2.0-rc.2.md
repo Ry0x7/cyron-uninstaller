@@ -3,7 +3,7 @@
 **Status: unsigned release candidate (2026-11-18).** The 2026-11-17 audit's trust and native-path
 gaps are still open; this candidate is for testing and must not be described as a publicly trusted
 or warning-free release. The detailed blockers remain in
-[the audit](RELEASE_AUDIT_2026-11-17.md#outstanding-issues).
+[the audit](RELEASE_AUDIT_2026-11-17.md).
 
 ## Changes since release candidate 1
 
