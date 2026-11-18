@@ -2,6 +2,8 @@
 
 Phase 5 replaces the old ink-and-teal dashboard language with a calm Windows-native utility shell. Product truth, safety copy and backend behaviour are unchanged.
 
+The [earlier design spec at cb8e919](https://github.com/Ry0x7/cyron-uninstaller/blob/cb8e919/docs/development/DESIGN.md) records the former palette, layout and contrast measurements.
+
 ## Direction
 
 Cyron should feel like a well-made Windows 11 utility: quiet neutral surfaces, one blue accent, native Segoe UI Variable type, comfortable density, and no decorative dashboard furniture. The interface disappears into the task.
