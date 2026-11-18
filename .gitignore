@@ -17,3 +17,6 @@ src-tauri/target/
 /screenshots/
 /test-results/
 src-tauri/*-bench.txt
+
+# Generated local release checksums
+/SHA256SUMS.txt
