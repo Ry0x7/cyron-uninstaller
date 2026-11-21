@@ -1,6 +1,6 @@
 [package]
 name = "cyron"
-version = "0.2.0"
+version = "0.2.1"
 description = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
 authors = ["Chryypt"]
 license-file = "../LICENSE"
