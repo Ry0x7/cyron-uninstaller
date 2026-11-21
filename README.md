@@ -4,9 +4,9 @@ Cyron is a Windows desktop app for uninstalling software, finding what takes up 
 
 ## Download for Windows
 
-**[Download Cyron 0.2.0 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.0)**
+**[Download Cyron 0.2.1 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.1)**
 
-Cyron 0.2.0 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.0.md)
+Cyron 0.2.1 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.1.md)
 
 Cyron targets Windows 10 (1809 or later) and Windows 11 on x64 and uses the Microsoft Edge WebView2 Runtime.
 

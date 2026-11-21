@@ -175,7 +175,7 @@ function Sidebar({
         </button>
 
         <div className="sidebar__tools">
-          <span className="sidebar__version">v0.2.0</span>
+          <span className="sidebar__version">v0.2.1</span>
           <IconButton
             label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="collapse-btn"

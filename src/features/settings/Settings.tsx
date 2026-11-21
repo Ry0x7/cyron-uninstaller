@@ -751,8 +751,8 @@ export function Settings() {
                   <KeyValue
                     items={[
                       { label: "Name", value: "Cyron" },
-                      { label: "Version", value: "0.2.0" },
-                      { label: "Stage", value: "Release Candidate 2 (RC2)" },
+                      { label: "Version", value: "0.2.1" },
+                      { label: "Stage", value: "Stable release (unsigned)" },
                       { label: "Publisher", value: "Chryypt" },
                       { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },
                       {
