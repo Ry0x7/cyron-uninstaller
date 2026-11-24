@@ -21,6 +21,7 @@ Every public release candidate must satisfy all verification gates before packag
 - [ ] **Desktop Debug Binary**: `node scripts/verify-desktop-binary.mjs` outputs `DESKTOP_BINARY_OK`.
 - [ ] **Desktop Smoke Test**: `node scripts/smoke-desktop.mjs` outputs `DESKTOP_SMOKE_OK`.
 - [ ] **Release Installer Bundles**: `node scripts/verify-release-bundles.mjs` outputs `RELEASE_BUNDLES_OK`.
+- [ ] **Updater Artifacts**: build with `npm run build:release` and `TAURI_SIGNING_PRIVATE_KEY` set; `node scripts/generate-updater-manifest.mjs --tag v<version>` writes `latest.json`; `npm run verify:updater` outputs `UPDATER_ARTIFACTS_OK`.
 - [ ] **Windows Metadata Consistency**: `npm run verify:metadata` outputs `WINDOWS_METADATA_OK`.
 - [ ] **Authenticode Signature & Negative Integrity**: `npm run verify:signatures` outputs `SIGNATURES_VERIFIED_OK` for a signed release. An `UNSIGNED_RC` build is expected to fail with `NotSigned` and must not be published as trusted.
 - [ ] **NSIS Installer Exercise**: install `/S`, relaunch, repair `/S`, uninstall `/S`, reinstall `/S`; confirm the HKCU uninstall entry, install directory and `%APPDATA%\dev.cyron.uninstaller` survive/behave as expected. The 2026-11-17 run passed; see [the installer receipt](evidence/2026-11-17-installer-release.md).
@@ -36,6 +37,7 @@ Every build artifact belongs strictly to one of two release classifications:
 |---|---|---|---|
 | `UNSIGNED_RC` | Unsigned | Internal private testing | `node scripts/verify-release-bundles.mjs` |
 | `CHRYYPT_SIGNED` | Signed (`CN=Chryypt Organization`) | Official releases & installers | `npm run verify:signatures` |
+| `UPDATER_SIGNED` | Minisign signature from the Tauri updater key | In-app update packages | `npm run verify:updater` |
 
 ### Chryypt Organization Signing (`CHRYYPT_SIGNED`)
 ```powershell
@@ -73,11 +75,26 @@ For every release build, generate standard SHA-256 checksums using `scripts/gene
 node scripts/generate-checksums.mjs
 ```
 
+Build the release feed with `npm run build:release`, then generate the manifest and checksums:
+
+```powershell
+node scripts/generate-updater-manifest.mjs --tag v<version>
+npm run verify:updater
+node scripts/generate-checksums.mjs --output src-tauri/target/release/bundle/SHA256SUMS.txt --require-updater
+```
+
 Attach the following verified assets to the GitHub Release:
-1. `Cyron Uninstaller_<version>_x64-setup.exe` (NSIS Installer)
+1. `Cyron Uninstaller_<version>_x64-setup.exe` (NSIS Installer and updater package)
 2. `Cyron Uninstaller_<version>_x64_en-US.msi` (MSI Package)
 3. `cyron.exe` (Standalone Portable Executable)
-4. `SHA256SUMS.txt` (Cryptographic verification checksums)
+4. `latest.json` (Signed Tauri updater manifest)
+5. `SHA256SUMS.txt` (Cryptographic verification checksums)
+
+Do not publish `latest.json` without the matching NSIS setup and `.sig`; the in-app updater rejects
+an unsigned or mismatched package. The manifest must expose only `windows-x86_64-nsis`, never a
+generic `windows-x86_64` or `windows-x86_64-msi` entry, so MSI installations are not replaced by the
+per-user NSIS package. The GitHub release workflow requires `TAURI_SIGNING_PRIVATE_KEY` (and
+optionally `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) in repository secrets.
 
 ---
 
@@ -93,4 +110,4 @@ During in-place upgrades:
   1. Populate mock scan history and a quarantine batch in `%APPDATA%\dev.cyron.uninstaller\`.
   2. Run the `N+1` installer.
   3. Launch Cyron and verify that history, quarantine batches, and settings remain intact.
-- **Current evidence:** the `0.1.0` NSIS same-version repair/reinstall preserved 0 app-data hashes and quarantine sentinels. A real `N` → `N+1` upgrade, downgrade and clean-VM run remain open release gates.
+- **Current evidence:** the `0.1.0` NSIS same-version repair/reinstall preserved 0 app-data hashes and quarantine sentinels. A real `N` → `N+1` upgrade, downgrade and clean-VM run remain open release gates. The 0.2.2 updater path must be verified after the release feed is published; existing 0.2.1 installations need one manual 0.2.2 install before future in-app updates are available.

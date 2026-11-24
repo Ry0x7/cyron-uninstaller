@@ -44,6 +44,11 @@ npm run build:desktop
 # 5. Build unsigned production release bundles (NSIS setup & WiX MSI)
 npm run build:unsigned
 
+# 5a. Build release bundles plus signed updater artifacts and latest.json
+#     Requires TAURI_SIGNING_PRIVATE_KEY in the environment.
+npm run build:release
+node scripts/generate-updater-manifest.mjs --tag v0.2.2
+
 # 6. Build and sign release bundles with Chryypt Organization certificate
 npm run build:signed
 
@@ -56,8 +61,9 @@ npm run verify:metadata
 
 ### Build Types Explained:
 - **`npm run build:desktop`**: Invokes `tauri build --debug --no-bundle`. Emits `src-tauri/target/debug/cyron.exe` with embedded production assets; it runs standalone and is the executable used by the desktop E2E suite. The debug profile is not an optimized release build.
-- **`npm run build:unsigned`**: Builds optimized release binaries with embedded frontend assets into NSIS and WiX MSI installers under `src-tauri/target/release/bundle/`. Artifacts are unsigned (`UNSIGNED_RC`).
-- **`npm run build:signed`**: Builds release bundles and invokes `scripts/sign-build.ps1` to sign `cyron.exe`, NSIS setup, and WiX MSI packages with the Chryypt Organization code signing certificate (`CHRYYPT_SIGNED`).
+- **`npm run build:unsigned`**: Builds optimized release binaries with embedded frontend assets into NSIS and WiX MSI installers under `src-tauri/target/release/bundle/`. Artifacts are Authenticode-unsigned (`UNSIGNED_RC`).
+- **`npm run build:release`**: Builds the same bundles with `src-tauri/tauri.release.conf.json`, which enables `bundle.createUpdaterArtifacts`. With `TAURI_SIGNING_PRIVATE_KEY` set, Tauri writes the NSIS setup signature (`*-setup.exe.sig`) used by the in-app updater. This is the release-feed build.
+- **`npm run build:signed`**: Builds release bundles and invokes `scripts/sign-build.ps1` to sign `cyron.exe`, NSIS setup, and WiX MSI packages with the Chryypt Organization Authenticode certificate (`CHRYYPT_SIGNED`). Authenticode signing is separate from the Tauri updater signature.
 
 ---
 
@@ -69,12 +75,15 @@ Cyron classifies build and release artifacts into:
 |---|---|---|---|
 | `UNSIGNED_RC` | None | Maintainers & core developers | Private testing; verify SHA-256 against `SHA256SUMS.txt`. |
 | `CHRYYPT_SIGNED` | Self-signed certificate (`CN=Chryypt Organization`) | Local or manually signed builds | Authenticode-signed binaries and installers; cryptographically intact but not publicly trusted. |
+| `UPDATER_SIGNED` | Minisign signature from the Tauri updater key | In-app update packages | Verifies the NSIS setup against the committed updater public key; separate from Authenticode trust. |
 
 ---
 
 ## 4. Chryypt Organization Signing (`CHRYYPT_SIGNED`)
 
-Cyron provides automated signing with a Chryypt Organization **self-signed** certificate. This proves artifact integrity and signer identity, not public trust. The GitHub release workflow currently runs `npm run tauri -- build` without a signing step, so published release assets are unsigned unless a maintainer signs them locally before upload.
+Cyron provides automated signing with a Chryypt Organization **self-signed** certificate. This proves artifact integrity and signer identity, not public trust. The GitHub release workflow now runs `npm run build:release` to create Tauri updater signatures, but it does not Authenticode-sign the published binaries. Published release assets remain unsigned unless a maintainer signs them locally before upload.
+
+The updater uses a separate minisign key pair. Its public key is committed in `tauri.conf.json`; its private key is never committed. Losing the private key prevents future in-app updates for installations that trust the current public key.
 
 ### Certificate Specification:
 - **Subject**: `CN=Chryypt Organization`
@@ -97,6 +106,46 @@ Cyron provides automated signing with a Chryypt Organization **self-signed** cer
 2. **No Policy Circumvention**: Never modify Defender SmartScreen or Windows 11 Smart App Control policies to simulate signing success.
 3. **No Private Key Distribution**: No private key or PFX file is ever committed to Git or uploaded to public CI runners.
 
+### Updater Signing (`TAURI_SIGNING_PRIVATE_KEY`)
+
+```powershell
+# One-time key generation. Keep the private key out of Git.
+npm run tauri -- signer generate -w .tauri/cyron-updater.key
+
+# Build the release feed after setting the key path or content.
+$env:TAURI_SIGNING_PRIVATE_KEY = (Resolve-Path ".tauri/cyron-updater.key").Path
+npm run build:release
+node scripts/generate-updater-manifest.mjs --tag v<version>
+npm run verify:updater
+```
+
+The generated public key is committed in `tauri.conf.json` under `plugins.updater.pubkey`. The
+release workflow reads the private key and optional password from repository secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (empty if the key has no password)
+
+From a checkout that holds the generated key, set the content secret without printing it:
+
+```powershell
+gh secret set TAURI_SIGNING_PRIVATE_KEY < .tauri/cyron-updater.key
+# Only if the key has a password:
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+```
+
+`build:release` writes the signed NSIS setup and its `.sig` next to the normal bundle. The manifest
+script embeds that signature and the GitHub release asset URL in `latest.json` under
+`windows-x86_64-nsis`; the workflow uploads the setup, MSI, standalone executable, manifest and
+checksums. The updater downloads the NSIS setup only after the user confirms, so the per-user
+installer path remains the update path. The manifest deliberately has no generic
+`windows-x86_64` or `windows-x86_64-msi` entry: Tauri would otherwise hand the per-user NSIS
+package to an MSI installation. The app enables the check only for an NSIS bundle; MSI
+installations are directed to the release page instead.
+
+> [!IMPORTANT]
+> Back up the updater private key. Existing installations trust the public key embedded in the app;
+> losing the private key means those installations cannot receive another immutable signed update.
+
 ---
 
 ## 5. Windows Metadata Standards & Audit
@@ -105,7 +154,7 @@ Windows metadata is enforced consistently across all artifacts and audited autom
 
 - **Product Name**: `Cyron Uninstaller`
 - **File Description**: `Windows Application Uninstaller, Disk Analyzer & Cleaner`
-- **Version**: Derived dynamically from `package.json` and `tauri.conf.json` (`0.2.0`)
+- **Version**: Derived dynamically from `package.json` and `tauri.conf.json` (`0.2.2`)
 - **Original Filename**: `cyron.exe`
 - **Publisher**: `Chryypt`
 - **Copyright**: `Copyright © 2026 Chryypt`
@@ -113,14 +162,16 @@ Windows metadata is enforced consistently across all artifacts and audited autom
 - **MSI UpgradeCode**: `{C2BCD648-205F-5904-9E5C-85726E376EC2}`
 
 ### Generated Release Bundles:
-- **NSIS Setup (current user)**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.2.0_x64-setup.exe`
-- **WiX MSI Package (per machine)**: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.2.0_x64_en-US.msi`
+- **NSIS Setup (current user)**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.2.2_x64-setup.exe`
+- **WiX MSI Package (per machine)**: `src-tauri/target/release/bundle/msi/Cyron Uninstaller_0.2.2_x64_en-US.msi`
 - **Standalone Binary**: `src-tauri/target/release/cyron.exe`
+- **Updater signature**: `src-tauri/target/release/bundle/nsis/Cyron Uninstaller_0.2.2_x64-setup.exe.sig`
+- **Updater manifest**: `src-tauri/target/release/bundle/latest.json`
 
 The WiX package is per-machine and its install requires administrator elevation. The NSIS package
 installs per user under `%LOCALAPPDATA%\Cyron Uninstaller` and is the verified per-user path.
 
-### Verified Audit Build (2026-11-17)
+### Historical Verified Audit Build (2026-11-17, version 0.2.0)
 
 | Artifact | Bytes | SHA-256 |
 |---|---:|---|
@@ -185,4 +236,4 @@ Cyron strictly separates its application state from browser rendering caches:
 - **WebView2 Browser Cache**:
   - Located at `%LOCALAPPDATA%\dev.cyron.uninstaller\EBWebView\` (`FOLDERID_LocalAppData`).
   - Managed exclusively by the Microsoft Edge WebView2 runtime for web rendering caches, GPU caches, and local storage.
-- **Zero Telemetry**: Cyron contains no network communication code, analytics, or background telemetry.
+- **No Telemetry**: Cyron contains no analytics, diagnostics uploads or background telemetry. The only network path is the user-initiated updater check described in section 4.

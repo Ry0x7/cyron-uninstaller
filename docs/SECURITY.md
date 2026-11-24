@@ -129,10 +129,44 @@ Child processes are strictly controlled:
 
 ## Network and data handling
 
-There is no application network or telemetry code. Scanned paths, duplicate hashes, quarantine
-manifests, performance baselines and traces, and the cleanup log remain local. Cyron contains no
-network feature. Tauri's dependency graph includes HTTP crates transitively, so “no network stack”
-is not literally true at the linked-library level; no Cyron code calls them.
+Cyron has no telemetry, analytics, diagnostics uploads or account data. Scanned paths, duplicate
+hashes, quarantine manifests, performance baselines and traces, and the cleanup log remain local.
+The sole user-initiated network path is the in-app updater described below. Tauri's dependency graph
+includes HTTP crates transitively; that is not a Cyron network call.
+
+### In-app updater boundary
+
+- The check runs only after **Settings → About → Software updates → Check for updates**. There is no
+  background polling, startup check, telemetry identifier or usage payload.
+- The endpoint is the fixed GitHub Releases URL configured in `tauri.conf.json`; the renderer cannot
+  supply an arbitrary update URL, proxy or executable.
+- Tauri downloads `latest.json`, verifies the advertised package signature against the embedded
+  minisign public key, and downloads the pinned NSIS setup URL. Cyron asks for native confirmation
+  before running the installer. A failed signature check leaves the installed app unchanged.
+- The updater private key exists only outside the repository and in the release CI secret; it is
+  never bundled with the application. The public key is safe to embed.
+- The NSIS setup is the per-user update package. The manifest exposes only
+  `windows-x86_64-nsis`, so an MSI installation is never handed the per-user NSIS bundle. The app
+  offers the check only when it detects an NSIS bundle; MSI installations are directed to the
+  published release page instead.
+- Authenticode signing is a separate trust layer; release artifacts are currently unsigned and the
+  release notes say so.
+
+### Everything index integration
+
+The **Search** destination reads a third-party local index maintained by Everything (voidtools).
+Cyron requires an already installed and running Everything 1.4.1 or newer; it does not install,
+bundle, start or stop Everything, load the SDK DLL, or change Everything's index or settings. The
+only channel is the documented local `WM_COPYDATA` `QUERY2W` IPC sent to the
+`EVERYTHING_TASKBAR_NOTIFICATION` window; Everything's HTTP and ETP network interfaces are never
+used. `everything.rs` treats every reply field as untrusted: it caps reply size and item counts,
+validates offsets and string lengths before decoding, and returns an error instead of panicking on
+a malformed list. Search is read-only and has no filesystem, registry, process or settings write
+path. A result is never executed or opened; the UI may only pass its path to the existing
+`reveal_path` command, which still requires an existing path and launches Explorer. The reply
+window's message filter is widened for `WM_COPYDATA` only; UIPI can still block a lower-integrity
+Cyron from querying an elevated Everything, which surfaces as a normal search error. A local
+process that spoofs a reply can at most inject display text, not command execution.
 
 ## Gates satisfied across Phases 3 and 4
 

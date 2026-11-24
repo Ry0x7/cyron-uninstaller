@@ -1,6 +1,6 @@
 {
   "name": "cyron-uninstaller",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Windows Application Uninstaller, Disk Analyzer & Cleaner",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Chryypt",
@@ -24,14 +24,19 @@
     "dev:desktop": "node scripts/msvc-env.mjs npx tauri dev",
     "build:desktop": "node scripts/msvc-env.mjs npx tauri build --debug --no-bundle",
     "build:unsigned": "node scripts/msvc-env.mjs npx tauri build",
+    "build:release": "node scripts/msvc-env.mjs npx tauri build --config src-tauri/tauri.release.conf.json",
     "build:signed": "node scripts/msvc-env.mjs npx tauri build && powershell -ExecutionPolicy Bypass -File scripts/sign-build.ps1",
     "build:dev-signed": "node scripts/msvc-env.mjs npx tauri build && powershell -ExecutionPolicy Bypass -File scripts/sign-build.ps1",
     "verify:signatures": "powershell -ExecutionPolicy Bypass -File scripts/verify-signatures.ps1 -RunNegativeTests",
-    "verify:metadata": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-metadata.ps1"
+    "verify:metadata": "powershell -ExecutionPolicy Bypass -File scripts/verify-windows-metadata.ps1",
+    "updater:manifest": "node scripts/generate-updater-manifest.mjs",
+    "verify:updater": "node scripts/verify-updater-artifacts.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

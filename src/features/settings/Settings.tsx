@@ -2,6 +2,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "../../lib/api";
 import { useSettings, type ThemePreference } from "../../lib/settings";
+import {
+  checkForUpdate,
+  formatDownloadProgress,
+  relaunchApp,
+  supportsInAppUpdates,
+  useInstalledBundleType,
+  useInstalledVersion,
+  type AvailableUpdate,
+  type UpdateProgress,
+} from "../../lib/updates";
 import type { ExplorerIntegrationStatus, StartupItem } from "../../lib/types";
 import {
   Badge,
@@ -10,6 +20,7 @@ import {
   Field,
   KeyValue,
   Panel,
+  ProgressBar,
   Toggle,
   ViewHeader,
   cx,
@@ -17,6 +28,7 @@ import {
 import {
   IconCheck,
   IconCopy,
+  IconDownload,
   IconExternal,
   IconFolderOpen,
   IconInfo,
@@ -98,6 +110,43 @@ function parseExclusions(raw: string): ParsedExclusions {
 
 type SettingsTab = "appearance" | "scanning" | "startup" | "explorer" | "safety" | "about";
 
+type UpdatePhase =
+  | "idle"
+  | "checking"
+  | "current"
+  | "available"
+  | "downloading"
+  | "installing"
+  | "ready"
+  | "restarting"
+  | "error";
+
+function updateStatus(phase: UpdatePhase): {
+  tone: "neutral" | "accent" | "safe" | "caution" | "danger";
+  label: string;
+} {
+  switch (phase) {
+    case "idle":
+      return { tone: "neutral", label: "Not checked" };
+    case "checking":
+      return { tone: "accent", label: "Checking…" };
+    case "current":
+      return { tone: "safe", label: "Up to date" };
+    case "available":
+      return { tone: "accent", label: "Update available" };
+    case "downloading":
+      return { tone: "accent", label: "Downloading…" };
+    case "installing":
+      return { tone: "caution", label: "Installing…" };
+    case "ready":
+      return { tone: "safe", label: "Installed — restart needed" };
+    case "restarting":
+      return { tone: "caution", label: "Restarting…" };
+    case "error":
+      return { tone: "danger", label: "Update failed" };
+  }
+}
+
 const SECTIONS: {
   value: SettingsTab;
   label: string;
@@ -122,6 +171,25 @@ export function Settings() {
   } = useSettings();
 
   const [tab, setTab] = useState<SettingsTab>("appearance");
+
+  const [updatePhase, setUpdatePhase] = useState<UpdatePhase>("idle");
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const pendingUpdate = useRef<AvailableUpdate | null>(null);
+  const installedVersion = useInstalledVersion();
+  const bundleType = useInstalledBundleType();
+  const msiInstall = bundleType === "msi";
+  const updateSupported = supportsInAppUpdates(bundleType);
+
+  useEffect(
+    () => () => {
+      const pending = pendingUpdate.current;
+      pendingUpdate.current = null;
+      if (pending) void pending.close().catch(() => {});
+    },
+    [],
+  );
 
   const [systemDark, setSystemDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
@@ -314,8 +382,90 @@ export function Settings() {
     }
   };
 
+  const closePendingUpdate = () => {
+    const pending = pendingUpdate.current;
+    pendingUpdate.current = null;
+    if (pending) void pending.close().catch(() => {});
+  };
+
+  const handleCheckForUpdate = async () => {
+    if (!updateSupported) return;
+    if (updatePhase === "checking" || updatePhase === "downloading" || updatePhase === "installing" || updatePhase === "restarting") {
+      return;
+    }
+    closePendingUpdate();
+    setAvailableUpdate(null);
+    setUpdateProgress(null);
+    setUpdateError(null);
+    setUpdatePhase("checking");
+    try {
+      const next = await checkForUpdate();
+      if (!next) {
+        setUpdatePhase("current");
+        return;
+      }
+      pendingUpdate.current = next;
+      setAvailableUpdate(next);
+      setUpdatePhase("available");
+    } catch (err) {
+      setUpdatePhase("error");
+      setUpdateError(errorMessage(err));
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!availableUpdate || updatePhase === "downloading" || updatePhase === "installing") return;
+    let confirmed = false;
+    try {
+      confirmed = await ask(
+        `Download and install Cyron ${availableUpdate.info.version}? Cyron will close and restart after installation.`,
+        {
+          title: "Install update?",
+          kind: "info",
+          okLabel: "Download & install",
+          cancelLabel: "Cancel",
+        },
+      );
+    } catch (err) {
+      setUpdateError(errorMessage(err));
+      return;
+    }
+    if (!confirmed) return;
+
+    setUpdateError(null);
+    setUpdateProgress({ downloaded: 0, total: null, percent: null });
+    setUpdatePhase("downloading");
+    try {
+      await availableUpdate.downloadAndInstall({
+        onProgress: setUpdateProgress,
+        onDownloaded: () => setUpdatePhase("installing"),
+      });
+      setUpdatePhase("ready");
+    } catch (err) {
+      setUpdatePhase("error");
+      setUpdateError(errorMessage(err));
+    }
+  };
+
+  const handleRestart = async () => {
+    setUpdateError(null);
+    setUpdatePhase("restarting");
+    try {
+      await relaunchApp();
+    } catch (err) {
+      setUpdatePhase("ready");
+      setUpdateError(errorMessage(err));
+    }
+  };
+
   const resolved = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme;
   const themeSource = settings.theme === "system" ? "Following system preference" : "Chosen manually";
+  const updateBadge = updateStatus(updatePhase);
+  const updateBusy =
+    updatePhase === "checking" ||
+    updatePhase === "downloading" ||
+    updatePhase === "installing" ||
+    updatePhase === "restarting";
 
   return (
     <>
@@ -747,11 +897,158 @@ export function Settings() {
 
             {tab === "about" && (
               <div className="set-stack">
+                <Panel
+                  title="Software updates"
+                  subtitle="Cyron checks GitHub Releases only when you ask. No telemetry or background polling."
+                  actions={
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={<IconRefresh size={13} />}
+                      loading={updatePhase === "checking"}
+                      disabled={updateBusy || updatePhase === "ready" || !updateSupported}
+                      onClick={() => void handleCheckForUpdate()}
+                    >
+                      Check for updates
+                    </Button>
+                  }
+                >
+                  <div className="set-status">
+                    <Badge tone={updateBadge.tone}>{updateBadge.label}</Badge>
+                    <span className="set-note">Installed version {installedVersion ?? "…"}</span>
+                  </div>
+
+                  {msiInstall && (
+                    <p className="set-note set-note--spaced">
+                      This installation was packaged as an MSI for all users. In-app updates use
+                      the per-user NSIS setup, so MSI installations update by downloading the next
+                      release from the project page. This avoids replacing an MSI install with a
+                      second, per-user copy.
+                    </p>
+                  )}
+                  {bundleType === null && (
+                    <p className="set-note set-note--spaced">
+                      This copy was not installed by the per-user NSIS setup, so in-app updates are
+                      unavailable. Download the next release from the project page and replace this
+                      copy.
+                    </p>
+                  )}
+                  {updateSupported && updatePhase === "idle" && (
+                    <p className="set-note set-note--spaced">
+                      The check sends a request for the signed release manifest to this project's
+                      GitHub Releases page. It contains no account, usage or machine data. Nothing
+                      is downloaded or installed until you confirm it.
+                    </p>
+                  )}
+                  {updatePhase === "checking" && (
+                    <p className="set-note set-note--spaced">Contacting the signed release feed…</p>
+                  )}
+                  {updatePhase === "current" && (
+                    <p className="set-note set-note--spaced">
+                      You are running the latest published version.
+                    </p>
+                  )}
+
+                  {availableUpdate && (
+                    <div className="set-update">
+                      <div className="set-update__heading">
+                        <div>
+                          <span className="set-update__version">
+                            Version {availableUpdate.info.version}
+                          </span>
+                          <span className="set-update__meta">
+                            Installed {availableUpdate.info.currentVersion}
+                            {availableUpdate.info.date
+                              ? ` · published ${availableUpdate.info.date}`
+                              : ""}
+                          </span>
+                        </div>
+                      </div>
+
+                      {availableUpdate.info.body && (
+                        <pre className="set-update__notes">{availableUpdate.info.body}</pre>
+                      )}
+
+                      {(updatePhase === "downloading" ||
+                        updatePhase === "installing" ||
+                        updatePhase === "restarting") &&
+                        updateProgress && (
+                          <div className="set-update__progress">
+                            <div className="set-update__progress-meta">
+                              <span>{formatDownloadProgress(updateProgress)}</span>
+                              <span>
+                                {updateProgress.percent === null
+                                  ? "Verifying download…"
+                                  : `${updateProgress.percent}%`}
+                              </span>
+                            </div>
+                            <ProgressBar
+                              value={
+                                updateProgress.percent === null
+                                  ? undefined
+                                  : updateProgress.percent / 100
+                              }
+                              label="Update download"
+                            />
+                          </div>
+                        )}
+
+                      {updatePhase === "available" && (
+                        <div className="set-update__actions">
+                          <Button
+                            variant="primary"
+                            icon={<IconDownload size={14} />}
+                            onClick={() => void handleInstallUpdate()}
+                          >
+                            Download &amp; install
+                          </Button>
+                        </div>
+                      )}
+
+                      {updatePhase === "downloading" && (
+                        <p className="set-note">
+                          Keep Cyron open while the update downloads. The signed package is
+                          verified before the installer runs.
+                        </p>
+                      )}
+                      {updatePhase === "installing" && (
+                        <p className="set-note">
+                          The installer is running. Cyron may close and reopen automatically.
+                        </p>
+                      )}
+                      {updatePhase === "ready" && (
+                        <div className="set-update__actions">
+                          <p className="set-note">
+                            The update is installed. Restart Cyron to use it.
+                          </p>
+                          <Button variant="primary" onClick={() => void handleRestart()}>
+                            Restart now
+                          </Button>
+                        </div>
+                      )}
+                      {updatePhase === "restarting" && (
+                        <p className="set-note">Restarting Cyron…</p>
+                      )}
+                    </div>
+                  )}
+
+                  {updateError && (
+                    <Banner tone="danger">
+                      <strong>Could not update Cyron.</strong> {updateError}
+                    </Banner>
+                  )}
+
+                  <p className="set-note set-note--spaced">
+                    Update packages are signed with Cyron's updater key and verified before
+                    installation. A failed check or download leaves the installed app unchanged.
+                  </p>
+                </Panel>
+
                 <Panel title="About Cyron" subtitle="A local Windows utility for removal, disk space and performance.">
                   <KeyValue
                     items={[
                       { label: "Name", value: "Cyron" },
-                      { label: "Version", value: "0.2.1" },
+                      { label: "Version", value: installedVersion ?? "…" },
                       { label: "Stage", value: "Stable release (unsigned)" },
                       { label: "Publisher", value: "Chryypt" },
                       { label: "Stack", value: "Tauri v2 · Rust · React · TypeScript" },

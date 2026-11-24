@@ -14,7 +14,7 @@ Cyron is a Windows desktop application (Tauri v2 + Rust backend, React 19 + Type
 
 ## Architectural Invariants (Non-Negotiable)
 
-1. **IPC Surface:** 72 commands in `src-tauri/src/commands.rs`, registered in `lib.rs`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the contract. Change both together. Never accept free-form execution commands from the frontend.
+1. **IPC Surface:** 74 commands in `src-tauri/src/commands.rs`, registered in `lib.rs`. Payloads use `#[serde(rename_all = "camelCase")]`; `src/lib/types.ts` mirrors the contract. Change both together. Never accept free-form execution commands from the frontend.
 2. **Scanner is Strictly Read-Only:** Directory walk (`fs.rs`, `scan.rs`), direct NTFS MFT reader (`mft.rs`), duplicate finder (`duplicates.rs`), storage categorization (`storage.rs`), and developer project scanning (`devscan.rs`) never modify the filesystem. Reparse points (junctions, symlinks) are never followed.
 3. **Review-First Destructive Operations:** All modifications (cache cleaning, uninstallation, process termination, leftover removal, broken registry entry removal) require server-held, single-use expiring confirmation plans (`CleanupPlan`, `UninstallPlan`, `BatchUninstallPlan`, `LeftoverPlan`, `BrokenEntryPlan`).
 4. **Quarantine Over Deletion:** Cleaner and leftover files are moved into `%APPDATA%\dev.cyron.uninstaller\quarantine\<run-id>\` using Win32 renames. Every move is preceded by a durable write-ahead recovery journal (`recovery_journal.jsonl`) with `sync_all`. Their only permanent removal is manifest-scoped `purge_quarantine`. **Narrow Analyzer exception:** explicit user-selected files/folders may be recycled or permanently deleted through separate, server-held, expiring, single-use Analyzer plans. Scanning remains strictly read-only; recycle failure never authorizes permanent file deletion. Permanent deletion has no Cyron restore.
@@ -23,7 +23,7 @@ Cyron is a Windows desktop application (Tauri v2 + Rust backend, React 19 + Type
 7. **Leftovers & Multi-Type Registry Backup:** Registry subkey deletion requires an automated, recursive `.reg` export supporting all 6 value types (`REG_SZ`, `REG_DWORD`, `REG_QWORD`, `REG_BINARY`, `REG_EXPAND_SZ`, `REG_MULTI_SZ`). System roots and shared vendor keys (`Software\Microsoft`, `Software\Google`, etc.) are protected.
 8. **App Discovery:** Win32 (HKLM/HKCU 64/32-bit), Microsoft Store (`AppModel\Repository\Packages`, read-only inventory), Steam (`libraryfolders.vdf`), and portable heuristics (`%LOCALAPPDATA%\Programs`). Store apps display guidance to Windows Settings / `winget`.
 9. **Shell Integration (`explorer.rs`):** Per-user shell verbs registered under `HKCU\Software\Classes` without elevation. CLI startup routes (`--analyze`, `--duplicates`, `--storage`, etc.) route to views; they never execute destructive actions directly.
-10. **Zero Telemetry:** No Cyron application code initializes a network client, resolves an address, or sends telemetry. Tauri's dependency graph may link HTTP crates transitively; that is not an application network call.
+10. **Zero Telemetry, User-Initiated Updates:** Cyron sends no telemetry, analytics, diagnostics or account data. The only application network path is the explicit **Settings → About → Software updates** action: `tauri-plugin-updater` fetches the signed GitHub Releases `latest.json` and, after a native confirmation, the signed NSIS setup. No background update polling exists. Tauri's dependency graph may link HTTP crates transitively; that is not an application network call outside this path.
 11. **Performance Diagnostics Are Read-Only:** `perf.rs` samples CPU, memory, physical-disk counters, processes and startup/task inventory with bounded Windows APIs. It never clears standby memory, disables services, deletes Prefetch, changes the page file, disables Defender or updates, or applies registry/driver tweaks. Reversible startup toggling goes through the existing `StartupApproved` path and a native confirmation; advanced WPR tracing is optional, local, and requires the user to relaunch elevated.
 
 ## Git Workflow: Strict No-Rebase Policy
@@ -41,7 +41,10 @@ npm test                   # Frontend Vitest suite
 npm run test:desktop       # Real Tauri/WebView2 desktop E2E (10 journeys)
 npm run docs:check         # Verify documentation integrity
 npm run build:unsigned     # Unsigned release bundles (NSIS & MSI)
+npm run build:release      # Bundles + signed updater artifacts (requires TAURI_SIGNING_PRIVATE_KEY)
 npm run build:signed       # Build and sign with Chryypt Organization certificate
+npm run updater:manifest   # Generate latest.json from the NSIS setup signature
+npm run verify:updater     # Verify updater setup, signature and latest.json agree
 npm run verify:signatures  # Authenticode signature & negative checks
 npm run verify:metadata    # Windows PE VERSIONINFO & MSI audit
 node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml

@@ -1,7 +1,7 @@
 use crate::scan::{self, ScanProgress, ScanResult};
 use crate::{
-    app_history, apps, caches, cleanup, devscan, duplicates, explorer, history, leftovers, mft,
-    perf, process, store, uninstall, volumes, AppState,
+    app_history, apps, caches, cleanup, devscan, duplicates, everything, explorer, history, leftovers,
+    mft, perf, process, store, uninstall, volumes, AppState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2903,6 +2903,38 @@ pub fn set_startup_item_enabled(
     enabled: bool,
 ) -> Result<crate::system::StartupItem, String> {
     crate::system::set_startup_item_enabled(id.trim(), enabled)
+}
+
+#[tauri::command]
+pub async fn everything_status() -> everything::EverythingStatus {
+    run_blocking("Everything status", everything::status)
+        .await
+        .unwrap_or_else(|error| everything::EverythingStatus {
+            running: false,
+            available: false,
+            version: None,
+            db_loaded: false,
+            db_busy: false,
+            message: error,
+        })
+}
+
+#[tauri::command]
+pub async fn everything_search(
+    query: String,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<everything::EverythingPage, String> {
+    let query = query.trim().to_string();
+    if query.is_empty() {
+        return Err("Enter a search term.".into());
+    }
+    let offset = offset.unwrap_or(0);
+    let limit = limit.unwrap_or(everything::DEFAULT_LIMIT);
+    run_blocking("Everything search", move || {
+        everything::search(&query, offset, limit)
+    })
+    .await?
 }
 
 #[cfg(test)]

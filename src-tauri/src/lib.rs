@@ -6,6 +6,7 @@ pub mod cleanup;
 pub mod devscan;
 pub mod commands;
 pub mod duplicates;
+pub mod everything;
 pub mod explorer;
 pub mod fs;
 pub mod history;
@@ -97,6 +98,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::list_installed_apps,
@@ -171,6 +174,8 @@ pub fn run() {
             commands::prepare_kill_process_plan,
             commands::execute_kill_process_plan,
             commands::find_locking_processes,
+            commands::everything_status,
+            commands::everything_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cyron");

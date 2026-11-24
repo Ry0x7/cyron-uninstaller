@@ -4,7 +4,7 @@
  *
  * Checks the tag, that it is a published (non-draft, non-prerelease) release,
  * and that the asset set is exactly the NSIS setup, the WiX MSI, the standalone
- * executable and SHA256SUMS.txt for that version.
+ * executable, latest.json and SHA256SUMS.txt for that version.
  *
  *   node scripts/verify-release.mjs v0.2.1
  *   node scripts/verify-release.mjs            # uses package.json version
@@ -34,6 +34,7 @@ if (!/^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(tag)) {
 const expectedAssets = [
   `Cyron.Uninstaller_${version}_x64-setup.exe`,
   `Cyron.Uninstaller_${version}_x64_en-US.msi`,
+  "latest.json",
   "SHA256SUMS.txt",
   "cyron.exe",
 ].sort();

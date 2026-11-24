@@ -680,3 +680,57 @@ per-user installer. The final PASS/FAIL/UNVERIFIED matrix is in
   CHECK: `npm run build:desktop`; `npm run test:desktop` with the `spike capture and kernel/driver evidence render from live data` journey
   EXPECT: the rendered driver rows match the overview count; the System-event panel states its provenance; the capture renders its readings and peak CPU/kernel/disk/process summary with a bounded verdict; no horizontal overflow
   EVIDENCE: PASS on 2026-11-18. 11/11 desktop journeys passed in 20 m 08 s (`DESKTOP_E2E_OK`); the new journey passed in 55.6 s. The page listed 4 drivers (AMD Radeon RX 9060 XT, Intel Ethernet I225-V, TP-Link USB adapter, disk drive) and the count matched the rows; 0 recent System events were reported as such; the 20-reading capture showed peak CPU 42%, kernel 14%, disk 0.4%, `brave.exe` and a mixed verdict. See [the receipt](docs/evidence/2026-11-18-desktop-performance.md), [driver evidence](docs/evidence/2026-11-18-native/34-kernel-driver-evidence.png) and [spike result](docs/evidence/2026-11-18-native/35-spike-capture.png). Early stop, a live kernel-dominant spike and the elevated paths remain UNVERIFIED.
+## Everything index search — 2026-11-24
+
+Read-only search over a locally installed and running Everything 1.4.1+ index. The task ledger was
+written before implementation under the gitignored `.unlazy/everything-search/` scope, and all eight
+gates passed with `gate-check.mjs --approve` (`ALL MET (8 met)`). This section records the same
+evidence in the repository ledger.
+
+- [x] G108: the Everything WM_COPYDATA framing, reply parser, version gate and a fake local IPC peer round trip pass.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib everything::tests
+  EXPECT: test result: ok
+  EVIDENCE: PASS. 8/8 tests: QUERY2W header and UTF-16 layout, file and folder metadata, pagination, full-path fallback, malformed and truncated reply refusal, the 1.4.1 version gate, empty/oversized query refusal, and a real Win32 round trip against a fake WM_COPYDATA peer. The reply window filter allows only `WM_COPYDATA`; every field is bounds-checked.
+- [x] G109: all Rust and frontend suites pass on the final tree.
+  CHECK: `node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml`; `npm run typecheck`; `npm test`
+  EXPECT: exit 0
+  EVIDENCE: PASS. Rust 273 passed, 4 ignored, 0 failed (230 lib + 2 analyzer_actions + 5 cleanup_stress + 1 performance + 3 phase3_project + 1 real_system + 26 security + 5 stress_scan). TypeScript exit 0; 113 Vitest tests in 14 files.
+- [x] G110: the production frontend bundle and debug desktop binary build.
+  CHECK: `node scripts/verify-dist.mjs`; `npm run build:desktop`; `node scripts/verify-desktop-binary.mjs`
+  EXPECT: `DIST_OK`; `DESKTOP_BINARY_OK`
+  EVIDENCE: PASS. `DIST_OK` (2 assets, 702.3 KiB, index.html 444 bytes); Tauri built `src-tauri\\target\\debug\\cyron.exe` on the final source tree (19.04 MiB); `DESKTOP_BINARY_OK`.
+- [x] G111: documentation and the IPC contract agree.
+  CHECK: `npm run docs:check`; handler count check against AGENTS.md and HANDOFF.md
+  EXPECT: `DOCS_CHECK: PASSED`; `IPC_COUNT_OK 74`
+  EVIDENCE: PASS. 95 Markdown files audited, `DOCS_CHECK: PASSED (All documentation links, commands, versions, and invariants verified)`; 74 registered handlers matched the documented count; both new commands are in the architecture IPC table, TypeScript types and `api.ts`.
+- [x] G112: the integration has no network, write, execution or Everything-control surface.
+  CHECK: node -e "const s=require('fs').readFileSync('src-tauri/src/everything.rs','utf8');for(const banned of ['std::fs','std::process::Command','winreg','reqwest','TcpStream','http://','https://','EVERYTHING_IPC_EXIT','REBUILD_DB','DELETE_'])if(s.includes(banned))throw new Error('banned '+banned);console.log('EVERYTHING_READ_ONLY_OK')"
+  EXPECT: EVERYTHING_READ_ONLY_OK
+  EVIDENCE: PASS. `everything.rs` uses only Win32 window/message APIs: no filesystem, process launch, registry, network, index rebuild, exit or delete IPC. Results are display-only and a row may call the existing validated `reveal_path`; no result is opened or executed by Cyron. The Everything unavailable, unsupported-version and index-loading states are explicit. A live search against a real Everything process and visual inspection of the Search page remain UNVERIFIED because Everything is not installed on this verification machine.
+
+## In-app updater and release feed — 2026-11-25
+
+The update path is user-initiated and reads the signed GitHub Releases feed. The local release build
+and artifact checks passed; the live feed and a real version-to-version update remain UNVERIFIED
+because v0.2.2 is not published yet.
+
+- [x] G113: the updater is reachable only from Settings → About, reports bounded progress, verifies the package before install, and exposes restart without background polling.
+  CHECK: `npm run typecheck`; `npx vitest run src/lib/updates.test.ts`
+  EXPECT: exit 0 and 7 updater tests passing
+  EVIDENCE: PASS. 120 frontend tests in 15 files, including 7 updater-wrapper tests covering no-update, version/notes mapping, bounded progress with and without a content length, resource close, relaunch, installed version/bundle type, and NSIS-only update eligibility. The renderer cannot supply an endpoint; the only network path is `check()` from the button. No background timer or startup check was added. The updater panel was typechecked and unit-driven, not visually inspected in a native window.
+- [x] G114: the signed release build produces the NSIS setup, detached signature and agreeing manifest, and the bundles keep the expected Windows metadata.
+  CHECK: `TAURI_SIGNING_PRIVATE_KEY=<key> npm run build:release`; `npm run updater:manifest`; `npm run verify:updater`; `node scripts/verify-release-bundles.mjs`; `npm run verify:metadata`; `node scripts/generate-checksums.mjs --require-updater`
+  EXPECT: `UPDATER_ARTIFACTS_OK`, `RELEASE_BUNDLES_OK`, `WINDOWS_METADATA_OK`, `CHECKSUMS_OK`
+  EVIDENCE: PASS. NSIS 3,149,936 bytes / `fa004eaff621ad58573825c47742a84622115c3b4b0fe18374213c84e610231f`; MSI 4,395,008 bytes / `e26ca37b18ba17eea256307873368764ce633fd753d38c5ebfc9d592e56dda9f`; `cyron.exe` 9,129,472 bytes / `17853d79acf435bcf79216e1a09872448f48dd3544e90fe9cd5eb1b67f4cd061`. The NSIS `.sig` matches the `windows-x86_64-nsis` signature in `latest.json`, whose URL names the same setup asset. The verifier rejects a generic `windows-x86_64` or `windows-x86_64-msi` entry so an MSI install cannot receive the NSIS package. Version, publisher, icon and UpgradeCode checks passed.
+- [x] G115: the tag workflow requires the updater secret, builds with updater artifacts, verifies the manifest before upload, and publishes the manifest and matching checksums.
+  CHECK: `node -e "const s=require('fs').readFileSync('.github/workflows/release.yml','utf8');for(const x of ['npm run build:release','npm run verify:updater','latest.json','TAURI_SIGNING_PRIVATE_KEY'])if(!s.includes(x))throw new Error('missing '+x);console.log('RELEASE_WORKFLOW_UPDATER_OK')"`
+  EXPECT: RELEASE_WORKFLOW_UPDATER_OK
+  EVIDENCE: PASS (static). The workflow fails before building when the secret is empty, sets the key only for the release build, generates `latest.json` after the bundle, runs `verify:updater`, writes checksums with `--require-updater`, and uploads exactly the setup, MSI, standalone executable, manifest and checksum file. The manifest is scoped to `windows-x86_64-nsis`, and Settings enables the check only for an NSIS bundle while directing MSI installations to the release page. `scripts/verify-release.mjs` now includes `latest.json` in the expected asset set. No workflow run has executed this revision.
+- [x] G116: documentation and the updater boundary agree with the implementation.
+  CHECK: `npm run docs:check`
+  EXPECT: `DOCS_CHECK: PASSED`
+  EVIDENCE: PASS. 96 Markdown files audited with package and Tauri versions both `0.2.2`. The docs state that the only application network path is the explicit update check, that there is no polling, that Authenticode trust is separate from the updater signature, and that the private key is never committed.
+- [ ] G117: a published v0.2.2 feed installs over a real 0.2.1 installation, restarts the app and preserves app data.
+  CHECK: publish v0.2.2, check for updates from an installed 0.2.1, confirm the installer, relaunch and hash the app-data tree
+  EXPECT: update offered, signature accepted, app restarted at 0.2.2, no app-data loss
+  EVIDENCE: UNVERIFIED. v0.2.2 is not published; no live feed, native download or version-to-version installer run was performed.
