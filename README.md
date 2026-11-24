@@ -4,9 +4,9 @@ Cyron is a Windows desktop app for uninstalling software, finding what takes up 
 
 ## Download for Windows
 
-**[Download Cyron 0.2.1 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.1)**
+**[Download Cyron 0.2.2 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.2)**
 
-Cyron 0.2.1 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.1.md)
+Cyron 0.2.2 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.2.md)
 
 Cyron targets Windows 10 (1809 or later) and Windows 11 on x64 and uses the Microsoft Edge WebView2 Runtime.
 
@@ -24,11 +24,11 @@ Search installed Windows apps, current-user Store packages, Steam games and dete
 
 ### Search indexed drives instantly
 
-The development build adds a **Search** destination that queries the local [Everything](https://www.voidtools.com/) index by filename across every drive it covers (the published 0.2.1 package predates it). Everything 1.4.1 or newer must be installed and running; Cyron does not bundle, install or start it. Search is read-only, uses Everything's local IPC rather than its network interfaces, never changes the index or settings, and reveals a result only through the existing validated File Explorer action. If Everything is unavailable or still loading, the page says so instead of presenting an empty result.
+Version 0.2.2 adds a **Search** destination that queries the local [Everything](https://www.voidtools.com/) index by filename across every drive it covers. Everything 1.4.1 or newer must be installed and running; Cyron does not bundle, install or start it. Search is read-only, uses Everything's local IPC rather than its network interfaces, never changes the index or settings, and reveals a result only through the existing validated File Explorer action. If Everything is unavailable or still loading, the page says so instead of presenting an empty result.
 
 ### Update from inside the app
 
-The unreleased 0.2.2 adds **Settings → About → Software updates**. Cyron checks the signed GitHub Releases feed only when you click **Check for updates**, shows download progress, asks for confirmation, verifies the updater signature and restarts after the Windows installer finishes. It does not poll in the background or send telemetry. Existing 0.2.1 installations need one manual 0.2.2 install before this path is available. In-app updates use the per-user NSIS setup; MSI installations update from the release page.
+Version 0.2.2 adds **Settings → About → Software updates**. Cyron checks the signed GitHub Releases feed only when you click **Check for updates**, shows download progress, asks for confirmation, verifies the updater signature and restarts after the Windows installer finishes. It does not poll in the background or send telemetry. Existing 0.2.1 installations need one manual 0.2.2 install before this path is available; later releases can update in place. In-app updates use the per-user NSIS setup; MSI installations update from the release page.
 
 ### Find what is using disk space
 

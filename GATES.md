@@ -711,8 +711,8 @@ evidence in the repository ledger.
 ## In-app updater and release feed — 2026-11-25
 
 The update path is user-initiated and reads the signed GitHub Releases feed. The local release build
-and artifact checks passed; the live feed and a real version-to-version update remain UNVERIFIED
-because v0.2.2 is not published yet.
+and artifact checks passed, v0.2.2 is published, and the downloaded feed and checksums verify. A real
+version-to-version update remains UNVERIFIED because no installed 0.2.1 was updated in place.
 
 - [x] G113: the updater is reachable only from Settings → About, reports bounded progress, verifies the package before install, and exposes restart without background polling.
   CHECK: `npm run typecheck`; `npx vitest run src/lib/updates.test.ts`
@@ -725,7 +725,7 @@ because v0.2.2 is not published yet.
 - [x] G115: the tag workflow requires the updater secret, builds with updater artifacts, verifies the manifest before upload, and publishes the manifest and matching checksums.
   CHECK: `node -e "const s=require('fs').readFileSync('.github/workflows/release.yml','utf8');for(const x of ['npm run build:release','npm run verify:updater','latest.json','TAURI_SIGNING_PRIVATE_KEY'])if(!s.includes(x))throw new Error('missing '+x);console.log('RELEASE_WORKFLOW_UPDATER_OK')"`
   EXPECT: RELEASE_WORKFLOW_UPDATER_OK
-  EVIDENCE: PASS (static). The workflow fails before building when the secret is empty, sets the key only for the release build, generates `latest.json` after the bundle, runs `verify:updater`, writes checksums with `--require-updater`, and uploads exactly the setup, MSI, standalone executable, manifest and checksum file. The manifest is scoped to `windows-x86_64-nsis`, and Settings enables the check only for an NSIS bundle while directing MSI installations to the release page. `scripts/verify-release.mjs` now includes `latest.json` in the expected asset set. No workflow run has executed this revision.
+  EVIDENCE: PASS (static). The workflow fails before building when the secret is empty, sets the key only for the release build, generates `latest.json` after the bundle, runs `verify:updater`, writes checksums with `--require-updater`, and uploads exactly the setup, MSI, standalone executable, manifest and checksum file. The manifest is scoped to `windows-x86_64-nsis`, and Settings enables the check only for an NSIS bundle while directing MSI installations to the release page. `scripts/verify-release.mjs` now includes `latest.json` in the expected asset set. Release workflow `45452657763` executed this revision and passed every step, including the signed build, updater verification, checksums, publication and Pages deployment.
 - [x] G116: documentation and the updater boundary agree with the implementation.
   CHECK: `npm run docs:check`
   EXPECT: `DOCS_CHECK: PASSED`
@@ -733,4 +733,4 @@ because v0.2.2 is not published yet.
 - [ ] G117: a published v0.2.2 feed installs over a real 0.2.1 installation, restarts the app and preserves app data.
   CHECK: publish v0.2.2, check for updates from an installed 0.2.1, confirm the installer, relaunch and hash the app-data tree
   EXPECT: update offered, signature accepted, app restarted at 0.2.2, no app-data loss
-  EVIDENCE: UNVERIFIED. v0.2.2 is not published; no live feed, native download or version-to-version installer run was performed.
+  EVIDENCE: UNVERIFIED. The v0.2.2 release and feed are published, and the downloaded setup, MSI, executable and manifest match `SHA256SUMS.txt`; `latest.json` advertises only `windows-x86_64-nsis`. No installed 0.2.1 was updated in place, so the native download, installer restart and app-data preservation still need a real version-to-version run.
