@@ -8,7 +8,7 @@ Local signed builds use a **Chryypt Organization** self-signed certificate (`CN=
 
 Release builds carry a **separate Tauri updater (minisign) signature**. This signature authenticates update packages to the in-app updater and is independent of Authenticode and SmartScreen trust.
 
-**Current status (verified 2026-11-18):** the published `v0.1.0` NSIS installer and all three 0.2.0 RC1 release artifacts are `NotSigned`. The Chryypt certificate is self-signed (`Subject == Issuer`) and its chain reports `UntrustedRoot`, so even a signed local build does not earn public trust or SmartScreen reputation. The unsigned NSIS installer was installed, repaired, relaunched, uninstalled and reinstalled successfully; that does not change the trust result. See [the installer receipt](evidence/2026-11-17-installer-release.md).
+**Current status (verified 2026-11-25):** the published v0.2.2 NSIS setup, MSI package and standalone executable are `NotSigned`; the v0.2.2 updater package carries a separate minisign signature. The earlier `v0.1.0` NSIS installer and 0.2.0 RC1/RC2 artifacts are also `NotSigned`. The Chryypt certificate is self-signed (`Subject == Issuer`) and its chain reports `UntrustedRoot`, so even a signed local build does not earn public trust or SmartScreen reputation. The unsigned NSIS installer was installed, repaired, relaunched, uninstalled and reinstalled successfully; that does not change the trust result. See [the installer receipt](evidence/2026-11-17-installer-release.md).
 
 ---
 
