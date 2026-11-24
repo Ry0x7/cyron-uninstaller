@@ -18,11 +18,11 @@ communication for non-technical users.
 | --- | --- |
 | Window/shell | Tauri v2, one native window (`main`), 1320×860, minimum 1000×680 |
 | Frontend | React 19 + TypeScript, Vite 7, no router |
-| Backend | Rust, `tauri`, `tauri-plugin-dialog`, `winreg`, `windows-sys`, `sha2` |
+| Backend | Rust, `tauri`, `tauri-plugin-dialog`, `tauri-plugin-updater`, `tauri-plugin-process`, `winreg`, `windows-sys`, `sha2` |
 | Storage | localStorage (preferences, tree width), `history.json`, `cleanup-log.json`, `recovery_journal.jsonl` and `quarantine/` in the Tauri app-data dir |
-| Frontend tests | Vitest, 112 tests in 14 files |
+| Frontend tests | Vitest, 120 tests in 15 files |
 | Desktop E2E | WebdriverIO + `@wdio/tauri-service` + `tauri-driver` + matching `msedgedriver`, driving the compiled Tauri/WebView2 window; 10 journeys in 2 spec files |
-| Backend tests | `cargo test`: 265 passed (222 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
+| Backend tests | `cargo test`: 273 passed (230 library, 26 security, 5 cleanup-stress, 5 scanner-stress, 3 Phase 3 project, 2 analyzer-actions, 1 real-system, 1 performance), 4 ignored |
 
 Native APIs used by the backend:
 
@@ -51,8 +51,9 @@ src/
   features/activity/          History & Recovery → Activity
   features/history/          History & Recovery destination shell, Recovery and cleanup log
   features/performance/       live metrics, 20-second spike capture, kernel/driver/event evidence, startup checks, baselines, optional trace
-  features/settings/          theme, scan scope, exclusions, startup apps, Explorer integration, safety
+  features/settings/          theme, scan scope, exclusions, startup apps, Explorer integration, safety, updates
   lib/api.ts                  typed invoke wrapper + cached cache-inventory request
+  lib/updates.ts              updater check, progress, close and relaunch wrapper
   lib/types.ts                shared IPC contract (camelCase)
   lib/analyzerFilters.ts      tree/file filtering, sorting and filtered totals
   lib/treemap.ts              squarified treemap layout
@@ -119,8 +120,9 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. Name-only file, shortcut and registry matches are `caution` and unselected; only exact install-location or exact registration identity is preselected as `safe`. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
+| `everything.rs` | Read-only client for a local Everything 1.4.1+ process using the documented `WM_COPYDATA` `QUERY2W` IPC (window class `EVERYTHING_TASKBAR_NOTIFICATION`). Reports the version, index loaded/busy state and unavailable reasons, caps query length and result counts, and parses every reply field with bounds checks before it becomes display data. It does not load the SDK DLL, start or stop Everything, change its index or settings, execute a result path, or use Everything's HTTP/ETP network interfaces. |
 | `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, Store removal plans, app lifecycle history, event emission, history and log recording, Explorer reveal, and validated IPC commands. |
-| `lib.rs` | Registers the dialog plugin, `AppState`, startup route resolution, and all Tauri commands. `read_only` starts `true`. |
+| `lib.rs` | Registers the dialog, updater and process plugins, `AppState`, startup route resolution, and all Tauri commands. `read_only` starts `true`. |
 
 ## IPC surface
 
@@ -179,6 +181,8 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `query_directory_children` | `query` | `DirectoryPage` | Registered; no current view consumes the scan index. |
 | `search_indexed_files` | `query` | `SearchResultPage` | Registered; no current view consumes the scan index. |
 | `get_scan_index_stats` | `jobId` | `IndexStats` | Registered; no current view consumes the scan index. |
+| `everything_status` | — | `EverythingStatus` | Read-only Everything IPC version and index state; `available: false` with an actionable message when Everything is missing, too old or not answering. |
+| `everything_search` | `query`, `offset?`, `limit?` | `EverythingPage` | Read-only name/path query against the local Everything index; query length and result window are clamped, and results are display data only. |
 | `snapshot_app_identity` | `appId` | `InstalledApp` | Backend identity for review, including Hunter tokens. |
 | `prepare_broken_inventory_cleanup` | `appId` | `BrokenEntryPlan` | 5-minute single-use plan; fingerprint-bound. |
 | `execute_broken_inventory_cleanup` | `planId`, `confirmedKeyPath` | `LeftoverCleanReport` | Re-verifies the live key before deletion. |
@@ -202,9 +206,34 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `execute_kill_process_plan` | `planId`, `pids[]`, `force` | `ProcessTerminateResult[]` | Consumes the plan; critical processes refused. |
 | `find_locking_processes` | `targetPath` | `LockingProcessInfo[]` | Windows Restart Manager (`rstrtmgr.dll`). |
 
+The Search destination uses a third-party local index rather than Cyron's scanner. Everything
+1.4.1 or newer must be installed and running; Cyron sends its query to the existing Everything
+process over the documented `WM_COPYDATA` IPC and never creates or changes the index. Results are
+treated as untrusted display data, query length and result windows are bounded, and a result path
+is only revealed through the existing validated `reveal_path` command. When Everything is absent or
+older than 1.4.1, `everything_status` returns `available: false` with a plain-language reason and
+the UI shows setup guidance instead of an empty-results claim. A still-loading index is reported as
+a warning (`dbLoaded: false`), not disguised as a successful empty search. No SDK DLL is bundled and
+no network interface is used.
+
 All three registries reject a job id that is already running instead of replacing its cancellation
 flag, so a cancel call cannot target a flag that no longer controls the running task. Cleanup plan
 ids are opaque, single-use and swept when expired.
+
+## In-app updates
+
+**Settings → About → Software updates** is the only application network path. The Tauri updater
+plugin fetches the fixed `https://github.com/Ry0x7/cyron-uninstaller/releases/latest/download/latest.json`
+manifest only after the user clicks **Check for updates**. The manifest names the version, notes, a
+signed NSIS setup URL and the minisign signature checked against the public key in
+`tauri.conf.json`. Its only platform entry is `windows-x86_64-nsis`; an MSI installation is not
+offered the per-user NSIS package. Download progress is reported to the renderer; installation
+starts only after a native confirmation, and the Windows installer restarts Cyron when it finishes.
+There is no background polling, telemetry, caller-supplied URL or update private key in the
+application.
+Release builds use `src-tauri/tauri.release.conf.json` to create the updater signatures, and
+`scripts/generate-updater-manifest.mjs` writes `latest.json`. The updater private key is a local or
+CI secret; the public key is committed in `tauri.conf.json`.
 
 Progress event payloads:
 
@@ -625,7 +654,7 @@ measurements and are not logged.
 - Reparse points are skipped during traversal, preventing cycle and mount-point escapes.
 - Scan depth, returned child counts, retained nodes, file nodes, largest-file output, extension stats and keys, errors, tracked file ids, the native directory buffer and the MFT record budget are all capped.
 - The WebView runs with a strict CSP (`default-src 'self'`, IPC allowed, no remote scripts) and only the dialog-open and dialog-ask capabilities are granted beyond Tauri core defaults. Native confirmations cannot be spoofed by renderer content.
-- No network API, telemetry, analytics or auto-update code is present.
+- No telemetry, analytics or background update polling is present. The only user-initiated network path is the signed updater checked from Settings → About. The renderer cannot supply an update URL, and the update private key is never bundled.
 - The app does not request elevation. Without it, MFT is unavailable, the walk reports unreadable folders, and locked cache files are skipped instead of forced.
 - Cleanup starts in read-only mode.
 

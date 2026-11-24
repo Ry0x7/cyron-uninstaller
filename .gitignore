@@ -11,6 +11,9 @@ src-tauri/target/
 .chryypt/
 .unlazy/
 
+# Local updater signing key (never commit)
+/.tauri/
+
 # Local scratch
 *.log
 /tmp/

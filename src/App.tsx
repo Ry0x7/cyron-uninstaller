@@ -7,6 +7,7 @@ import {
   IconHistory,
   IconHome,
   IconPanel,
+  IconSearch,
   IconSettings,
   IconStorage,
   type IconProps,
@@ -19,15 +20,17 @@ import { FindLocksModal } from "./features/explorer/FindLocksModal";
 import { KillProcessModal } from "./features/explorer/KillProcessModal";
 import { Overview } from "./features/overview/Overview";
 import { Performance } from "./features/performance/Performance";
+import { Search } from "./features/search/Search";
 import { Settings } from "./features/settings/Settings";
 import { StorageCleanup } from "./features/storage/StorageCleanup";
 import { Uninstaller } from "./features/uninstaller/Uninstaller";
 import { loadInstalledApps } from "./lib/api";
+import { useInstalledVersion } from "./lib/updates";
 import type { InstalledApp, StartupRoute, ViewId } from "./lib/types";
 
 const COLLAPSE_KEY = "cyron.sidebar.collapsed";
 
-type Destination = "home" | "applications" | "storage" | "performance" | "history" | "settings";
+type Destination = "home" | "search" | "applications" | "storage" | "performance" | "history" | "settings";
 type NavDestination = Exclude<Destination, "settings">;
 
 interface NavEntry {
@@ -38,6 +41,7 @@ interface NavEntry {
 
 const PRIMARY_NAV: NavEntry[] = [
   { id: "home", label: "Home", icon: IconHome },
+  { id: "search", label: "Search", icon: IconSearch },
   { id: "applications", label: "Applications", icon: IconApps },
   { id: "storage", label: "Storage & Cleanup", icon: IconStorage },
   { id: "performance", label: "Performance", icon: IconGauge },
@@ -46,6 +50,7 @@ const PRIMARY_NAV: NavEntry[] = [
 
 const TITLES: Record<Destination, string> = {
   home: "Home",
+  search: "Search",
   applications: "Applications",
   storage: "Storage & Cleanup",
   performance: "Performance",
@@ -57,6 +62,8 @@ function destinationForView(view: ViewId): Destination {
   switch (view) {
     case "overview":
       return "home";
+    case "search":
+      return "search";
     case "uninstaller":
       return "applications";
     case "cleaner":
@@ -75,6 +82,8 @@ function defaultView(destination: Destination): ViewId {
   switch (destination) {
     case "home":
       return "overview";
+    case "search":
+      return "search";
     case "applications":
       return "uninstaller";
     case "storage":
@@ -122,6 +131,8 @@ function Sidebar({
   onNavigate: (destination: Destination) => void;
   onToggleCollapsed: () => void;
 }) {
+  const version = useInstalledVersion();
+
   return (
     <aside className="sidebar" aria-label="Cyron sections">
       <button
@@ -175,7 +186,7 @@ function Sidebar({
         </button>
 
         <div className="sidebar__tools">
-          <span className="sidebar__version">v0.2.1</span>
+          <span className="sidebar__version">v{version ?? "…"}</span>
           <IconButton
             label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             className="collapse-btn"
@@ -292,6 +303,7 @@ export default function App() {
   );
 
   const overviewView = useMemo(() => <Overview onNavigate={navigate} />, [navigate]);
+  const searchView = useMemo(() => <Search />, []);
   const uninstallerInitialAppId =
     startupRoute?.view === "uninstaller" ? startupRoute.targetAppId : undefined;
   const uninstallerInitialQuery =
@@ -354,6 +366,8 @@ export default function App() {
     switch (destination) {
       case "home":
         return overviewView;
+      case "search":
+        return searchView;
       case "applications":
         return uninstallerView;
       case "storage":

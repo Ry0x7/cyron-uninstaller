@@ -136,6 +136,7 @@ Open **Settings** from the sidebar footer.
   - **Find Locking Processes**: Queries Restart Manager for all processes currently holding open handles on the selected file or directory. Offers graceful window closure (`WM_CLOSE`) and verified force termination with PID creation-time checks.
   - **Kill Running Process**: Matches running processes against the clicked executable's canonical path, displaying PID, creation time, and window title. Never terminates by filename alone, and unconditionally protects critical Windows system processes.
   - **Independent Settings Toggles**: Separate controls for Standard and Advanced verbs with live HKCU status indicators and one-click Repair actions.
+- **Software updates**: Open **Settings → About → Software updates** and choose **Check for updates**. Cyron checks the signed GitHub Releases manifest only when you ask; it does not poll in the background or send telemetry. If a newer version exists, review its version and notes, confirm the native prompt, and let Cyron download and verify the package. The installer closes and restarts Cyron when it finishes. A failed check or download leaves the installed version unchanged. Existing 0.2.1 installations require one manual 0.2.2 install before this update path exists. In-app updates apply to the per-user NSIS setup. MSI installations show that they must update from the published release page instead, so a per-machine install is never replaced by a second per-user copy.
 
 ---
 
@@ -182,6 +183,18 @@ Open **Performance** in the sidebar. Cyron samples CPU, memory, physical-disk pr
 - **Advanced diagnostic trace**: only helpful when the basic metrics and the 20-second capture cannot explain the lag. It requires Windows Performance Recorder and an administrator session, stays on this PC, and is never uploaded. Cyron does not elevate itself; reopen it with **Run as administrator** if you choose to trace.
 
 Cyron does not offer RAM boosters, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling or driver tweaks. Those are not supported performance fixes. Driver dates and event-log records are evidence for your own troubleshooting; Cyron never installs, rolls back or removes a driver. Recommendations carry their measured evidence, expected effect, risk and a way to verify the result.
+
+## 11. Search files with Everything
+
+Open **Search** in the sidebar to find files and folders by name across every drive that the local [Everything](https://www.voidtools.com/) index covers. Cyron uses the index that Everything already maintains; it does not create its own background index.
+
+- **Setup**: install Everything 1.4.1 or newer and keep it running. Cyron does not bundle, install or start Everything, and it cannot search when Everything is closed. If Everything is still loading its index, the page says so and results may stay empty until the index finishes. Use **Check Everything** after starting it.
+- **Read-only**: Search never adds, renames or deletes files, never changes Everything's index or settings, and never uses a network service. Results are only shown; revealing one opens File Explorer at that path.
+- **Query syntax**: Everything's normal filename matching applies. For example, `report` matches names containing that word, `ext:pdf` limits by extension, `folder:` matches folders, and quoted text keeps a phrase together. Cyron passes the query to Everything unchanged.
+- **Results**: each row shows the name, containing folder, size (for files) and last-modified date. Select a row or press Enter to reveal it in File Explorer. **Load more** continues through a large result set.
+- **Unavailable state**: when Everything is missing, older than 1.4.1, closed or not answering, the page explains which condition applies and how to fix it. A loading index is called out explicitly; neither state is disguised as a successful empty search.
+
+Everything is a separate third-party application. Cyron does not control its indexing rules or which drives it includes; adjust those in Everything itself.
 
 ---
 

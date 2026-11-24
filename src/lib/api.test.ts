@@ -77,6 +77,29 @@ describe("Tauri IPC contract", () => {
     expect(SCAN_EVENT).toBe("cyron-scan-progress");
   });
 
+  it("uses the Everything index command names and payloads", async () => {
+    const calls = [
+      { run: () => api.everythingStatus(), command: "everything_status", args: undefined },
+      {
+        run: () => api.searchEverything("report ext:pdf"),
+        command: "everything_search",
+        args: { query: "report ext:pdf", offset: 0, limit: 100 },
+      },
+      {
+        run: () => api.searchEverything("report", 100, 200),
+        command: "everything_search",
+        args: { query: "report", offset: 100, limit: 200 },
+      },
+    ];
+
+    for (const { run, command, args } of calls) {
+      invoke.mockClear();
+      invoke.mockResolvedValue(undefined);
+      await run();
+      expect(invoke).toHaveBeenCalledExactlyOnceWith(command, args);
+    }
+  });
+
   it("uses the cleanup command names and payloads", async () => {
     const calls = [
       { run: () => api.previewCleanup(["user-temp", "npm-cache"]), command: "preview_cleanup", args: { targetIds: ["user-temp", "npm-cache"], exclusions: [] } },

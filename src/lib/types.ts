@@ -2,6 +2,7 @@
 
 export type ViewId =
   | "overview"
+  | "search"
   | "uninstaller"
   | "analyzer"
   | "performance"
@@ -1038,6 +1039,38 @@ export interface PerformanceBaseline {
   topMemoryProcess: string | null;
   bootTimeMs: number | null;
   enabledStartupCount: number;
+}
+
+/* -------------------------------------------------------- Everything search */
+
+/** Result of checking the local Everything 1.4.1+ IPC surface. */
+export interface EverythingStatus {
+  running: boolean;
+  available: boolean;
+  version: string | null;
+  dbLoaded: boolean;
+  dbBusy: boolean;
+  message: string;
+}
+
+export interface EverythingItem {
+  name: string;
+  /** Parent folder reported by Everything. */
+  path: string;
+  fullPath: string;
+  isFolder: boolean;
+  size: number;
+  /** Unix seconds, when Everything has the timestamp indexed. */
+  modified: number | null;
+}
+
+export interface EverythingPage {
+  items: EverythingItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  elapsedMs: number;
 }
 
 export type AnalyzerAction = "recycle" | "permanent";

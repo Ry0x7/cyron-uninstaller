@@ -22,6 +22,14 @@ Search installed Windows apps, current-user Store packages, Steam games and dete
 
 *Applications shows each app's publisher, reported size, install scope and available actions.*
 
+### Search indexed drives instantly
+
+The development build adds a **Search** destination that queries the local [Everything](https://www.voidtools.com/) index by filename across every drive it covers (the published 0.2.1 package predates it). Everything 1.4.1 or newer must be installed and running; Cyron does not bundle, install or start it. Search is read-only, uses Everything's local IPC rather than its network interfaces, never changes the index or settings, and reveals a result only through the existing validated File Explorer action. If Everything is unavailable or still loading, the page says so instead of presenting an empty result.
+
+### Update from inside the app
+
+The unreleased 0.2.2 adds **Settings → About → Software updates**. Cyron checks the signed GitHub Releases feed only when you click **Check for updates**, shows download progress, asks for confirmation, verifies the updater signature and restarts after the Windows installer finishes. It does not poll in the background or send telemetry. Existing 0.2.1 installations need one manual 0.2.2 install before this path is available. In-app updates use the per-user NSIS setup; MSI installations update from the release page.
+
 ### Find what is using disk space
 
 Open **Storage & Cleanup → Disk space** and scan a drive or folder. Browse the results in a treemap and folder tree, or look for duplicate files. The Cleanup tab measures caches and rebuildable project files so you can review what removal would affect.
