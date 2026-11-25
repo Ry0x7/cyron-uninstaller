@@ -1041,36 +1041,110 @@ export interface PerformanceBaseline {
   enabledStartupCount: number;
 }
 
-/* -------------------------------------------------------- Everything search */
+/* ------------------------------------------------------- Native file index */
 
-/** Result of checking the local Everything 1.4.1+ IPC surface. */
-export interface EverythingStatus {
-  running: boolean;
-  available: boolean;
-  version: string | null;
-  dbLoaded: boolean;
-  dbBusy: boolean;
+/** Lifecycle of Cyron's own on-disk search index. */
+export type SearchIndexState = "empty" | "loading" | "building" | "ready" | "error";
+
+export interface SearchIndexVolumeStatus {
+  mount: string;
+  label: string;
+  state: "queued" | "indexing" | "done" | "error";
+  error: string | null;
+}
+
+export interface SearchIndexProgress {
+  /** Drive mount currently being walked, e.g. "C:\\". */
+  volume: string;
+  entries: number;
+  currentDir: string;
+}
+
+export interface SearchIndexStatus {
+  state: SearchIndexState;
+  building: boolean;
+  ready: boolean;
+  entries: number;
+  files: number;
+  folders: number;
+  totalSize: number;
+  /** Unix seconds of the last completed build or load. */
+  indexedAt: number | null;
+  buildMs: number | null;
+  volumes: SearchIndexVolumeStatus[];
+  progress: SearchIndexProgress | null;
+  warnings: string[];
+  /** True while the backend is watching indexed volumes for changes. */
+  watching: boolean;
   message: string;
 }
 
-export interface EverythingItem {
+export type SearchSortField =
+  | "name"
+  | "path"
+  | "size"
+  | "modified"
+  | "created"
+  | "extension";
+
+export type SearchFilter =
+  | "all"
+  | "files"
+  | "folders"
+  | "audio"
+  | "video"
+  | "image"
+  | "document"
+  | "executable"
+  | "compressed";
+
+export interface SearchQueryOptions {
+  query: string;
+  matchCase: boolean;
+  wholeWord: boolean;
+  matchPath: boolean;
+  regex: boolean;
+  filter: SearchFilter;
+  sort: SearchSortField;
+  descending: boolean;
+  offset: number;
+  limit: number;
+}
+
+export interface SearchIndexItem {
   name: string;
-  /** Parent folder reported by Everything. */
-  path: string;
+  /** Parent folder, without the file or folder name. */
+  parentPath: string;
   fullPath: string;
   isFolder: boolean;
   size: number;
-  /** Unix seconds, when Everything has the timestamp indexed. */
+  /** Unix seconds, when the file system reported it. */
   modified: number | null;
+  created: number | null;
+  extension: string;
 }
 
-export interface EverythingPage {
-  items: EverythingItem[];
+export interface SearchIndexPage {
+  items: SearchIndexItem[];
   total: number;
+  files: number;
+  folders: number;
+  totalSize: number;
   offset: number;
   limit: number;
   hasMore: boolean;
   elapsedMs: number;
+  /** True when the index stopped at its entry cap. */
+  truncated: boolean;
+}
+
+export type SearchExportFormat = "csv" | "txt";
+
+export interface SearchExportReport {
+  path: string;
+  rows: number;
+  skipped: number;
+  truncated: boolean;
 }
 
 export type AnalyzerAction = "recycle" | "permanent";

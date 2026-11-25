@@ -6,7 +6,6 @@ pub mod cleanup;
 pub mod devscan;
 pub mod commands;
 pub mod duplicates;
-pub mod everything;
 pub mod explorer;
 pub mod fs;
 pub mod history;
@@ -18,6 +17,7 @@ pub mod perf;
 pub mod process;
 pub mod providers;
 pub mod scan;
+pub mod searchindex;
 pub mod storage;
 pub mod store;
 pub mod system;
@@ -56,6 +56,8 @@ pub struct AppState {
     /// One optional Windows Performance Recorder session started by this app.
     pub performance_trace: Arc<Mutex<Option<perf::TraceSession>>>,
     pub index_manager: Arc<index::IndexManager>,
+    /// Native, read-only file index used by the Search destination.
+    pub search_index: Arc<searchindex::SearchState>,
     /// True until the user deliberately enables cleaning.
     pub read_only: Arc<AtomicBool>,
 }
@@ -85,6 +87,7 @@ impl Default for AppState {
             startup_route: Arc::default(),
             performance_trace: Arc::default(),
             index_manager: Arc::default(),
+            search_index: Arc::default(),
             read_only: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -174,9 +177,21 @@ pub fn run() {
             commands::prepare_kill_process_plan,
             commands::execute_kill_process_plan,
             commands::find_locking_processes,
-            commands::everything_status,
-            commands::everything_search,
+            commands::search_index_status,
+            commands::build_search_index,
+            commands::cancel_search_index_build,
+            commands::query_search_index,
+            commands::export_search_results,
         ])
+        .setup(|app| {
+            use tauri::Manager;
+            let state = app.state::<AppState>();
+            searchindex::start_cached_load(
+                app.handle().clone(),
+                Arc::clone(&state.search_index),
+            );
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Cyron");
 }

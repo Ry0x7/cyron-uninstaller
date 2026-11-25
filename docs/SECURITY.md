@@ -152,21 +152,42 @@ includes HTTP crates transitively; that is not a Cyron network call.
 - Authenticode signing is a separate trust layer; release artifacts are currently unsigned and the
   release notes say so.
 
-### Everything index integration
+### Native search index
 
-The **Search** destination reads a third-party local index maintained by Everything (voidtools).
-Cyron requires an already installed and running Everything 1.4.1 or newer; it does not install,
-bundle, start or stop Everything, load the SDK DLL, or change Everything's index or settings. The
-only channel is the documented local `WM_COPYDATA` `QUERY2W` IPC sent to the
-`EVERYTHING_TASKBAR_NOTIFICATION` window; Everything's HTTP and ETP network interfaces are never
-used. `everything.rs` treats every reply field as untrusted: it caps reply size and item counts,
-validates offsets and string lengths before decoding, and returns an error instead of panicking on
-a malformed list. Search is read-only and has no filesystem, registry, process or settings write
-path. A result is never executed or opened; the UI may only pass its path to the existing
-`reveal_path` command, which still requires an existing path and launches Explorer. The reply
-window's message filter is widened for `WM_COPYDATA` only; UIPI can still block a lower-integrity
-Cyron from querying an elevated Everything, which surfaces as a normal search error. A local
-process that spoofs a reply can at most inject display text, not command execution.
+The **Search** destination runs Cyron's own local index over fixed local drives. It does not need
+Everything, a service, elevation or a network connection. A build walks directories through the
+existing read-only `fs.rs` enumerator, records names, parent links, sizes, timestamps and raw
+`FILE_ATTRIBUTE_*` flags, and never opens file contents. Reparse points (junctions, symlinks and
+mount points) are indexed as entries but never followed, matching the scanner invariant.
+
+The only file the index writes automatically is its own regenerable cache,
+`%APPDATA%\dev.cyron.uninstaller\search-index.bin`. It is written to a temp file, flushed with
+`sync_all`, and atomically replaced after a versioned magic header; a truncated or foreign file is
+ignored and the user is offered a rebuild. Indexed files are never renamed, removed, written or
+executed. The stored index contains local file names and paths, which are already visible to the
+same Windows account; deleting the cache removes that copy. No telemetry or network request is
+made.
+
+Live updates open each indexed volume root read-only with `FILE_LIST_DIRECTORY` and wait on
+`ReadDirectoryChangesW`. Events only mutate the in-memory index; a new, renamed or changed path is
+re-read with `symlink_metadata` for its metadata. Watcher handles are read-only and never grant
+write access to the volume. A failed watcher simply leaves the index stale until the next rebuild;
+it cannot write to the filesystem.
+
+The query parser caps input at 512 characters and 32 terms, validates field values and calendar
+dates, and compiles regex terms with a bounded size in Rust's linear-time regex engine, so a
+pathological query cannot trigger catastrophic backtracking. Results contain display metadata only.
+A result is never opened or executed by the backend; the UI may pass its path to the existing
+`reveal_path` command, which requires an existing path and launches Explorer. The explicit **Copy
+path** action uses the WebView clipboard and never touches the filesystem.
+
+**CSV/TXT export** is the only user-file write in Search. The renderer obtains the destination from
+the native save dialog; the backend revalidates that it is absolute, ends in `.csv` or `.txt` to
+match the requested format, and sits in an existing folder. It writes only generated rows from the
+index (the selected paths or the current sorted result set), caps a single export at 1,000,000 rows,
+and refuses a missing, relative or mismatched destination. It never opens, executes or indexes the
+destination, and it does not modify any indexed file. Exporting to a path that already exists
+truncates it after the save dialog's overwrite confirmation.
 
 ## Gates satisfied across Phases 3 and 4
 

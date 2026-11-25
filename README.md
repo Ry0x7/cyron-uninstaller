@@ -4,9 +4,9 @@ Cyron is a Windows desktop app for uninstalling software, finding what takes up 
 
 ## Download for Windows
 
-**[Download Cyron 0.2.2 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.2)**
+**[Download Cyron 0.2.3 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.3)**
 
-Cyron 0.2.2 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.2.md)
+Cyron 0.2.3 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.3.md)
 
 Cyron targets Windows 10 (1809 or later) and Windows 11 on x64 and uses the Microsoft Edge WebView2 Runtime.
 
@@ -22,9 +22,11 @@ Search installed Windows apps, current-user Store packages, Steam games and dete
 
 *Applications shows each app's publisher, reported size, install scope and available actions.*
 
-### Search indexed drives instantly
+### Search every fixed drive instantly
 
-Version 0.2.2 adds a **Search** destination that queries the local [Everything](https://www.voidtools.com/) index by filename across every drive it covers. Everything 1.4.1 or newer must be installed and running; Cyron does not bundle, install or start it. Search is read-only, uses Everything's local IPC rather than its network interfaces, never changes the index or settings, and reveals a result only through the existing validated File Explorer action. If Everything is unavailable or still loading, the page says so instead of presenting an empty result.
+The **Search** destination builds Cyron's own local file index. One pass stores the name, path, size, dates and attributes of every accessible file and folder on your fixed drives, then search answers from memory in milliseconds. No Everything install, service or network is involved, and file contents are never read.
+
+Use Everything-style syntax when a filename alone is not enough: `report ext:pdf`, `size:>1gb`, `dm:thisweek`, `folder: node_modules`, `path:src`, `dupe:` or `regex:^log-\d+`. Type filters, match-case/whole-word/path options and sortable Name, Path, Size and Modified columns are in the page. Check rows with the mouse or Space/Shift+Arrow, then copy their paths or export just those rows as CSV or TXT; the footer exports the whole sorted result set. The index is saved between sessions and stays current with live file-system changes while Cyron runs; **Rebuild index** folds in changes made since the last build. Search and indexing are read-only, export writes only the rows you request to the destination you choose, and Reveal opens the existing validated File Explorer action.
 
 ### Update from inside the app
 

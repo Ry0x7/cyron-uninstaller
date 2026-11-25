@@ -465,6 +465,10 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         // Atomic publish of Cyron's own bounded performance-baselines.json;
         // no user files or system paths are touched.
         "perf.rs",
+        // Atomic publish of Cyron's own regenerable search-index.bin in the
+        // application data folder. Indexed user files are opened read-only and
+        // are never renamed, removed or written by this module.
+        "searchindex.rs",
     ];
     let mut command_invocations = Vec::new();
 

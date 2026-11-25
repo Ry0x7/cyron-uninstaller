@@ -37,8 +37,11 @@ import type {
   StoreUninstallPlan,
   StoreUninstallResult,
   ExplorerIntegrationStatus,
-  EverythingPage,
-  EverythingStatus,
+  SearchExportFormat,
+  SearchExportReport,
+  SearchIndexPage,
+  SearchIndexStatus,
+  SearchQueryOptions,
   CleanableInspection,
   CleanupProviderDef,
   DirectoryPage,
@@ -208,9 +211,23 @@ export const api = {
     call<DirectoryPage>("query_directory_children", { query }),
   searchIndexedFiles: (query: SearchQuery) =>
     call<SearchResultPage>("search_indexed_files", { query }),
-  everythingStatus: () => call<EverythingStatus>("everything_status"),
-  searchEverything: (query: string, offset = 0, limit = 100) =>
-    call<EverythingPage>("everything_search", { query, offset, limit }),
+  searchIndexStatus: () => call<SearchIndexStatus>("search_index_status"),
+  buildSearchIndex: () => call<SearchIndexStatus>("build_search_index"),
+  cancelSearchIndexBuild: () => call<SearchIndexStatus>("cancel_search_index_build"),
+  querySearchIndex: (options: SearchQueryOptions) =>
+    call<SearchIndexPage>("query_search_index", { options }),
+  exportSearchResults: (
+    options: SearchQueryOptions,
+    format: SearchExportFormat,
+    destination: string,
+    selected?: string[],
+  ) =>
+    call<SearchExportReport>("export_search_results", {
+      options,
+      format,
+      destination,
+      selected,
+    }),
   getScanIndexStats: (jobId: string) =>
     call<IndexStats>("get_scan_index_stats", { jobId }),
   resolveCursorTarget: () => call<HunterTargetInfo | null>("resolve_cursor_target"),

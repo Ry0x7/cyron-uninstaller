@@ -77,18 +77,44 @@ describe("Tauri IPC contract", () => {
     expect(SCAN_EVENT).toBe("cyron-scan-progress");
   });
 
-  it("uses the Everything index command names and payloads", async () => {
+  it("uses the native search index command names and payloads", async () => {
+    const options = {
+      query: "report ext:pdf",
+      matchCase: false,
+      wholeWord: false,
+      matchPath: false,
+      regex: false,
+      filter: "all" as const,
+      sort: "name" as const,
+      descending: false,
+      offset: 0,
+      limit: 100,
+    };
     const calls = [
-      { run: () => api.everythingStatus(), command: "everything_status", args: undefined },
+      { run: () => api.searchIndexStatus(), command: "search_index_status", args: undefined },
+      { run: () => api.buildSearchIndex(), command: "build_search_index", args: undefined },
       {
-        run: () => api.searchEverything("report ext:pdf"),
-        command: "everything_search",
-        args: { query: "report ext:pdf", offset: 0, limit: 100 },
+        run: () => api.cancelSearchIndexBuild(),
+        command: "cancel_search_index_build",
+        args: undefined,
       },
       {
-        run: () => api.searchEverything("report", 100, 200),
-        command: "everything_search",
-        args: { query: "report", offset: 100, limit: 200 },
+        run: () => api.querySearchIndex(options),
+        command: "query_search_index",
+        args: { options },
+      },
+      {
+        run: () =>
+          api.exportSearchResults(options, "csv", "C:\\Users\\me\\results.csv", [
+            "C:\\Users\\me\\report.pdf",
+          ]),
+        command: "export_search_results",
+        args: {
+          options,
+          format: "csv",
+          destination: "C:\\Users\\me\\results.csv",
+          selected: ["C:\\Users\\me\\report.pdf"],
+        },
       },
     ];
 
