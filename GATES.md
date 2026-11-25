@@ -809,3 +809,10 @@ ceiling so it cannot silently regress into a pathological build.
   CHECK: `npx vitest run src/features/search/SearchSelectionBar.test.tsx`
   EXPECT: exit 0; all toolbar render tests passing
   EVIDENCE: PASS. 3/3: no markup at zero selection; `3 selected`, `2 KB`, Copy paths, both export labels and Clear selection with no disabled state; and every action disabled while a CSV export runs.
+
+## Release 0.2.3 — 2026-11-26
+
+- [x] G132: the `v0.2.3` tag was pushed, the release workflow built and published the assets, and the downloaded checksums and updater manifest agree.
+  CHECK: `gh run view 45700921319`; `gh release download v0.2.3`; `sha256sum -c SHA256SUMS.txt`; read `latest.json`
+  EXPECT: release and landing jobs succeed; setup, MSI, executable and `latest.json` are present; every checksum verifies; `latest.json` reports `0.2.3` with only `windows-x86_64-nsis`
+  EVIDENCE: PASS on 2026-11-26. Release workflow [45700921319](https://github.com/Ry0x7/cyron-uninstaller/actions/runs/45700921319) succeeded for commit `8561127`; [v0.2.3](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.3) published with NSIS `3,540,111` bytes, MSI `4,964,352` bytes, `cyron.exe` `10,511,360` bytes, `latest.json` `3,594` bytes and `SHA256SUMS.txt`. `sha256sum -c` reports OK for all four hashed assets; `latest.json` is `0.2.3`, dated `2026-11-25T21:21:28.931Z`, with only `windows-x86_64-nsis` and a 448-byte signature. The Deploy Landing Page job also succeeded. The parallel `main` CI run `45700921629` failed its first Rust attempt only at `phase3_project::next_cache_cleanup_leaves_the_rest_of_the_build_and_source` (`report.quarantined > 0`); the release job passed the same suite, and a rerun of the failed Rust job passed, so it is recorded as a transient Windows cleanup-timing flake. The full fixed-drive desktop build remains UNVERIFIED under G124.
