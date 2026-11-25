@@ -680,7 +680,11 @@ per-user installer. The final PASS/FAIL/UNVERIFIED matrix is in
   CHECK: `npm run build:desktop`; `npm run test:desktop` with the `spike capture and kernel/driver evidence render from live data` journey
   EXPECT: the rendered driver rows match the overview count; the System-event panel states its provenance; the capture renders its readings and peak CPU/kernel/disk/process summary with a bounded verdict; no horizontal overflow
   EVIDENCE: PASS on 2026-11-18. 11/11 desktop journeys passed in 20 m 08 s (`DESKTOP_E2E_OK`); the new journey passed in 55.6 s. The page listed 4 drivers (AMD Radeon RX 9060 XT, Intel Ethernet I225-V, TP-Link USB adapter, disk drive) and the count matched the rows; 0 recent System events were reported as such; the 20-reading capture showed peak CPU 42%, kernel 14%, disk 0.4%, `brave.exe` and a mixed verdict. See [the receipt](docs/evidence/2026-11-18-desktop-performance.md), [driver evidence](docs/evidence/2026-11-18-native/34-kernel-driver-evidence.png) and [spike result](docs/evidence/2026-11-18-native/35-spike-capture.png). Early stop, a live kernel-dominant spike and the elevated paths remain UNVERIFIED.
-## Everything index search — 2026-11-24
+## Everything index search — 2026-11-24 (retired 2026-11-26)
+
+**Retired:** these gates record the former Everything IPC client. `everything.rs` was removed in
+favour of the native index below, so the CHECK commands in this section are historical and no
+longer runnable against this tree. The replacement gates start at G118.
 
 Read-only search over a locally installed and running Everything 1.4.1+ index. The task ledger was
 written before implementation under the gitignored `.unlazy/everything-search/` scope, and all eight
@@ -734,3 +738,74 @@ version-to-version update remains UNVERIFIED because no installed 0.2.1 was upda
   CHECK: publish v0.2.2, check for updates from an installed 0.2.1, confirm the installer, relaunch and hash the app-data tree
   EXPECT: update offered, signature accepted, app restarted at 0.2.2, no app-data loss
   EVIDENCE: UNVERIFIED. The v0.2.2 release and feed are published, and the downloaded setup, MSI, executable and manifest match `SHA256SUMS.txt`; `latest.json` advertises only `windows-x86_64-nsis`. No installed 0.2.1 was updated in place, so the native download, installer restart and app-data preservation still need a real version-to-version run.
+
+## Native search index — 2026-11-26
+
+The Everything IPC client was removed and replaced with Cyron's own read-only fixed-drive index.
+G108–G112 above are historical: their `everything.rs` checks are no longer runnable against this
+tree.
+
+- [x] G118: the native index engine's real-walk, persistence, parser, filter, sort, mutation and watcher tests pass.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib searchindex
+  EXPECT: exit 0; 18 passed; 1 ignored; 0 failed
+  EVIDENCE: PASS. 18/18 in 0.03 s (plus the ignored manual benchmark): boolean/phrase/negation/wildcards; case and whole-word; extension/size/kind/attribute/type filters; date keywords, absolute dates and ranges; file/folder chips; path-only and match-path matching; stable sort and pagination; a real nested-directory fixture walk with created timestamps; save/load round trip; corrupt-cache refusal; rename and delete with descendant path reseeding; invalid/hostile query refusal; empty-state query refusal; civil date round trip with local midnight; watcher add/remove/rename notifications; pre-walk cancellation; and the CSV/TXT export added under G127.
+- [x] G119: the complete Rust suite passes after the search engine and `fs.rs` metadata additions.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml
+  EXPECT: exit 0; 283 passed; 5 ignored; 0 failed
+  EVIDENCE: PASS. 240 lib (3 ignored, including the manual search benchmark), 2 analyzer_actions (1 ignored), 5 cleanup_stress, 1 performance, 3 phase3_project, 1 real_system, 26 security, 5 stress_scan (1 ignored) → 283 passed, 5 ignored. The security allowlist admits only `searchindex.rs`'s atomic publish of Cyron's own regenerable cache; it still forbids the operation everywhere else.
+- [x] G120: the frontend contract, Search view and API wrapper typecheck and pass their tests.
+  CHECK: `npm run typecheck`; `npm test`
+  EXPECT: exit 0; 127 tests; 0 failures
+  EVIDENCE: PASS. TypeScript exits 0 with no diagnostics. 127 Vitest tests in 17 files, including the four `search_index_*` command names, the `query_search_index` payload and `export_search_results` in `api.test.ts`, four selection-helper tests and three toolbar render tests.
+- [x] G121: the production renderer bundle builds and passes the dist verifier.
+  CHECK: `npm run build`; `node scripts/verify-dist.mjs`
+  EXPECT: `DIST_OK`
+  EVIDENCE: PASS. Vite built 104 modules in 2.17 s: `index.html` 444 B, CSS 144.08 kB, JS 609.22 kB. `verify-dist.mjs` reports `bundle ok: 2 assets, 735.6 KiB, index.html 444 bytes` and `DIST_OK`.
+- [x] G122: documentation, the IPC count and the architecture contract agree.
+  CHECK: `npm run docs:check`; node -e "const fs=require('fs');const s=fs.readFileSync('src-tauri/src/lib.rs','utf8');const n=[...s.matchAll(/commands::([a-z0-9_]+),/g)].length;const u=new Set([...s.matchAll(/commands::([a-z0-9_]+),/g)].map(m=>m[1])).size;if(n!==76||u!==76)throw new Error('handlers '+n+'/'+u);for(const f of ['AGENTS.md','HANDOFF.md'])if(!fs.readFileSync(f,'utf8').includes('76 commands'))throw new Error(f);console.log('IPC_COUNT_OK '+n)"
+  EXPECT: `DOCS_CHECK: PASSED`; `IPC_COUNT_OK 77`
+  EVIDENCE: PASS. 96 Markdown files audited with package and Tauri versions both `0.2.2`; `DOCS_CHECK: PASSED (All documentation links, commands, versions, and invariants verified)`. 77 unique registered handlers; AGENTS.md and HANDOFF.md both say 77. The four engine commands and `export_search_results` appear in the architecture IPC table, TypeScript types and `api.ts`.
+- [x] G123: the native index has no Everything dependency, network call, result execution or user-file mutation.
+  CHECK: node -e "const fs=require('fs');if(fs.existsSync('src-tauri/src/everything.rs'))throw new Error('Everything IPC client still present');const prod=fs.readFileSync('src-tauri/src/searchindex.rs','utf8').split('#[cfg(test)]')[0];for(const b of ['std::process::Command','reqwest','TcpStream','http://','https://','ShellExecute','remove_dir_all(','remove_file(','MoveFileExW(','DeleteFileW('])if(prod.includes(b))throw new Error('banned '+b);if(!prod.includes('search-index.bin'))throw new Error('cache name');console.log('SEARCH_INDEX_READ_ONLY_OK')"
+  EXPECT: `SEARCH_INDEX_READ_ONLY_OK`
+  EVIDENCE: PASS (static review). No Everything source file remains. The module contains no process launch, network client, URL, shell execution or user-file removal primitive. Its only mutation is the atomic `search-index.bin` publish in the application data directory. Reparse points are indexed but never traversed; result paths are display data and can only reach the existing validated `reveal_path` command. The security suite passes with this boundary in place.
+- [ ] G124: a full fixed-drive build and the native desktop Search page are exercised against a real drive.
+  CHECK: launch the desktop app, build the index over the real fixed drives, query, sort, filter, reveal, and observe a live create/rename/delete
+  EXPECT: counts and paths match Explorer; progress and cancellation behave; watchers update results without a rebuild
+  EVIDENCE: UNVERIFIED. The engine was verified against a real nested-directory fixture, persistence round trip and synthesized watcher notifications; a complete fixed-drive crawl, the native Search click-through and live OS watcher behavior remain for a desktop session. No false claim of those paths is made.
+
+## Search performance, selection and export — 2026-11-26
+
+The native index gains a lower-memory build path and top-k result ordering, and Search gains
+multi-select plus CSV/TXT export. Performance evidence is measured on this machine and recorded
+with both the pre-change baseline and the optimized run; the runnable gate enforces a generous
+ceiling so it cannot silently regress into a pathological build.
+
+- [x] G125: the optimized build indexes a 20,000-file fixture and answers a broad 500,000-entry query inside the recorded ceilings.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --release --lib searchindex_perf -- --ignored --nocapture
+  EXPECT: `SEARCH_INDEX_PERF_OK`
+  EVIDENCE: PASS on 2026-11-26. `SEARCH_INDEX_PERF build_ms=105 query_ms=7 size_query_ms=15 rare_query_ms=4 fixture_entries=20201 query_entries=500000 pools_bytes=18777786 entry_bytes=24000048 path_entries=1` then `SEARCH_INDEX_PERF_OK`, 1 passed in 8.60 s. The 20,201-entry fixture is 20,000 files in 200 directories plus the volume root; the 500,000 synthetic entries used 18,777,786 B of name/extension pools plus 24,000,048 B of 48-byte entries (about 42.8 MB) and a one-entry directory-path map. The test records the pre-change baseline on this machine (355 ms build, 21 ms name query) and its ceilings are 300 ms build, 18 ms name query, 60 ms size sort and 30 ms rare query, so both recorded regressions fail it.
+- [x] G126: selection helpers cover toggle, range, select-all, copy formatting and clearing without duplicating rows.
+  CHECK: `npx vitest run src/features/search/selection.test.ts`
+  EXPECT: exit 0; all selection tests passing
+  EVIDENCE: PASS. 4/4 tests: immutable toggle with explicit check/uncheck, inclusive range in both directions plus a missing anchor, select-all deduplication, visible-order checked paths, file-only byte totals and newline copy formatting.
+- [x] G127: CSV and TXT export write the selected rows or the full sorted result set, escape CSV correctly, and reject a bad format or destination.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml --lib searchindex_export
+  EXPECT: exit 0; all export tests passing
+  EVIDENCE: PASS. 1/1: the CSV path writes header plus the selected rows with an empty size for folders, TXT writes one path per row, a quote/comma name is doubled and wrapped, the result-set path ignores a query when a selection is given, and a `.pdf` format, relative path, mismatched extension, existing folder destination and missing parent are all refused.
+- [x] G128: the renderer contract exposes `export_search_results` with the same options, selection and destination shape the backend expects, and the IPC count matches the docs.
+  CHECK: `npx vitest run src/lib/api.test.ts`; node -e "const fs=require('fs');const s=fs.readFileSync('src-tauri/src/lib.rs','utf8');const names=[...s.matchAll(/commands::([a-z0-9_]+),/g)].map(m=>m[1]);if(new Set(names).size!==77||names.length!==77)throw new Error('handlers '+names.length);if(!names.includes('export_search_results'))throw new Error('export command missing');for(const f of ['AGENTS.md','HANDOFF.md'])if(!fs.readFileSync(f,'utf8').includes('77 commands'))throw new Error(f);console.log('IPC_COUNT_OK 77')"
+  EXPECT: exit 0; `IPC_COUNT_OK 77`
+  EVIDENCE: PASS. `api.test.ts` passes 14/14, including `export_search_results` with `{ options, format, destination, selected }`; the registered surface is 77 handlers, 77 unique, and `AGENTS.md`/`HANDOFF.md` both say 77.
+- [x] G129: typecheck, all frontend tests, production build, dist verifier and documentation check pass on the final tree.
+  CHECK: `npm run typecheck`; `npm test`; `npm run build`; `node scripts/verify-dist.mjs`; `npm run docs:check`
+  EXPECT: exit 0; `DIST_OK`; `DOCS_CHECK: PASSED`
+  EVIDENCE: PASS on 2026-11-26. TypeScript exits 0 with no diagnostics; Vitest passes 127/127 in 17 files; Vite builds 104 modules in 1.89 s (CSS 144.08 kB, JS 609.50 kB); `verify-dist.mjs` reports `bundle ok: 2 assets, 735.9 KiB` and `DIST_OK`; `docs:check` audits 96 files and reports `DOCS_CHECK: PASSED`.
+- [x] G130: the complete Rust suite passes and the search engine remains read-only with no execution, network or user-file deletion surface.
+  CHECK: node scripts/msvc-env.mjs cargo test --manifest-path src-tauri/Cargo.toml; node -e "const fs=require('fs');const prod=fs.readFileSync('src-tauri/src/searchindex.rs','utf8').split('#[cfg(test)]')[0];for(const b of ['std::process::Command','reqwest','TcpStream','http://','https://','ShellExecute','remove_dir_all(','remove_file(','MoveFileExW(','DeleteFileW('])if(prod.includes(b))throw new Error('banned '+b);console.log('SEARCH_INDEX_READ_ONLY_OK')"
+  EXPECT: exit 0; `SEARCH_INDEX_READ_ONLY_OK`
+  EVIDENCE: PASS. 283 passed, 5 ignored, 0 failed across the lib and seven integration suites; the static scan reports `SEARCH_INDEX_READ_ONLY_OK`. Export writes only the destination file through `File::create`/`BufWriter`; it adds no process launch, network, shell or indexed-file mutation path.
+- [x] G131: the selection toolbar exposes labelled copy, CSV, TXT and clear actions with correct counts and disabled states in a rendered markup test.
+  CHECK: `npx vitest run src/features/search/SearchSelectionBar.test.tsx`
+  EXPECT: exit 0; all toolbar render tests passing
+  EVIDENCE: PASS. 3/3: no markup at zero selection; `3 selected`, `2 KB`, Copy paths, both export labels and Clear selection with no disabled state; and every action disabled while a CSV export runs.

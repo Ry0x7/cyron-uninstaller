@@ -21,9 +21,11 @@ export function formatBytesFull(bytes: number): string {
   return `${formatBytes(bytes)} (${formatCount(bytes)} bytes)`;
 }
 
+const COUNT_FORMAT = new Intl.NumberFormat("en-US");
+
 export function formatCount(value: number): string {
   if (!Number.isFinite(value)) return "0";
-  return new Intl.NumberFormat("en-US").format(Math.round(value));
+  return COUNT_FORMAT.format(Math.round(value));
 }
 
 /** Ratio from 0 to 1 rendered as a rounded percentage. */

@@ -184,17 +184,49 @@ Open **Performance** in the sidebar. Cyron samples CPU, memory, physical-disk pr
 
 Cyron does not offer RAM boosters, registry cleaning, service disabling, Prefetch deletion, page-file changes, Defender/update disabling or driver tweaks. Those are not supported performance fixes. Driver dates and event-log records are evidence for your own troubleshooting; Cyron never installs, rolls back or removes a driver. Recommendations carry their measured evidence, expected effect, risk and a way to verify the result.
 
-## 11. Search files with Everything
+## 11. Search files and folders
 
-Open **Search** in the sidebar to find files and folders by name across every drive that the local [Everything](https://www.voidtools.com/) index covers. Cyron uses the index that Everything already maintains; it does not create its own background index.
+Open **Search** in the sidebar to find files and folders across your fixed local drives. Cyron builds and keeps its own local index; Everything does not need to be installed, and search never uses the network.
 
-- **Setup**: install Everything 1.4.1 or newer and keep it running. Cyron does not bundle, install or start Everything, and it cannot search when Everything is closed. If Everything is still loading its index, the page says so and results may stay empty until the index finishes. Use **Check Everything** after starting it.
-- **Read-only**: Search never adds, renames or deletes files, never changes Everything's index or settings, and never uses a network service. Results are only shown; revealing one opens File Explorer at that path.
-- **Query syntax**: Everything's normal filename matching applies. For example, `report` matches names containing that word, `ext:pdf` limits by extension, `folder:` matches folders, and quoted text keeps a phrase together. Cyron passes the query to Everything unchanged.
-- **Results**: each row shows the name, containing folder, size (for files) and last-modified date. Select a row or press Enter to reveal it in File Explorer. **Load more** continues through a large result set.
-- **Unavailable state**: when Everything is missing, older than 1.4.1, closed or not answering, the page explains which condition applies and how to fix it. A loading index is called out explicitly; neither state is disguised as a successful empty search.
+- **Build the index once**: the first visit offers **Build index**. Cyron walks every fixed drive and stores names, paths, sizes, created/accessed/modified dates and file attributes. It reads no file contents and changes nothing on disk. Up to four directory readers work at once, enough to keep an SSD busy without turning the build into a CPU or disk hog. Progress shows the current drive, folder and entry count; **Cancel** stops the build. On a large drive the first pass can take several minutes.
+- **Saved between sessions**: the index is written to `%APPDATA%\dev.cyron.uninstaller\search-index.bin` and loaded in the background on the next launch. While Cyron is running, file-system watchers add, remove, rename and update entries live. Those live changes are held in memory for the session, so **Rebuild index** is what folds in changes made after the last build, including while Cyron was closed; the page warns when the saved index may be stale.
+- **Search as you type**: names match by substring and are case-insensitive by default. Answers come from memory; a broad query over 500,000 indexed names measured 7 ms on the test machine. Results show the name, containing folder, size and modified date. Click a column to sort, double-click a row (or press Enter) to reveal it in File Explorer, or copy its full path. **Load more** pages through large result sets.
+- **Filters and options**: the chips limit results to files, folders, audio, video, images, documents, executables or compressed files. **Match case**, **Whole word**, **Match path** and **Regex** change how each term is matched.
+- **Select and export**: check rows with the row checkbox, ctrl/cmd-click, shift-click for a range, or from the keyboard with Space and Shift+Arrow. Ctrl+A checks every loaded row and Escape clears the selection. The bar above the table shows the checked count and size and can copy their paths or export just those rows as CSV or TXT. The footer's CSV and TXT buttons export every matching row of the current query and sort order, even when no row is checked. Both use the native save dialog.
 
-Everything is a separate third-party application. Cyron does not control its indexing rules or which drives it includes; adjust those in Everything itself.
+### Search syntax
+
+| Query | Meaning |
+|---|---|
+| `report` | Names containing `report`. |
+| `annual report` | Both terms must match (space is AND). |
+| `report | invoice` | Either term matches (OR). |
+| `!backup` | Exclude names containing `backup`. |
+| `"annual report"` | Match the phrase as typed. |
+| `*.pdf` | Wildcards: `*` for any run of characters, `?` for one. |
+| `ext:pdf,png` | Match one of several extensions. |
+| `file:` / `folder:` | Only files, or only folders. |
+| `size:>1gb` | Size comparison. Ranges use `1mb..10mb`; units are b, kb, mb, gb and tb. |
+| `dm:thisweek` | Modified date. Also `today`, `yesterday`, `lastmonth`, `thisyear`, an absolute date like `2026-01-31`, comparisons with `>` or `<`, and ranges with `..`. |
+| `dc:` / `da:` | Created and accessed dates, with the same values as `dm:`. |
+| `type:video` | Built-in kinds: audio, video, image, document, executable, compressed. |
+| `path:src` | Match the full path instead of only the name. |
+| `attrib:h` | Files with an attribute such as h (hidden), s (system), r (read-only), a (archive) or d (folder); prefix `-` to require its absence. |
+| `dupe:` | Keep only names that appear more than once in the matches. |
+| `empty:` | Empty folders and zero-byte files. |
+| `regex:^log-\d+` | Treat the rest of that term as a regular expression. |
+
+Examples: `report ext:pdf dm:thisweek`, `size:>1gb`, `folder: node_modules`, `ext:psd,ai,sketch`, `dupe: ext:jpg`.
+
+### What the index covers
+
+- **Fixed local drives only.** Removable, network and optical drives are skipped so indexing never blocks on them.
+- **Metadata only.** Cyron never opens a file's contents, so it cannot search inside documents. It indexes paths, not full-text.
+- **Reparse points are not followed.** Junctions and symlinks are listed as entries but their targets are not traversed, matching the disk analyzer's rule.
+- **Unreadable folders are reported.** Windows-protected or locked folders appear as warnings; the rest of the drive is still indexed. The index also stops at a 3,000,000-entry safety cap and says so.
+- **Live updates apply while Cyron runs.** A rebuild reflects the moment of scanning; use **Rebuild index** after large changes made while Cyron was closed.
+
+Search is read-only: it never adds, renames or deletes files or changes the index other than its own regenerable cache. Export writes only the generated rows to the `.csv` or `.txt` path you pick in the native save dialog, and never opens or indexes the destination. The local cache contains file names and paths and can be deleted at any time; it is rebuilt on demand. Revealing a result uses the same validated File Explorer action as the rest of the app.
 
 ---
 

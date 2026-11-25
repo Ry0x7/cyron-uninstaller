@@ -1,7 +1,7 @@
 use crate::scan::{self, ScanProgress, ScanResult};
 use crate::{
-    app_history, apps, caches, cleanup, devscan, duplicates, everything, explorer, history, leftovers,
-    mft, perf, process, store, uninstall, volumes, AppState,
+    app_history, apps, caches, cleanup, devscan, duplicates, explorer, history, leftovers, mft,
+    perf, process, searchindex, store, uninstall, volumes, AppState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2906,33 +2906,51 @@ pub fn set_startup_item_enabled(
 }
 
 #[tauri::command]
-pub async fn everything_status() -> everything::EverythingStatus {
-    run_blocking("Everything status", everything::status)
-        .await
-        .unwrap_or_else(|error| everything::EverythingStatus {
-            running: false,
-            available: false,
-            version: None,
-            db_loaded: false,
-            db_busy: false,
-            message: error,
-        })
+pub fn search_index_status(state: State<'_, AppState>) -> searchindex::SearchIndexStatus {
+    state.search_index.status()
 }
 
 #[tauri::command]
-pub async fn everything_search(
-    query: String,
-    offset: Option<u32>,
-    limit: Option<u32>,
-) -> Result<everything::EverythingPage, String> {
-    let query = query.trim().to_string();
-    if query.is_empty() {
-        return Err("Enter a search term.".into());
-    }
-    let offset = offset.unwrap_or(0);
-    let limit = limit.unwrap_or(everything::DEFAULT_LIMIT);
-    run_blocking("Everything search", move || {
-        everything::search(&query, offset, limit)
+pub fn build_search_index(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<searchindex::SearchIndexStatus, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("The application data folder is unavailable: {error}"))?;
+    state.search_index.start_build(directory)?;
+    Ok(state.search_index.status())
+}
+
+#[tauri::command]
+pub fn cancel_search_index_build(
+    state: State<'_, AppState>,
+) -> searchindex::SearchIndexStatus {
+    state.search_index.cancel_build();
+    state.search_index.status()
+}
+
+#[tauri::command]
+pub async fn query_search_index(
+    state: State<'_, AppState>,
+    options: searchindex::SearchQueryOptions,
+) -> Result<searchindex::SearchIndexPage, String> {
+    let search = Arc::clone(&state.search_index);
+    run_blocking("Search index query", move || search.query(&options)).await?
+}
+
+#[tauri::command]
+pub async fn export_search_results(
+    state: State<'_, AppState>,
+    options: searchindex::SearchQueryOptions,
+    format: String,
+    destination: String,
+    selected: Option<Vec<String>>,
+) -> Result<searchindex::SearchExportReport, String> {
+    let search = Arc::clone(&state.search_index);
+    run_blocking("Search export", move || {
+        search.export(&options, &format, &destination, selected.as_deref())
     })
     .await?
 }

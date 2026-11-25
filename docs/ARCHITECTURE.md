@@ -102,7 +102,7 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | Module | Responsibility |
 | --- | --- |
 | `apps.rs` | Enumerates `HKLM`/`HKCU` uninstall keys (64-bit and 32-bit views), Microsoft Store packages through the Windows Runtime `PackageManager` (with a read-only `AppModel\Repository\Packages` fallback), Steam libraries (`libraryfolders.vdf`), and bounded portable binaries (`%LOCALAPPDATA%\Programs`). Detects MSI product codes in commands or GUID-named uninstall subkeys, reads PE version metadata for portable executables, identifies broken uninstallers, and provides source tags. |
-| `fs.rs` | Opens a directory with `FILE_LIST_DIRECTORY` + `FILE_FLAG_BACKUP_SEMANTICS` and reads `FILE_ID_BOTH_DIR_INFO` batches. Returns name, attributes, logical size, `AllocationSize`, file id and last-write time. Falls back to `std::fs` when the native path fails or exceeds an 8 MiB listing buffer. |
+| `fs.rs` | Opens a directory with `FILE_LIST_DIRECTORY` + `FILE_FLAG_BACKUP_SEMANTICS` and reads `FILE_ID_BOTH_DIR_INFO` batches. Returns name, raw Win32 attributes, logical size, `AllocationSize`, file id and created/accessed/last-write times. Falls back to `std::fs` when the native path fails or exceeds an 8 MiB listing buffer. |
 | `mft.rs` | Reads the NTFS boot sector and `$MFT` run list, validates record counts against a derived memory budget, applies update-sequence fixups, parses `FILE_NAME`/`$DATA`/`$STANDARD_INFORMATION`, deduplicates hard links with a record bitset, and builds the requested subtree. Cancellation and progress are polled during parsing. Any failure returns a fallback reason. |
 | `scan.rs` | Chooses the scan method, then runs the streaming directory walk: depth/error/stat-output/tree caps, exclusions, hidden/system filtering, reparse skipping, totals, extension stats, largest files, hard-link tracking, throttled progress and cancellation. Builds `StorageReport` alongside the tree. `measure_path` reuses the walker without a tree or cancellation. |
 | `duplicates.rs` | Walks a root for files at or above `minSize`, groups by size, confirms groups with 4 KiB head/tail SHA-256, then full streaming SHA-256. Tracks hard links by file id, polls cancellation, emits `cyron-duplicate-progress`, caps candidates/groups/files and reports truncation. |
@@ -120,9 +120,9 @@ scripts/                      MSVC env shim, build/bundle/binary/smoke/benchmark
 | `leftovers.rs` | Scans likely residual files and registry keys under AppData, ProgramData, and HKCU/HKLM. Enforces root guards, executes recursive multi-type `.reg` backups, verifies backup integrity, and cleans residual files into quarantine. Name-only file, shortcut and registry matches are `caution` and unselected; only exact install-location or exact registration identity is preselected as `safe`. |
 | `volumes.rs` | Lists local fixed/removable volumes with label, file system, capacity and free space. Network and optical drives are skipped deliberately. |
 | `history.rs` | Reads/writes `history.json` in the app-data directory, newest first, capped at 100, atomic temp-file replace with a direct-write fallback. Corrupt files read as empty. |
-| `everything.rs` | Read-only client for a local Everything 1.4.1+ process using the documented `WM_COPYDATA` `QUERY2W` IPC (window class `EVERYTHING_TASKBAR_NOTIFICATION`). Reports the version, index loaded/busy state and unavailable reasons, caps query length and result counts, and parses every reply field with bounds checks before it becomes display data. It does not load the SDK DLL, start or stop Everything, change its index or settings, execute a result path, or use Everything's HTTP/ETP network interfaces. |
+| `searchindex.rs` | Native, read-only file index and Everything-compatible query engine. Walks every fixed local volume with `fs::read_dir` on up to four workers, records each accessible file/folder name, parent link, size, created/accessed/modified times and raw attributes, never follows reparse points, and never opens file contents. Entries live in compact name pools plus parallel vectors; full paths are reconstructed on demand. Only directory paths enter the lookup map, and a sorted name order answers name queries without sorting every match. Persists the index to `<app_data>\search-index.bin` with an atomic temp-file publish, loads it in the background at startup, and keeps it current with one recursive `ReadDirectoryChangesW` watcher per volume (add/remove/rename/metadata). The query parser supports AND/OR/NOT, quotes, wildcards, regex, `ext:`, `size:`, `dm:`/`dc:`/`da:`, `type:`/kind macros, `path:`, `attrib:`, `dupe:`, `empty:` and match-case/whole-word/path/regex options; results are sorted and paginated server-side. CSV/TXT export streams the selected or complete result set to a user-chosen destination, capped at 1,000,000 rows. It never executes a result path or writes to an indexed file. |
 | `commands.rs` | Path/job/plan validation, background execution, cancellation registries, single-use plan registries, Store removal plans, app lifecycle history, event emission, history and log recording, Explorer reveal, and validated IPC commands. |
-| `lib.rs` | Registers the dialog, updater and process plugins, `AppState`, startup route resolution, and all Tauri commands. `read_only` starts `true`. |
+| `lib.rs` | Registers the dialog, updater and process plugins, `AppState`, startup route resolution, the background load of the persisted search index, and all Tauri commands. `read_only` starts `true`. |
 
 ## IPC surface
 
@@ -181,8 +181,11 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `query_directory_children` | `query` | `DirectoryPage` | Registered; no current view consumes the scan index. |
 | `search_indexed_files` | `query` | `SearchResultPage` | Registered; no current view consumes the scan index. |
 | `get_scan_index_stats` | `jobId` | `IndexStats` | Registered; no current view consumes the scan index. |
-| `everything_status` | — | `EverythingStatus` | Read-only Everything IPC version and index state; `available: false` with an actionable message when Everything is missing, too old or not answering. |
-| `everything_search` | `query`, `offset?`, `limit?` | `EverythingPage` | Read-only name/path query against the local Everything index; query length and result window are clamped, and results are display data only. |
+| `search_index_status` | — | `SearchIndexStatus` | Read-only index state: empty/loading/building/ready/error, entry/file/folder counts, volumes, progress, warnings and live-watch state. Never waits for a full query. |
+| `build_search_index` | — | `SearchIndexStatus` | Starts a background index build over fixed local drives. Rejects a second concurrent build; the previous index remains queryable until the new one is published. |
+| `cancel_search_index_build` | — | `SearchIndexStatus` | Sets the build cancellation flag and returns the current status. A partial index may be kept with a warning. |
+| `query_search_index` | `options` | `SearchIndexPage` | Read-only local query with bounded length/term count, filters, sort and pagination; result paths are display data only. |
+| `export_search_results` | `options`, `format`, `destination`, `selected?` | `SearchExportReport` | Writes generated CSV/TXT rows for the selection or the full sorted result set to an absolute `.csv`/`.txt` path inside an existing folder. Caps at 1,000,000 rows; never opens or executes a result. |
 | `snapshot_app_identity` | `appId` | `InstalledApp` | Backend identity for review, including Hunter tokens. |
 | `prepare_broken_inventory_cleanup` | `appId` | `BrokenEntryPlan` | 5-minute single-use plan; fingerprint-bound. |
 | `execute_broken_inventory_cleanup` | `planId`, `confirmedKeyPath` | `LeftoverCleanReport` | Re-verifies the live key before deletion. |
@@ -206,15 +209,35 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `execute_kill_process_plan` | `planId`, `pids[]`, `force` | `ProcessTerminateResult[]` | Consumes the plan; critical processes refused. |
 | `find_locking_processes` | `targetPath` | `LockingProcessInfo[]` | Windows Restart Manager (`rstrtmgr.dll`). |
 
-The Search destination uses a third-party local index rather than Cyron's scanner. Everything
-1.4.1 or newer must be installed and running; Cyron sends its query to the existing Everything
-process over the documented `WM_COPYDATA` IPC and never creates or changes the index. Results are
-treated as untrusted display data, query length and result windows are bounded, and a result path
-is only revealed through the existing validated `reveal_path` command. When Everything is absent or
-older than 1.4.1, `everything_status` returns `available: false` with a plain-language reason and
-the UI shows setup guidance instead of an empty-results claim. A still-loading index is reported as
-a warning (`dbLoaded: false`), not disguised as a successful empty search. No SDK DLL is bundled and
-no network interface is used.
+The Search destination is backed by Cyron's own index, not the analyzer's in-memory scan index
+and not a third-party process. A build enumerates every fixed local volume with `fs.rs`, skips
+reparse points and records metadata only. One `FileIndex` holds a UTF-8 name pool, a lowercase
+matching pool, fixed-size entry records (parent link, size, timestamps, attributes, flags) and
+child/sibling links; the full path is reconstructed by walking parents, so the index does not
+duplicate path strings for every file.
+
+The index is published with a magic/version header to `<app_data>\search-index.bin` through a
+temp-file write, `sync_all`, and an atomic replace. Startup loads it in a background thread, then
+starts one recursive `ReadDirectoryChangesW` watcher per indexed volume; watcher events update the
+in-memory index in place and re-seed descendant path keys after a folder rename. A rebuild builds a
+new index off to the side, saves it, then swaps it in, so queries keep using the previous index
+until the new one is complete. Directory enumeration runs on up to four workers while insertion
+holds one short index lock per folder; a directory-only path map and a sorted name order keep
+memory and name-sorted queries bounded. Watcher mutations clear that order and fall back to the
+general comparator until the next rebuild. The app data cache is the only file the index module
+writes during scanning; indexed files are opened for metadata only and are never modified, executed
+or deleted. The explicit Search export writes its generated CSV/TXT only to the destination chosen
+in the save dialog.
+
+Queries are parsed server-side. Whitespace is AND, `|` is OR, `!` is NOT, parentheses group,
+quotes form a phrase, and `*`/`?` are wildcards. Field terms include `ext:`, `file:`/`folder:`,
+`size:`, `dm:`/`dc:`/`da:` (relative keywords such as `today`, `thisweek`, `lastmonth`, absolute
+dates, comparisons and `..` ranges), `attrib:`, `type:` and the audio/video/image/document/
+executable/compressed macros, `path:`, `dupe:` and `empty:`. The global match-case, whole-word,
+match-path and regex switches are applied by the parser, and the UI's filter chips add a typed
+predicate. Queries are capped at 512 characters and 32 terms; regex uses Rust's linear-time engine
+with bounded compiled size. Results carry only display metadata; the renderer reveals a path
+through the existing validated `reveal_path` command.
 
 All three registries reject a job id that is already running instead of replacing its cancellation
 flag, so a cancel call cannot target a flag that no longer controls the running task. Cleanup plan

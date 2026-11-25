@@ -1,6 +1,6 @@
 [package]
 name = "cyron"
-version = "0.2.2"
+version = "0.2.3"
 description = "Windows Application Uninstaller, Disk Analyzer & Cleaner"
 authors = ["Chryypt"]
 license-file = "../LICENSE"
@@ -30,6 +30,7 @@ tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+regex = "1"
 winreg = "0.55"
 windows = { version = "0.62", features = [
   "ApplicationModel",
@@ -48,12 +49,14 @@ windows-sys = { version = "0.60", features = [
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_EventLog",
   "Win32_System_Ioctl",
+  "Win32_System_IO",
   "Win32_System_LibraryLoader",
   "Win32_System_Performance",
   "Win32_System_ProcessStatus",
   "Win32_System_RestartManager",
   "Win32_System_Threading",
   "Win32_System_SystemInformation",
+  "Win32_System_Time",
   "Win32_UI_WindowsAndMessaging",
 ] }
 

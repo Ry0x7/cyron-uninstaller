@@ -21,12 +21,18 @@ pub struct DirEntryInfo {
     pub is_reparse: bool,
     pub is_hidden: bool,
     pub is_system: bool,
+    /// Raw Win32 `FILE_ATTRIBUTE_*` flags.
+    pub attributes: u32,
     pub size: u64,
     pub allocated: u64,
     /// Stable per-volume id used to deduplicate hard links.
     pub file_id: Option<u64>,
     /// Seconds since the Unix epoch.
     pub modified: Option<u64>,
+    /// Seconds since the Unix epoch.
+    pub created: Option<u64>,
+    /// Seconds since the Unix epoch.
+    pub accessed: Option<u64>,
 }
 
 const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
@@ -220,6 +226,7 @@ fn read_batches(
                     is_reparse: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
                     is_hidden: attributes & FILE_ATTRIBUTE_HIDDEN != 0,
                     is_system: attributes & FILE_ATTRIBUTE_SYSTEM != 0,
+                    attributes,
                     size: info.EndOfFile.max(0) as u64,
                     allocated: info.AllocationSize.max(0) as u64,
                     file_id: if info.FileId == 0 {
@@ -228,6 +235,8 @@ fn read_batches(
                         Some(info.FileId as u64)
                     },
                     modified: filetime_to_unix(info.LastWriteTime),
+                    created: filetime_to_unix(info.CreationTime),
+                    accessed: filetime_to_unix(info.LastAccessTime),
                 };
                 if !visit(&entry) {
                     return Ok(());
@@ -301,6 +310,8 @@ mod tests {
         );
         assert!(file.file_id.is_some(), "NTFS exposes a stable file id");
         assert!(file.modified.is_some());
+        assert!(file.created.is_some());
+        assert!(file.accessed.is_some());
         assert!(file.path.ends_with("payload.bin"));
 
         let directory = entries
@@ -365,12 +376,15 @@ fn read_dir_fallback(
             is_reparse: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
             is_hidden: attributes & FILE_ATTRIBUTE_HIDDEN != 0,
             is_system: attributes & FILE_ATTRIBUTE_SYSTEM != 0,
+            attributes,
             size,
             // Without a native handle the cluster-rounded allocation is not
             // available; logical size is the honest approximation.
             allocated: size,
             file_id: None,
             modified: metadata.modified().ok().and_then(systemtime_to_unix),
+            created: metadata.created().ok().and_then(systemtime_to_unix),
+            accessed: metadata.accessed().ok().and_then(systemtime_to_unix),
         };
         if !visit(&info) {
             return Ok(());
