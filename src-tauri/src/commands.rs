@@ -2906,6 +2906,93 @@ pub fn set_startup_item_enabled(
 }
 
 #[tauri::command]
+pub async fn scan_dead_entries() -> Result<crate::health::DeadEntryScanReport, String> {
+    run_blocking("Dead entry scan", crate::health::scan_dead_entries).await
+}
+
+#[tauri::command]
+pub async fn prepare_dead_startup_removal(
+    state: State<'_, AppState>,
+    startup_id: String,
+) -> Result<crate::health::DeadStartupPlan, String> {
+    let id = startup_id.trim().to_string();
+    if id.is_empty() {
+        return Err("Startup entry ID is required.".into());
+    }
+    let plan = run_blocking("Dead startup plan", move || {
+        crate::health::prepare_dead_startup_plan(&id)
+    })
+    .await??;
+
+    let now = now_secs();
+    let mut plans = state
+        .dead_startup_plans
+        .lock()
+        .map_err(|_| "Dead startup plan registry is unavailable.".to_string())?;
+    plans.retain(|_, stored| stored.expires_at > now);
+    plans.insert(plan.plan_id.clone(), plan.clone());
+    Ok(plan)
+}
+
+#[tauri::command]
+pub async fn execute_dead_startup_removal(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    plan_id: String,
+    confirmed_location: String,
+) -> Result<crate::health::DeadStartupRemovalReport, String> {
+    ensure_cleanup_enabled(state.read_only.load(Ordering::Relaxed))?;
+    let quarantine_root = cleanup_quarantine_root(&app)?;
+
+    let plan = {
+        let mut plans = state
+            .dead_startup_plans
+            .lock()
+            .map_err(|_| "Dead startup plan registry is unavailable.".to_string())?;
+        plans.remove(plan_id.trim()).ok_or_else(|| {
+            "Dead startup removal plan expired or not found. Please prepare again.".to_string()
+        })?
+    };
+
+    let now = now_secs();
+    if now > plan.expires_at {
+        return Err("Dead startup removal plan has expired. Please prepare again.".into());
+    }
+    if plan.location.to_ascii_lowercase() != confirmed_location.trim().to_ascii_lowercase() {
+        return Err("Confirmed startup location does not match the prepared removal plan.".into());
+    }
+
+    let plan_clone = plan.clone();
+    let report = run_blocking("Remove dead startup entry", move || {
+        crate::health::execute_dead_startup_removal(&plan_clone, &quarantine_root)
+    })
+    .await??;
+
+    if let Ok(data_dir) = app_data_dir(&app) {
+        let at = now_secs();
+        let log = cleanup::CleanupLogEntry {
+            id: format!("clean-dead-startup-{}-{at}", plan.plan_id),
+            at,
+            title: format!("Removed dead startup entry ({})", plan.name),
+            targets: vec![format!("{}\\{}", plan.registry_key_path, plan.value_name)],
+            bytes: 0,
+            files: 0,
+            quarantined: 0,
+            skipped: 0,
+            failed: 0,
+            status: "completed".into(),
+            detail: format!(
+                "Created verified .reg backup at {}",
+                report.registry_backup_path
+            ),
+        };
+        let _ = cleanup::append_log(&data_dir, &log);
+    }
+
+    Ok(report)
+}
+
+#[tauri::command]
 pub fn search_index_status(state: State<'_, AppState>) -> searchindex::SearchIndexStatus {
     state.search_index.status()
 }

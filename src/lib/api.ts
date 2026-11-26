@@ -52,6 +52,9 @@ import type {
   HunterTargetInfo,
   SystemSpecs,
   StartupItem,
+  DeadEntryScanReport,
+  DeadStartupPlan,
+  DeadStartupRemovalReport,
   ForceDeletePlanPreview,
   ForceDeleteResult,
   KillProcessPlanPreview,
@@ -235,6 +238,11 @@ export const api = {
   listStartupItems: () => call<StartupItem[]>("list_startup_items"),
   setStartupItemEnabled: (id: string, enabled: boolean) =>
     call<StartupItem>("set_startup_item_enabled", { id, enabled }),
+  scanDeadEntries: () => call<DeadEntryScanReport>("scan_dead_entries"),
+  prepareDeadStartupRemoval: (startupId: string) =>
+    call<DeadStartupPlan>("prepare_dead_startup_removal", { startupId }),
+  executeDeadStartupRemoval: (planId: string, confirmedLocation: string) =>
+    call<DeadStartupRemovalReport>("execute_dead_startup_removal", { planId, confirmedLocation }),
   capturePerformanceSnapshot: (forceStartup = false) =>
     call<PerformanceSnapshot>("capture_performance_snapshot", { forceStartup }),
   listPerformanceBaselines: () => call<PerformanceBaseline[]>("list_performance_baselines"),

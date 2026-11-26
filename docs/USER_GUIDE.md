@@ -108,6 +108,15 @@ Select only the artifacts you reviewed, choose **Preview project cleanup**, insp
 
 Tool cache cleanup for Claude Code, Codex, Gemini CLI, Cursor, VS Code, Antigravity, Freebuff, Ollama, LM Studio, Hugging Face, npm, pnpm, Yarn, pip, uv, Poetry, Cargo, Gradle, Docker and WSL remains in the main **Cleanup** section. Model weights, conversation histories, LM Studio presets, Hugging Face tokens and Docker/WSL disks are protected by default. For model caches, use the owning tool's reviewed prune command (for example `hf cache prune`) rather than deleting model files.
 
+### System health
+
+Open **Storage & Cleanup → Cleanup → System health** and choose **Scan registry** to find two kinds of stale Windows data:
+
+- **Startup entries**: a Run or RunOnce registry value whose program no longer exists after `%VAR%` expansion. Startup-folder shortcuts and bare command names are not treated as dead because Cyron cannot prove their target is missing.
+- **Uninstall registrations**: an installed-application entry whose uninstaller and install folder are both gone. Windows components, protected keys and shared vendor roots are excluded.
+
+Every row states why it is considered dead and shows the exact registry value or key. Entries that need an elevated Cyron session are marked **Needs elevation**; **Windows security** startup entries are protected and cannot be removed. Removal requires cleaning to be enabled, then a confirmation dialog. Before deleting, Cyron re-reads the live entry and refuses anything that changed or reappeared. A dead startup value is exported to a verified single-value `.reg` backup and recorded in the recovery journal; a dead uninstall registration uses the same recursive backup, fingerprint check and journal as broken-entry cleanup. Both backups can be restored from **History & Recovery → Recovery**. Re-scan after a removal to refresh the list.
+
 ---
 
 ## 6. History & Recovery

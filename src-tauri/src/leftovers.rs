@@ -1186,6 +1186,85 @@ pub fn verify_registry_backup(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes one value line in Windows .reg syntax, preserving its original type.
+/// Shared with the dead-entry scanner so single-value backups round-trip through
+/// the same restore path as recursive subkey backups.
+pub(crate) fn write_registry_value_line(
+    file: &mut fs::File,
+    name: &str,
+    val: &RegValue,
+) -> Result<(), String> {
+    use std::io::Write;
+    let escaped_name = if name.is_empty() {
+        "@".into()
+    } else {
+        format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+    };
+
+    match val.vtype.clone() {
+        REG_SZ => {
+            let text = val.to_string();
+            let escaped_val = text.replace('\\', "\\\\").replace('"', "\\\"");
+            writeln!(file, "{escaped_name}=\"{escaped_val}\"").map_err(|e| e.to_string())?;
+        }
+        REG_DWORD => {
+            let dword = if val.bytes.len() >= 4 {
+                u32::from_le_bytes([val.bytes[0], val.bytes[1], val.bytes[2], val.bytes[3]])
+            } else {
+                0
+            };
+            writeln!(file, "{escaped_name}=dword:{:08x}", dword).map_err(|e| e.to_string())?;
+        }
+        REG_BINARY => {
+            let hex_str = val
+                .bytes
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(file, "{escaped_name}=hex:{}", hex_str).map_err(|e| e.to_string())?;
+        }
+        REG_EXPAND_SZ => {
+            let hex_str = val
+                .bytes
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(file, "{escaped_name}=hex(2):{}", hex_str).map_err(|e| e.to_string())?;
+        }
+        REG_MULTI_SZ => {
+            let hex_str = val
+                .bytes
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(file, "{escaped_name}=hex(7):{}", hex_str).map_err(|e| e.to_string())?;
+        }
+        REG_QWORD => {
+            let hex_str = val
+                .bytes
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(file, "{escaped_name}=hex(b):{}", hex_str).map_err(|e| e.to_string())?;
+        }
+        other => {
+            let hex_str = val
+                .bytes
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(",");
+            writeln!(file, "{escaped_name}=hex({:x}):{}", other as u32, hex_str)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 fn export_key_recursive(
     root: &RegKey,
     display_prefix: &str,
@@ -1208,72 +1287,7 @@ fn export_key_recursive(
 
     for res in key.enum_values() {
         let (name, val) = res.map_err(|e| format!("Failed to read registry value in {display_prefix}: {e}"))?;
-        let escaped_name = if name.is_empty() {
-            "@".into()
-        } else {
-            format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
-        };
-
-        match val.vtype {
-            REG_SZ => {
-                let text = val.to_string();
-                let escaped_val = text.replace('\\', "\\\\").replace('"', "\\\"");
-                writeln!(file, "{escaped_name}=\"{escaped_val}\"").map_err(|e| e.to_string())?;
-            }
-            REG_DWORD => {
-                let dword = if val.bytes.len() >= 4 {
-                    u32::from_le_bytes([val.bytes[0], val.bytes[1], val.bytes[2], val.bytes[3]])
-                } else {
-                    0
-                };
-                writeln!(file, "{escaped_name}=dword:{:08x}", dword).map_err(|e| e.to_string())?;
-            }
-            REG_BINARY => {
-                let hex_str = val
-                    .bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                writeln!(file, "{escaped_name}=hex:{}", hex_str).map_err(|e| e.to_string())?;
-            }
-            REG_EXPAND_SZ => {
-                let hex_str = val
-                    .bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                writeln!(file, "{escaped_name}=hex(2):{}", hex_str).map_err(|e| e.to_string())?;
-            }
-            REG_MULTI_SZ => {
-                let hex_str = val
-                    .bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                writeln!(file, "{escaped_name}=hex(7):{}", hex_str).map_err(|e| e.to_string())?;
-            }
-            REG_QWORD => {
-                let hex_str = val
-                    .bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                writeln!(file, "{escaped_name}=hex(b):{}", hex_str).map_err(|e| e.to_string())?;
-            }
-            other => {
-                let hex_str = val
-                    .bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                writeln!(file, "{escaped_name}=hex({:x}):{}", other as u32, hex_str).map_err(|e| e.to_string())?;
-            }
-        }
+        write_registry_value_line(file, &name, &val)?;
     }
     writeln!(file).map_err(|e| e.to_string())?;
 

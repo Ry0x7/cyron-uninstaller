@@ -61,11 +61,12 @@ import {
 } from "../../lib/types";
 import { CleanerRemnants } from "./CleanerRemnants";
 import { DeveloperStorage } from "./DeveloperStorage";
+import { SystemHealth } from "./SystemHealth";
 import "./cleaner.css";
 
 type RiskFilter = "all" | Risk;
 type Status = "loading" | "ready" | "error";
-type Tab = "cleanup" | "projects";
+type Tab = "cleanup" | "projects" | "health";
 
 const CATEGORY_LABEL: Record<string, string> = {
   ai: "AI tools",
@@ -123,6 +124,7 @@ export function Cleaner({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("cleanup");
   const [projectsVisited, setProjectsVisited] = useState(false);
+  const [healthVisited, setHealthVisited] = useState(false);
 
   useEffect(() => {
     if (initialTargetId) {
@@ -585,14 +587,22 @@ export function Cleaner({
             value={tab}
             onChange={(next) => {
               if (next === "projects") setProjectsVisited(true);
+              if (next === "health") setHealthVisited(true);
               setTab(next);
             }}
             options={[
               { value: "cleanup", label: "Cache cleanup" },
               { value: "projects", label: "Projects" },
+              { value: "health", label: "System health" },
             ]}
           />
         </div>
+
+        {healthVisited && (
+          <div hidden={tab !== "health"}>
+            <SystemHealth readOnly={readOnly} />
+          </div>
+        )}
 
         {projectsVisited && (
           <div hidden={tab !== "projects"}>
