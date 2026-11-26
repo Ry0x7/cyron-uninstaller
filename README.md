@@ -4,9 +4,9 @@ Cyron is a Windows desktop app for uninstalling software, finding what takes up 
 
 ## Download for Windows
 
-**[Download Cyron 0.2.3 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.3)**
+**[Download Cyron 0.2.4 for Windows](https://github.com/Ry0x7/cyron-uninstaller/releases/tag/v0.2.4)**
 
-Cyron 0.2.3 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.3.md)
+Cyron 0.2.4 is the current stable release. The Windows binaries are unsigned. Choose the `x64-setup.exe` asset for a per-user install and verify it against the release's `SHA256SUMS.txt`. Windows may show an unknown-publisher warning. [Release notes](docs/RELEASE_NOTES_v0.2.4.md)
 
 Cyron targets Windows 10 (1809 or later) and Windows 11 on x64 and uses the Microsoft Edge WebView2 Runtime.
 
@@ -47,6 +47,10 @@ Cache cleaning starts in read-only mode. After you enable it, review the selecte
 ![Cyron Recovery tab with Quarantine and Cleanup log panels](docs/screenshots/recovery.png)
 
 *Recovery shows quarantined items and the local cleanup log. Local paths are redacted.*
+
+### Clean up dead startup and uninstall entries
+
+Open **Storage & Cleanup → Cleanup → System health** and scan the registry. Cyron lists Run/RunOnce values whose program is gone and uninstall registrations whose uninstaller and install folder are both missing. Windows security entries are protected, and entries that need an elevated session are labelled. Removal requires cleaning to be enabled and an explicit confirmation; Cyron re-checks the live entry, exports a verified `.reg` backup and quarantines the batch so it can be restored.
 
 The **Performance** page shows local CPU, memory, disk and startup measurements. Version 0.2.0 adds short spike capture and kernel and driver evidence. Elevated tracing and some real-world uninstall paths still have open verification items. [Release audit](docs/RELEASE_AUDIT_2026-11-17.md)
 
