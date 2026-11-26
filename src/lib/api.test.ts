@@ -228,6 +228,13 @@ describe("Tauri IPC contract", () => {
       { run: () => api.getSystemSpecs(), command: "get_system_specs", args: undefined },
       { run: () => api.listStartupItems(), command: "list_startup_items", args: undefined },
       { run: () => api.setStartupItemEnabled("startup-1", false), command: "set_startup_item_enabled", args: { id: "startup-1", enabled: false } },
+      { run: () => api.scanDeadEntries(), command: "scan_dead_entries", args: undefined },
+      { run: () => api.prepareDeadStartupRemoval("startup-1"), command: "prepare_dead_startup_removal", args: { startupId: "startup-1" } },
+      {
+        run: () => api.executeDeadStartupRemoval("dead-plan-1", "HKCU Run"),
+        command: "execute_dead_startup_removal",
+        args: { planId: "dead-plan-1", confirmedLocation: "HKCU Run" },
+      },
       { run: () => api.capturePerformanceSnapshot(), command: "capture_performance_snapshot", args: { forceStartup: false } },
       { run: () => api.capturePerformanceSnapshot(true), command: "capture_performance_snapshot", args: { forceStartup: true } },
       { run: () => api.listPerformanceBaselines(), command: "list_performance_baselines", args: undefined },

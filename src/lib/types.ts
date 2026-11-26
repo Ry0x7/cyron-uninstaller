@@ -838,6 +838,62 @@ export interface StartupItem {
   canToggle: boolean;
 }
 
+export interface DeadStartupEntry {
+  id: string;
+  name: string;
+  command: string;
+  location: string;
+  registryKeyPath: string;
+  valueName: string;
+  reason: string;
+  canRemove: boolean;
+  requiresElevation: boolean;
+  isProtected: boolean;
+}
+
+export interface DeadRegistryEntry {
+  appId: string;
+  hive: string;
+  subkeyName: string;
+  registryKeyPath: string;
+  displayName: string;
+  publisher: string | null;
+  displayVersion: string | null;
+  installLocation: string | null;
+  reason: string;
+  canRemove: boolean;
+  requiresElevation: boolean;
+  isProtected: boolean;
+}
+
+export interface DeadEntryScanReport {
+  startup: DeadStartupEntry[];
+  registry: DeadRegistryEntry[];
+  warnings: string[];
+  scannedAt: number;
+}
+
+export interface DeadStartupPlan {
+  planId: string;
+  startupId: string;
+  name: string;
+  command: string;
+  location: string;
+  registryKeyPath: string;
+  valueName: string;
+  fingerprint: string;
+  expiresAt: number;
+}
+
+export interface DeadStartupRemovalReport {
+  runId: string;
+  name: string;
+  location: string;
+  valueName: string;
+  registryBackupPath: string;
+  quarantineDir: string;
+}
+
 
 export interface CpuMetrics {
   utilizationPercent: number;

@@ -8,6 +8,7 @@ pub mod commands;
 pub mod duplicates;
 pub mod explorer;
 pub mod fs;
+pub mod health;
 pub mod history;
 pub mod hunter;
 pub mod index;
@@ -47,6 +48,7 @@ pub struct AppState {
     pub hunter_snapshots: Arc<Mutex<HashMap<String, process::StoredProcessSnapshot>>>,
     pub leftover_plans: Arc<Mutex<HashMap<String, leftovers::StoredLeftoverPlan>>>,
     pub broken_entry_plans: Arc<Mutex<HashMap<String, leftovers::StoredBrokenEntryPlan>>>,
+    pub dead_startup_plans: Arc<Mutex<HashMap<String, health::DeadStartupPlan>>>,
     pub app_snapshots: Arc<Mutex<HashMap<String, apps::InstalledApp>>>,
     pub hunter_app_snapshots: Arc<Mutex<HashMap<String, apps::InstalledApp>>>,
     pub force_delete_plans: Arc<Mutex<HashMap<String, explorer::StoredForceDeletePlan>>>,
@@ -79,6 +81,7 @@ impl Default for AppState {
             hunter_snapshots: Arc::default(),
             leftover_plans: Arc::default(),
             broken_entry_plans: Arc::default(),
+            dead_startup_plans: Arc::default(),
             app_snapshots: Arc::default(),
             hunter_app_snapshots: Arc::default(),
             force_delete_plans: Arc::default(),
@@ -165,6 +168,9 @@ pub fn run() {
             commands::get_system_specs,
             commands::list_startup_items,
             commands::set_startup_item_enabled,
+            commands::scan_dead_entries,
+            commands::prepare_dead_startup_removal,
+            commands::execute_dead_startup_removal,
             commands::capture_performance_snapshot,
             commands::list_performance_baselines,
             commands::record_performance_baseline,
