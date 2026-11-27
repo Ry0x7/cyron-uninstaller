@@ -2482,7 +2482,7 @@ fn windows_binary(relative: &str) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-fn windows_command(relative: &str) -> Result<std::process::Command, String> {
+pub(crate) fn windows_command(relative: &str) -> Result<std::process::Command, String> {
     let path = windows_binary(relative)
         .ok_or_else(|| format!("Windows did not expose a valid {relative} under SystemRoot."))?;
     let mut command = std::process::Command::new(path);

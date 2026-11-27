@@ -16,7 +16,7 @@ WSL distributions, browser profiles/history/cookies/passwords, the registry, Win
 critical Windows system processes, and the integrity of the scan, quarantine, and recovery journals.
 
 Child processes are strictly controlled:
-1. `explorer.exe` is launched solely to reveal a validated existing path on explicit user action.
+1. `explorer.exe` is launched solely to reveal a validated existing path on explicit user action, resolved under `%SystemRoot%` rather than the search path.
 2. Registered application uninstallers are launched only after tokenization, rejection of shell wrappers
    (`cmd.exe`, `powershell.exe`, batch scripts), and explicit operator confirmation.
 3. Processes can only be terminated if their executable resides strictly within the target application's
