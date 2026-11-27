@@ -192,7 +192,7 @@ fn fingerprint(item: &crate::system::StartupItem, key_path: &str, value_name: &s
         hasher.update(part.as_bytes());
         hasher.update(b"|");
     }
-    format!("{:x}", hasher.finalize())
+    crate::leftovers::hex_digest(&hasher.finalize())
 }
 
 fn now_secs() -> u64 {

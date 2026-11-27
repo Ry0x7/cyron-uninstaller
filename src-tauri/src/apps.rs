@@ -856,7 +856,7 @@ fn hash_path(path: &Path) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(path.to_string_lossy().as_bytes());
-    format!("{:x}", hasher.finalize())[..12].to_string()
+    crate::leftovers::hex_digest(&hasher.finalize())[..12].to_string()
 }
 
 fn read_string(key: &RegKey, name: &str) -> Option<String> {
