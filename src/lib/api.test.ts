@@ -242,6 +242,8 @@ describe("Tauri IPC contract", () => {
       { run: () => api.startPerformanceTrace(), command: "start_performance_trace", args: undefined },
       { run: () => api.stopPerformanceTrace(), command: "stop_performance_trace", args: undefined },
       { run: () => api.openPerformanceSettings("task-manager"), command: "open_performance_settings", args: { page: "task-manager" } },
+      { run: () => api.openSupportPage(), command: "open_performance_settings", args: { page: "support" } },
+      { run: () => api.openRepositoryPage(), command: "open_performance_settings", args: { page: "repository" } },
     ];
 
     for (const { run, command, args } of calls) {

@@ -3597,3 +3597,21 @@ tbody tr:last-child td {
 :root[data-theme="dark"] .tour-shot {
   background: #141418;
 }
+
+/* Support links. */
+.support-note {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.support-note a,
+.footer-links .footer-kofi {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.support-note a:hover,
+.footer-links .footer-kofi:hover {
+  text-decoration: underline;
+}

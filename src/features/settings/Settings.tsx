@@ -31,6 +31,7 @@ import {
   IconDownload,
   IconExternal,
   IconFolderOpen,
+  IconHeart,
   IconInfo,
   IconLock,
   IconMonitor,
@@ -1055,19 +1056,36 @@ export function Settings() {
                       {
                         label: "Repository",
                         value: (
-                          <a
+                          <button
+                            type="button"
                             className="set-link"
-                            href="https://github.com/Ry0x7/Cyron-uninstaller"
-                            target="_blank"
-                            rel="noreferrer noopener"
+                            onClick={() => void api.openRepositoryPage().catch(() => undefined)}
                           >
-                            Ry0x7/Cyron-uninstaller
+                            Ry0x7/cyron-uninstaller
                             <IconExternal size={12} />
-                          </a>
+                          </button>
+                        ),
+                      },
+                      {
+                        label: "Support",
+                        value: (
+                          <button
+                            type="button"
+                            className="set-link"
+                            onClick={() => void api.openSupportPage().catch(() => undefined)}
+                          >
+                            <IconHeart size={12} />
+                            Support Cyron on Ko-fi
+                            <IconExternal size={12} />
+                          </button>
                         ),
                       },
                     ]}
                   />
+                  <p className="set-note set-note--spaced">
+                    Cyron is free and built in the open. If it helps you, a coffee on Ko-fi keeps
+                    it going. Links open in your default browser.
+                  </p>
                   <p className="set-note set-note--spaced">
                     Application sizes come from installer metadata when the publisher recorded it.
                     Measure a folder from the application details to get the real on-disk size.

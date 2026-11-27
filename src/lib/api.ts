@@ -255,6 +255,10 @@ export const api = {
   stopPerformanceTrace: () => call<PerformanceTraceStatus>("stop_performance_trace"),
   openPerformanceSettings: (page: string) =>
     call<void>("open_performance_settings", { page }),
+  /** Opens Cyron's Ko-fi page in the default browser. The URL is fixed in the backend. */
+  openSupportPage: () => call<void>("open_performance_settings", { page: "support" }),
+  /** Opens the GitHub repository in the default browser. The URL is fixed in the backend. */
+  openRepositoryPage: () => call<void>("open_performance_settings", { page: "repository" }),
 };
 
 let cacheRequest: Promise<CacheInventory> | null = null;
