@@ -63,13 +63,17 @@ The Applications destination provides transparent management of all desktop soft
 ## 3. Storage & Cleanup — Disk space
 
 Open **Storage & Cleanup**, then **Disk space** to analyze where space went across any directory or drive:
-- **Visual Treemap**: High-performance Squarified treemap rendering directory sizes proportionally.
+- **Nested treemap**: Folders are drawn up to four levels deep. Each folder gets a frame and a header strip with its name and size, so sibling folders read as separate blocks; files are coloured by type. Every top-level folder keeps its own tile, even when a very large scan has to summarize deeper levels. Click a folder to drill in; the breadcrumb takes you back.
+- **On-demand loading**: A folder summarized to keep the view responsive loads its contents when you drill into it or expand it in the tree. The scan's own index answers first; a focused, read-only scan of just that folder fills in the rest.
+- **Smooth on large drives**: The map is drawn on a single canvas and hover is resolved once per frame, so moving the pointer, resizing the window or dragging the tree splitter stays fluid.
 - **Synchronized Hierarchy Tree**: Resizable virtualized folder tree synchronized with the treemap selection.
 - **Direct Cleaner Integration**: Selecting recognized developer or cache folders (e.g., `.gradle`, `.cargo`, `node_modules`, pip cache, NuGet) displays a cleanable callout in Selection Details, showing expected reclaimable space and providing a 1-click **Review for Cleanup** shortcut directly to the Cleaner drawer.
 - **Scanning Methods**:
   - **Directory Walk**: Depth-first streaming traversal that tracks hard links and respects memory bounds.
   - **NTFS MFT Reader**: High-speed Master File Table parser for full volume scans when running with administrator privileges.
 - **Safety**: Reparse points, symlinks, and directory junctions are never traversed.
+
+![Disk space nested treemap in dark appearance (preview with sample data)](screenshots/disk-map-dark.png)
 
 ---
 
@@ -189,6 +193,10 @@ Open **Performance** in the sidebar. It has four tabs:
 - **Startup** and **Diagnose**: the startup list and the diagnostics described below. These take a fuller sample every ten seconds while visible.
 
 Monitor and Processes update once a second while visible. **Pause** stops automatic updates; **Refresh** takes a new diagnostic sample immediately.
+
+![Performance Monitor with the CPU chart and resource rail (preview with sample data)](screenshots/performance-cpu.png)
+
+![Processes grouped into apps, background and Windows processes (preview with sample data)](screenshots/performance-processes.png)
 
 - **Why is my PC slow?**: choose the symptom that matches what you see, including **CPU spikes / kernel time**. Cyron filters the evidence and shows only a recommendation the sample supports. If nothing supports a change, it says so instead of inventing one. A short sample cannot explain every slowdown.
 - **Catch a short spike**: a normal sample lasts 700 ms and can miss a brief lag. **Record 20 seconds** takes about 20 one-second readings and keeps the peak CPU, kernel and physical-disk values, plus the process using the most CPU at that point. The report says whether the spike was process-, kernel- or disk-dominated. You can stop early; nothing is written to disk, and leaving the page ends the capture.
