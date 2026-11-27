@@ -129,20 +129,44 @@ function withToolchain(base) {
 }
 
 const environment = withToolchain(process.env);
-const quote = (value) => (/\s/.test(value) ? `"${value.replaceAll('"', '\\"')}"` : value);
-const wrapInShell = isWindows && ["npm", "npx", "pnpm", "yarn"].includes(command);
+// npm-style launchers are .cmd shims on Windows. Run their JavaScript entry
+// point with this Node binary instead, so no argument is reparsed by cmd.exe.
+const npmEntry = {
+  npm: "npm-cli.js",
+  npx: "npx-cli.js",
+}[command];
+const npmScript = isWindows && npmEntry
+  ? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", npmEntry)
+  : undefined;
 
-const result = wrapInShell
-  ? spawnSync(
-      "cmd.exe",
-      ["/d", "/s", "/c", [command, ...args].map(quote).join(" ")],
-      { stdio: "inherit", env: environment },
-    )
-  : spawnSync(command, args, {
-      stdio: "inherit",
-      env: environment,
-      shell: isWindows && /\.(cmd|bat)$/i.test(command),
-    });
+// Anything that still has to go through cmd.exe (pnpm/yarn shims, or a .cmd/.bat
+// command) must not carry characters cmd.exe treats as syntax.
+const CMD_META = /[&|<>^%!"\r\n]/;
+function assertCmdSafe(values) {
+  const unsafe = values.find((value) => CMD_META.test(value));
+  if (unsafe !== undefined) {
+    console.error(`Refusing to pass ${JSON.stringify(unsafe)} through cmd.exe.`);
+    process.exit(2);
+  }
+}
+const quote = (value) => (/\s/.test(value) ? `"${value}"` : value);
+const needsCmd =
+  isWindows &&
+  !(npmScript && existsSync(npmScript)) &&
+  (["npm", "npx", "pnpm", "yarn"].includes(command) || /\.(cmd|bat)$/i.test(command));
+
+let result;
+if (npmScript && existsSync(npmScript)) {
+  result = spawnSync(process.execPath, [npmScript, ...args], { stdio: "inherit", env: environment });
+} else if (needsCmd) {
+  assertCmdSafe([command, ...args]);
+  result = spawnSync("cmd.exe", ["/d", "/s", "/c", [command, ...args].map(quote).join(" ")], {
+    stdio: "inherit",
+    env: environment,
+  });
+} else {
+  result = spawnSync(command, args, { stdio: "inherit", env: environment });
+}
 
 if (result.error) {
   console.error(result.error.message);

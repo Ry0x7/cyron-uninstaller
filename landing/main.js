@@ -469,14 +469,17 @@ let manifestoWords = [];
 if (manifesto) {
   const words = manifesto.textContent.trim().split(/\s+/);
   manifesto.setAttribute("aria-label", words.join(" "));
-  manifesto.innerHTML = words
-    .map((word) => {
-      const key = KEY_WORDS.has(word.toLowerCase().replace(/[—,]/g, ""))
-        ? " is-key"
-        : "";
-      return `<span class="word${key}" aria-hidden="true">${word}</span>`;
-    })
-    .join(" ");
+  // Rebuild the words as text nodes: the manifesto is never parsed as HTML.
+  const fragment = document.createDocumentFragment();
+  words.forEach((word, index) => {
+    if (index > 0) fragment.append(" ");
+    const span = document.createElement("span");
+    span.className = KEY_WORDS.has(word.toLowerCase().replace(/[—,]/g, "")) ? "word is-key" : "word";
+    span.setAttribute("aria-hidden", "true");
+    span.textContent = word;
+    fragment.append(span);
+  });
+  manifesto.replaceChildren(fragment);
   manifestoWords = [...manifesto.querySelectorAll(".word")];
 }
 
