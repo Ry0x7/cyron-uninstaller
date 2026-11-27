@@ -1,0 +1,56 @@
+# Dependabot keeps the three dependency ecosystems current: the npm frontend
+# and test tooling, the Rust core in src-tauri, and the GitHub Actions used by
+# the workflows. Security updates are raised as soon as an advisory lands;
+# these entries add a weekly batch of ordinary version updates.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      # The desktop E2E stack only works when its packages move together.
+      wdio:
+        patterns: ["@wdio/*", "webdriverio"]
+      tauri-js:
+        patterns: ["@tauri-apps/*"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      build-tooling:
+        patterns: ["vite", "@vitejs/*", "vitest", "typescript"]
+    ignore:
+      # @wdio/tauri-service 1.x requires webdriverio 9; hold the WebdriverIO
+      # majors until the Tauri service supports v10.
+      - dependency-name: "@wdio/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "webdriverio"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      tauri:
+        patterns: ["tauri", "tauri-*"]
+      windows:
+        patterns: ["windows", "windows-*", "winreg"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
