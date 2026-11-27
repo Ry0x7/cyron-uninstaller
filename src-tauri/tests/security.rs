@@ -573,21 +573,24 @@ fn destructive_calls_stay_inside_reviewed_modules() {
         }
     }
 
-    // Three reviewed process execution paths:
-    // 1. Explorer in commands.rs (to reveal folders).
-    // 2. Validated uninstaller binary in uninstall.rs.
-    // 3. Fixed Windows binaries in perf.rs, resolved under %SystemRoot% by
-    //    windows_binary() and launched through one helper.
+    // Two reviewed process execution paths:
+    // 1. Validated uninstaller binary in uninstall.rs.
+    // 2. Fixed Windows binaries in perf.rs, resolved under %SystemRoot% by
+    //    windows_binary() and launched through one helper. Explorer (to reveal
+    //    folders) goes through the same helper from commands.rs, so it is
+    //    never looked up on the search path.
     assert_eq!(
         command_invocations.len(),
-        3,
-        "only Explorer, validated uninstaller and fixed System32 diagnostics may be launched: {command_invocations:?}"
+        2,
+        "only the validated uninstaller and fixed %SystemRoot% binaries may be launched: {command_invocations:?}"
+    );
+    let commands_source = without_test_modules(
+        &std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands.rs"))
+            .expect("read commands.rs"),
     );
     assert!(
-        command_invocations
-            .iter()
-            .any(|(f, _, cmd)| f == "commands.rs" && cmd.contains("explorer.exe")),
-        "commands.rs must launch explorer.exe"
+        commands_source.contains("perf::windows_command(\"explorer.exe\")"),
+        "commands.rs must launch Explorer through perf::windows_command"
     );
     assert!(
         command_invocations
