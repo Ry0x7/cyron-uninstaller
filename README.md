@@ -85,6 +85,14 @@ Elevated tracing and some real-world uninstall paths still have open verificatio
 - [Roadmap](ROADMAP.md), [Engineering handoff](HANDOFF.md) and [Verification gates](GATES.md) for project status.
 - [Release checklist](docs/RELEASE_CHECKLIST.md) and [Evidence index](docs/evidence/README.md) for verification records.
 
+## Contributing and support
+
+Bug reports, ideas and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), which covers setup, the safety rules and the pull request process, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately as described in [SECURITY.md](SECURITY.md).
+
+If Cyron is useful to you and you would like to support its development, you can [buy me a coffee on Ko-fi](https://ko-fi.com/ry0x7).
+
+[![Support Cyron on Ko-fi](https://img.shields.io/badge/Support_on-Ko--fi-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/ry0x7)
+
 ## License
 
 Cyron is source-available. Viewing, auditing and personal compilation are governed by the [Cyron Source-Available License](LICENSE). Code reuse and redistribution require written permission from the author.

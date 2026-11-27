@@ -337,6 +337,16 @@
   overflow-wrap: anywhere;
 }
 
+button.set-link {
+  padding: 0;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
 .set-link:hover {
   border-bottom-color: var(--accent);
 }

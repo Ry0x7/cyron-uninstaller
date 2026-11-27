@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Ry0x7/cyron-uninstaller/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.
+  - name: User guide
+    url: https://github.com/Ry0x7/cyron-uninstaller/blob/main/docs/USER_GUIDE.md
+    about: How each page of Cyron works.
+  - name: Support Cyron on Ko-fi
+    url: https://ko-fi.com/ry0x7
+    about: Enjoying Cyron? You can support its development.
