@@ -206,7 +206,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `record_performance_baseline` | `label` | `PerformanceBaseline` | Captures a fresh snapshot and stores compareable figures locally. |
 | `start_performance_trace` | — | `PerformanceTraceStatus` | Optional WPR trace; refuses when already recording, unavailable or unelevated. |
 | `stop_performance_trace` | — | `PerformanceTraceStatus` | Stops and saves the local trace; no upload. |
-| `open_performance_settings` | `page` | — | Opens a fixed Windows settings page; no arbitrary command. |
+| `open_performance_settings` | `page` | — | Opens a fixed Windows settings page or tool, or one of two fixed web pages (`support` → Ko-fi, `repository` → GitHub) in the default browser; no arbitrary command or URL. |
 | `prepare_force_delete_plan` | `targetPath` | `ForceDeletePlanPreview` | Inspects target, locks and protections; 10-minute plan. |
 | `execute_force_delete_plan` | `planId`, `mode` | `ForceDeleteResult` | `quarantine` or `permanent`; unknown modes refused; journaled quarantine. |
 | `terminate_force_delete_locking_process` | `planId`, `pid`, `force` | `ProcessTerminateResult` | PID and creation time must match the plan. |

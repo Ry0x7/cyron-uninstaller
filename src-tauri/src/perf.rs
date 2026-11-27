@@ -2579,8 +2579,15 @@ pub fn stop_trace(session: &TraceSession) -> Result<PathBuf, String> {
 
 /* ------------------------------------------------------------ supported tools */
 
+/// Fixed web pages the About and sidebar links may open in the default browser.
+/// They are constants, so the frontend can never pass a URL of its own.
+pub const SUPPORT_URL: &str = "https://ko-fi.com/ry0x7";
+pub const REPOSITORY_URL: &str = "https://github.com/Ry0x7/cyron-uninstaller";
+
 pub fn open_supported_tool(page: &str) -> Result<(), String> {
     let (binary, argument) = match page {
+        "support" => ("explorer.exe", Some(SUPPORT_URL)),
+        "repository" => ("explorer.exe", Some(REPOSITORY_URL)),
         "startup-apps" => ("explorer.exe", Some("ms-settings:startupapps")),
         "storage" => ("explorer.exe", Some("ms-settings:storagesense")),
         "task-manager" => ("System32\\taskmgr.exe", None),
@@ -2603,6 +2610,15 @@ pub fn open_supported_tool(page: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supported_pages_are_fixed_and_unknown_pages_are_refused() {
+        assert_eq!(SUPPORT_URL, "https://ko-fi.com/ry0x7");
+        assert!(REPOSITORY_URL.starts_with("https://github.com/"));
+        // A URL or path from the frontend is never opened; only named pages are.
+        assert!(open_supported_tool("https://example.com").is_err());
+        assert!(open_supported_tool("C:\\Windows\\System32\\cmd.exe").is_err());
+    }
 
     fn empty_drivers() -> DriverAnalysis {
         DriverAnalysis {
