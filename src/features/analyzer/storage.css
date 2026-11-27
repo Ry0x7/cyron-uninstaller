@@ -8,11 +8,11 @@
 }
 
 .sto-summary {
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface);
   padding: 18px;
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-card);
 }
 
 .sto-summary__stats {

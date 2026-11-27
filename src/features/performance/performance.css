@@ -35,10 +35,10 @@
   align-items: center;
   gap: 7px;
   height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--fill);
   color: var(--text-muted);
   font-family: var(--font-ui);
   font-size: 12px;
@@ -49,19 +49,19 @@
 }
 
 .perf-live-toggle:hover {
-  border-color: var(--line-strong);
+  background: var(--fill-strong);
   color: var(--text-strong);
 }
 
 .perf-live-toggle[aria-pressed="true"] {
   color: var(--text-strong);
-  border-color: color-mix(in srgb, var(--accent) 26%, var(--line));
-  background: var(--accent-soft);
+  border-color: transparent;
+  background: var(--fill);
 }
 
 .perf-live-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: var(--safe);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--safe) 12%, transparent);

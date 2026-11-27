@@ -1236,3 +1236,108 @@ export interface AnalyzerActionReport {
   cancelled: boolean;
 }
 
+
+/* ------------------------------------------------------ Live resource monitor */
+
+export interface LiveCpu {
+  utilizationPercent: number;
+  userPercent: number;
+  kernelPercent: number;
+  perCorePercent: number[];
+  speedMhz: number | null;
+}
+
+export interface LiveMemory {
+  totalBytes: number;
+  availableBytes: number;
+  usedBytes: number;
+  usedPercent: number;
+  commitUsedBytes: number;
+  commitLimitBytes: number;
+  cachedBytes: number;
+  pagedPoolBytes: number;
+  nonpagedPoolBytes: number;
+  modifiedBytes: number | null;
+  standbyBytes: number | null;
+  freeBytes: number | null;
+}
+
+export interface LiveDisk {
+  index: number;
+  volumes: string[];
+  activePercent: number;
+  readBytesPerSec: number;
+  writeBytesPerSec: number;
+  responseMs: number;
+}
+
+export interface LiveNetwork {
+  name: string;
+  kind: "wifi" | "ethernet" | "other";
+  receivedBytesPerSec: number;
+  sentBytesPerSec: number;
+  linkBitsPerSec: number;
+}
+
+export interface LiveGpuEngine {
+  name: string;
+  percent: number;
+}
+
+export interface LiveGpu {
+  index: number;
+  name: string | null;
+  luid: string;
+  utilizationPercent: number;
+  engines: LiveGpuEngine[];
+  dedicatedUsedBytes: number;
+  sharedUsedBytes: number;
+}
+
+export interface LiveProcess {
+  pid: number;
+  name: string;
+  path: string | null;
+  cpuPercent: number;
+  workingSetBytes: number;
+  privateBytes: number;
+  ioBytesPerSec: number;
+  hasWindow: boolean;
+  isCritical: boolean;
+  isCyron: boolean;
+}
+
+export interface LiveSystem {
+  processCount: number;
+  threadCount: number;
+  handleCount: number;
+  uptimeSeconds: number;
+}
+
+export interface LiveHardware {
+  cpuName: string;
+  baseSpeedMhz: number | null;
+  sockets: number;
+  cores: number;
+  logicalProcessors: number;
+  l1CacheBytes: number;
+  l2CacheBytes: number;
+  l3CacheBytes: number;
+  installedMemoryBytes: number | null;
+  gpuNames: string[];
+}
+
+export interface LivePerformance {
+  capturedAt: number;
+  intervalMs: number;
+  warm: boolean;
+  cpu: LiveCpu;
+  memory: LiveMemory;
+  disks: LiveDisk[];
+  networks: LiveNetwork[];
+  gpus: LiveGpu[];
+  system: LiveSystem;
+  processes: LiveProcess[] | null;
+  hardware: LiveHardware;
+  notes: string[];
+}

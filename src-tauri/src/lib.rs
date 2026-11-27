@@ -15,6 +15,7 @@ pub mod index;
 pub mod leftovers;
 pub mod mft;
 pub mod perf;
+pub mod perf_live;
 pub mod process;
 pub mod providers;
 pub mod scan;
@@ -172,6 +173,7 @@ pub fn run() {
             commands::prepare_dead_startup_removal,
             commands::execute_dead_startup_removal,
             commands::capture_performance_snapshot,
+            commands::sample_live_performance,
             commands::list_performance_baselines,
             commands::record_performance_baseline,
             commands::start_performance_trace,

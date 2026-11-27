@@ -1,7 +1,7 @@
 use crate::scan::{self, ScanProgress, ScanResult};
 use crate::{
     app_history, apps, caches, cleanup, devscan, duplicates, explorer, history, leftovers, mft,
-    perf, process, searchindex, store, uninstall, volumes, AppState,
+    perf, perf_live, process, searchindex, store, uninstall, volumes, AppState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -2034,6 +2034,19 @@ pub async fn capture_performance_snapshot(
         .clone();
     snapshot.trace = perf::trace_status(&active);
     Ok(snapshot)
+}
+
+/// Lightweight live sample for the Performance monitor; meant to be polled
+/// about once a second while the monitor is visible. Read-only.
+#[tauri::command]
+pub async fn sample_live_performance(
+    include_processes: Option<bool>,
+) -> Result<perf_live::LivePerformance, String> {
+    let include_processes = include_processes.unwrap_or(false);
+    run_blocking("Live performance sample", move || {
+        perf_live::sample(include_processes)
+    })
+    .await
 }
 
 #[tauri::command]

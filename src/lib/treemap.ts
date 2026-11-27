@@ -178,3 +178,130 @@ export function squarify(
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
+
+export interface NestedNode {
+  size: number;
+  allocated: number;
+  kind: string;
+  children: NestedNode[];
+}
+
+export interface NestedTile<T extends NestedNode> {
+  node: T;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  depth: number;
+  /** Index of the enclosing folder tile, or -1 for the top level. */
+  parent: number;
+  /** True when this folder's own contents are drawn inside it. */
+  nested: boolean;
+  /** Height of the folder's name strip when nested; 0 otherwise. */
+  header: number;
+}
+
+export interface NestedLayoutOptions {
+  /** Levels of folders drawn inside each other, counting the top level. */
+  maxDepth?: number;
+  /** Name strip height for nested folders. */
+  header?: number;
+  /** Frame between a folder's edge and its contents. */
+  padding?: number;
+  /** Smallest folder (in px) whose contents are still drawn. */
+  minNestedWidth?: number;
+  minNestedHeight?: number;
+  /** Hard ceiling on tiles, so a wide tree cannot stall a frame. */
+  maxTiles?: number;
+}
+
+const tileValue = (node: NestedNode) => node.size || node.allocated;
+
+/**
+ * Lays out a folder and, breadth first, the contents of every folder large
+ * enough to show them, the way WizTree and WinDirStat nest folders. Each
+ * nested folder keeps a frame and a name strip, so siblings stay visibly
+ * separate instead of reading as one block of same-coloured tiles.
+ */
+export function nestedSquarify<T extends NestedNode>(
+  root: T,
+  width: number,
+  height: number,
+  options: NestedLayoutOptions = {},
+): NestedTile<T>[] {
+  const {
+    maxDepth = 4,
+    header = 17,
+    padding = 3,
+    minNestedWidth = 54,
+    minNestedHeight = 40,
+    maxTiles = 5000,
+  } = options;
+  const tiles: NestedTile<T>[] = [];
+  if (!(width > 0) || !(height > 0)) return tiles;
+
+  const queue: Array<{ node: T; x: number; y: number; w: number; h: number; depth: number; parent: number }> = [
+    { node: root, x: 0, y: 0, w: width, h: height, depth: 0, parent: -1 },
+  ];
+
+  while (queue.length > 0 && tiles.length < maxTiles) {
+    const job = queue.shift()!;
+    const children = job.node.children.filter((child) => tileValue(child) > 0) as T[];
+    if (children.length === 0) continue;
+    const rects = squarify(
+      children.map((child, index) => ({ key: String(index), value: tileValue(child) })),
+      job.w,
+      job.h,
+    );
+    for (const rect of rects) {
+      if (tiles.length >= maxTiles) break;
+      if (rect.w < 0.75 || rect.h < 0.75) continue;
+      const child = children[Number(rect.key)];
+      const index = tiles.length;
+      const tile: NestedTile<T> = {
+        node: child,
+        x: job.x + rect.x,
+        y: job.y + rect.y,
+        w: rect.w,
+        h: rect.h,
+        depth: job.depth,
+        parent: job.parent,
+        nested: false,
+        header: 0,
+      };
+      tiles.push(tile);
+      const canNest =
+        child.kind === "dir" &&
+        child.children.length > 0 &&
+        job.depth + 1 < maxDepth &&
+        rect.w >= minNestedWidth &&
+        rect.h >= minNestedHeight;
+      if (!canNest) continue;
+      const strip = rect.h >= header * 2.6 && rect.w >= 64 ? header : 0;
+      const innerW = rect.w - padding * 2;
+      const innerH = rect.h - strip - padding * (strip ? 1 : 2);
+      if (innerW < 8 || innerH < 8) continue;
+      tile.nested = true;
+      tile.header = strip;
+      queue.push({
+        node: child,
+        x: tile.x + padding,
+        y: tile.y + (strip || padding),
+        w: innerW,
+        h: innerH,
+        depth: job.depth + 1,
+        parent: index,
+      });
+    }
+  }
+  return tiles;
+}
+
+/** The deepest tile under a point. Tiles are ordered parents before children. */
+export function hitTest<T extends NestedNode>(tiles: NestedTile<T>[], x: number, y: number): number {
+  for (let index = tiles.length - 1; index >= 0; index -= 1) {
+    const tile = tiles[index];
+    if (x >= tile.x && x < tile.x + tile.w && y >= tile.y && y < tile.y + tile.h) return index;
+  }
+  return -1;
+}

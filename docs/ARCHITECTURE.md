@@ -201,6 +201,7 @@ All payloads use `#[serde(rename_all = "camelCase")]`; the TypeScript mirror is
 | `prepare_dead_startup_removal` | `startupId` | `DeadStartupPlan` | 5-minute single-use plan bound to the exact registry value and metadata fingerprint; refuses protected or reappeared entries. |
 | `execute_dead_startup_removal` | `planId`, `confirmedLocation` | `DeadStartupRemovalReport` | Read-only gated; revalidates the entry, writes and verifies a single-value `.reg` backup plus journal/manifest in quarantine, then deletes only that value. Restorable through `restore_registry_backup`. |
 | `capture_performance_snapshot` | `forceStartup?` | `PerformanceSnapshot` | Read-only 700 ms sample plus cached driver inventory and recent System events; `forceStartup` bypasses the 120 s startup/device-evidence caches for a manual refresh. |
+| `sample_live_performance` | `includeProcesses?` | `LivePerformance` | Read-only one-second live sample from a persistent PDH query: total/per-core CPU and speed, memory composition, physical disks, network adapters, GPU engines and dedicated memory, uptime and handle/thread counts; per-process CPU, memory, disk and app/background grouping only when `includeProcesses` is true. |
 | `list_performance_baselines` | — | `PerformanceBaseline[]` | Local baselines, newest first, capped at 50. |
 | `record_performance_baseline` | `label` | `PerformanceBaseline` | Captures a fresh snapshot and stores compareable figures locally. |
 | `start_performance_trace` | — | `PerformanceTraceStatus` | Optional WPR trace; refuses when already recording, unavailable or unelevated. |
@@ -594,10 +595,13 @@ files.
 - **Storage & Cleanup → Disk space** starts from volumes or the native folder picker, subscribes to
   progress events filtered by a generated job id, supports cancel and cancels on unmount. Results
   are nodes held in a stack for breadcrumbs. Tabs: **Map**, **Files**, **Duplicates**, **By type**.
-- **Treemap** measures its container with `ResizeObserver`, lays out children with
-  `lib/treemap.ts`, and renders absolutely positioned buttons on a fixed dark canvas. File tiles
-  are colored by extension category; folder tiles are neutral, aggregate nodes amber. Click
-  selects, double-click/Enter drills, hover shows the share of the parent. Selection is shared with
+- **Treemap** measures its container with `ResizeObserver` (coalesced per animation frame), lays
+  out up to four levels with `nestedSquarify` in `lib/treemap.ts`, and draws them on one `<canvas>`.
+  Folders get a header strip and a frame so siblings separate visually; file tiles are colored by
+  extension category, folders whose contents were summarized are grey and load on demand (index
+  query first, focused directory scan fallback). Hover is hit-tested once per frame; invisible
+  top-level buttons keep keyboard and screen-reader access. Click selects, double-click/Enter
+  drills, hover shows the path and the share of the parent. Selection is shared with
   the tree and details.
 - **Tree column** (`TreeView.tsx`) is a persistent, resizable (220–520 px, persisted) column with
   virtualized rows, ARIA tree keyboard navigation, expand/collapse, scroll-to-selection and reset
