@@ -19,6 +19,7 @@
     "docs:check": "node scripts/verify-docs.mjs",
     "landing:sync": "node scripts/sync-landing.mjs",
     "landing:check": "node scripts/sync-landing.mjs --check",
+    "preview:screenshots": "node scripts/capture-ui-preview.mjs",
     "prepare": "powershell -ExecutionPolicy Bypass -File scripts/setup-git-hooks.ps1",
     "tauri": "node scripts/msvc-env.mjs npx tauri",
     "dev:desktop": "node scripts/msvc-env.mjs npx tauri dev",
