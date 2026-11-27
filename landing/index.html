@@ -65,11 +65,12 @@
         <span>Cyron</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#safety">Safety</a>
-        <a href="#capabilities">Capabilities</a>
-        <a href="#vibecode">AI caches</a>
-        <a href="#speed">Speed</a>
-        <a href="#compare">Compare</a>
+        <a href="#capabilities" data-spy="capabilities">Features</a>
+        <a href="#monitor" data-spy="monitor">Monitor</a>
+        <a href="#tour" data-spy="tour">Tour</a>
+        <a href="#safety" data-spy="safety">Safety</a>
+        <a href="#vibecode" data-spy="vibecode">AI caches</a>
+        <a href="#compare" data-spy="compare">Compare</a>
       </nav>
       <div class="nav-tools" role="group" aria-label="Display preferences">
         <button
@@ -117,19 +118,19 @@
         <div class="wrap hero-copy">
           <p class="eyebrow reveal">
             <span class="status-dot" aria-hidden="true"></span>
-            Windows 10/11 x64 · <span data-release-version>v0.2.1</span>
+            Windows 10/11 x64 · <span data-release-version>v0.2.4</span>
           </p>
           <h1 class="reveal" style="--delay: 60ms">
             The uninstaller that<br />
             <span class="accent">shows its work.</span>
           </h1>
           <p class="lede reveal" style="--delay: 120ms">
-            Remove the app, find what it left behind, clear the caches your AI tools quietly
-            filled, and see what your PC is actually doing — before anything changes. One calm
-            utility instead of five noisy ones.
+            Remove the app, find what it left behind, map every byte on the drive, and watch what
+            your PC is doing live — before anything changes. One calm utility instead of five
+            noisy ones.
           </p>
           <div class="actions reveal" style="--delay: 180ms">
-            <a class="btn btn-primary" href="#download">
+            <a class="btn btn-primary magnetic" href="#download">
               Download for Windows
               <svg viewBox="0 0 20 20" aria-hidden="true">
                 <path d="M10 3v10m0 0 4-4m-4 4L6 9M4 16h12" />
@@ -143,7 +144,7 @@
             </a>
           </div>
           <p class="fineprint reveal" style="--delay: 240ms">
-            Review-first · recoverable cleanup · AI &amp; IDE cache review · no telemetry · no
+            Review-first · recoverable cleanup · live resource monitor · no telemetry · no
             RAM-booster claims
           </p>
         </div>
@@ -153,39 +154,56 @@
             <div class="frame-bar" aria-hidden="true">
               <span class="traffic"><i></i><i></i><i></i></span>
               <span class="frame-title">Cyron — Performance</span>
-              <span class="frame-live"><i></i>Live sample</span>
+              <span class="frame-live"><i></i>Live</span>
             </div>
-            <img
-              src="assets/spike-capture.png"
-              width="1320"
-              height="870"
-              alt="Cyron Performance page showing a 20-second spike capture with peak CPU, kernel and disk figures and the process using the most CPU."
-            />
+            <img class="shot shot-light" src="assets/ui/performance-cpu-light.webp" width="2880" height="1840" loading="eager" decoding="async" alt="Cyron Performance monitor with a resource rail of CPU, memory, disk, Wi-Fi and GPU sparklines and a 60-second CPU utilization chart, shown with sample data." />
+            <img class="shot shot-dark" src="assets/ui/performance-cpu-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Performance monitor with a resource rail of CPU, memory, disk, Wi-Fi and GPU sparklines and a 60-second CPU utilization chart, shown with sample data." />
           </div>
           <div class="float-card glass float-a" aria-hidden="true">
-            <span class="float-kicker">20-second capture</span>
-            <strong>20 readings</strong>
-            <span>peak, not latest</span>
+            <span class="float-kicker">Live monitor</span>
+            <strong>Every second</strong>
+            <span>60-second history per resource</span>
           </div>
           <div class="float-card glass float-b" aria-hidden="true">
-            <span class="float-kicker">Kernel evidence</span>
-            <strong>4 drivers</strong>
-            <span>versions + dates</span>
+            <span class="float-kicker">Disk map</span>
+            <strong>4 levels deep</strong>
+            <span>every folder framed and named</span>
           </div>
+          <p class="hero-note">Preview of the redesigned app with sample data.</p>
         </div>
 
-        <a class="scroll-cue" href="#safety" aria-label="Scroll to safety">
+        <a class="scroll-cue" href="#manifesto" aria-label="Scroll to explore">
           <span class="cue-track" aria-hidden="true"><i></i></span>
           Scroll to explore
         </a>
       </section>
 
       <section class="strip" aria-label="Product principles">
-        <div class="wrap strip-grid">
-          <span><i class="dot dot-blue" aria-hidden="true"></i>Review before every change</span>
-          <span><i class="dot dot-green" aria-hidden="true"></i>Quarantine before deletion</span>
-          <span><i class="dot dot-blue" aria-hidden="true"></i>Read-only diagnostics by default</span>
-          <span><i class="dot dot-green" aria-hidden="true"></i>Zero telemetry by architecture</span>
+        <div class="marquee">
+          <div class="marquee-track">
+            <span><i class="dot dot-blue" aria-hidden="true"></i>Review before every change</span>
+            <span><i class="dot dot-green" aria-hidden="true"></i>Quarantine before deletion</span>
+            <span><i class="dot dot-blue" aria-hidden="true"></i>Read-only diagnostics by default</span>
+            <span><i class="dot dot-green" aria-hidden="true"></i>Zero telemetry by architecture</span>
+            <span><i class="dot dot-blue" aria-hidden="true"></i>Live CPU, memory, disk, network and GPU</span>
+            <span><i class="dot dot-green" aria-hidden="true"></i>Restores never overwrite a file</span>
+            <span class="marquee-dup" aria-hidden="true"><i class="dot dot-blue"></i>Review before every change</span>
+            <span class="marquee-dup" aria-hidden="true"><i class="dot dot-green"></i>Quarantine before deletion</span>
+            <span class="marquee-dup" aria-hidden="true"><i class="dot dot-blue"></i>Read-only diagnostics by default</span>
+            <span class="marquee-dup" aria-hidden="true"><i class="dot dot-green"></i>Zero telemetry by architecture</span>
+            <span class="marquee-dup" aria-hidden="true"><i class="dot dot-blue"></i>Live CPU, memory, disk, network and GPU</span>
+            <span class="marquee-dup" aria-hidden="true"><i class="dot dot-green"></i>Restores never overwrite a file</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="manifesto" id="manifesto" aria-label="How Cyron works">
+        <div class="wrap">
+          <p class="manifesto-text" data-scrub>
+            Cyron measures before it touches anything. It shows you the exact plan — every file,
+            every registry key. Nothing moves until you say so. And everything it moves, it can put
+            back.
+          </p>
         </div>
       </section>
 
@@ -265,19 +283,18 @@
             <p class="eyebrow">One utility</p>
             <h2>Five jobs, one clear point of view.</h2>
             <p>
-              Uninstall, explore, clean, diagnose and recover without handing your PC to a black box.
-              Scroll through the work.
+              Uninstall, search, explore, clean and diagnose without handing your PC to a black
+              box. Scroll through the work.
             </p>
           </div>
 
           <div class="showcase-grid">
             <div class="steps">
-              <article class="step is-active" data-step="0">
+              <article class="step is-active" data-step="0" data-title="Applications" data-live="Review">
                 <span class="step-index">01</span>
                 <h3>Uninstall without leftovers</h3>
                 <p>
-                  Win32, Store, Steam and portable apps in one inventory. Batch runs only what has a
-                  registered vendor uninstaller, and leftover files are reviewed separately.
+                  Win32, Store, Steam and portable apps in one inventory. Batch runs only what has a registered vendor uninstaller, and leftover files are reviewed separately.
                 </p>
                 <ul>
                   <li>Batch queue refuses Store, Steam and unregistered entries</li>
@@ -285,25 +302,35 @@
                   <li>Exit codes are checked against the live inventory, not trusted alone</li>
                 </ul>
               </article>
-              <article class="step" data-step="1">
+              <article class="step" data-step="1" data-title="Search" data-live="Local index">
                 <span class="step-index">02</span>
-                <h3>See where every byte went</h3>
+                <h3>Find any file in milliseconds</h3>
                 <p>
-                  A treemap and virtualized tree expose the folders behind a full drive. NTFS MFT
-                  scanning is used when elevated; a streaming walk covers the rest.
+                  Cyron builds its own index of every fixed drive, then answers from memory as you type, with Everything-style filters like <code>ext:pdf</code>, <code>size:&gt;1gb</code> and <code>dm:thisweek</code>.
                 </p>
                 <ul>
-                  <li>Reparse points are never followed</li>
-                  <li>Hard links are deduplicated so allocation is not double-counted</li>
-                  <li>Duplicate detection uses size, edge hashes and SHA-256</li>
+                  <li>Names, sizes and dates only — file contents are never read</li>
+                  <li>Stays current while Cyron runs</li>
+                  <li>Export only the rows you choose, as CSV or TXT</li>
                 </ul>
               </article>
-              <article class="step" data-step="2">
+              <article class="step" data-step="2" data-title="Disk space" data-live="Explore">
                 <span class="step-index">03</span>
+                <h3>See where every byte went</h3>
+                <p>
+                  A nested treemap draws each folder as a framed block with its name and size, four levels deep. Drill into a summarized folder and its contents load on demand.
+                </p>
+                <ul>
+                  <li>NTFS MFT scanning when elevated; a streaming walk covers the rest</li>
+                  <li>Reparse points are never followed and hard links are counted once</li>
+                  <li>Drawn on one canvas, so hovering a full drive stays smooth</li>
+                </ul>
+              </article>
+              <article class="step" data-step="3" data-title="Caches" data-live="Review">
+                <span class="step-index">04</span>
                 <h3>Clean what you actually own</h3>
                 <p>
-                  Developer and AI caches are mapped to documented provider paths, then shown for
-                  review. Conversation history, credentials and model data stay protected.
+                  Developer and AI caches are mapped to documented provider paths, then shown for review. Conversation history, credentials and model data stay protected.
                 </p>
                 <ul>
                   <li>No arbitrary shell or package-manager execution</li>
@@ -311,17 +338,16 @@
                   <li>Quarantine keeps the run reversible</li>
                 </ul>
               </article>
-              <article class="step" data-step="3">
-                <span class="step-index">04</span>
-                <h3>Diagnose the spike, not the vibe</h3>
+              <article class="step" data-step="4" data-title="Performance" data-live="Read-only">
+                <span class="step-index">05</span>
+                <h3>Like Task Manager, but honest</h3>
                 <p>
-                  A 20-second capture keeps the peak instead of the latest reading. Kernel time has
-                  no process row, so Cyron adds driver versions and recent System events.
+                  Processes are grouped into apps, background and Windows processes, with heat-tinted CPU, memory and disk columns. Startup and Diagnose keep the evidence tools.
                 </p>
                 <ul>
-                  <li>Kernel share of busy CPU, with the application time it does not explain</li>
-                  <li>Display, storage and network driver dates from the package</li>
-                  <li>No driver rollback, service disabling or placebo tweaks</li>
+                  <li>Sort any column and search by name, PID or path</li>
+                  <li>Open file location for any process</li>
+                  <li>No end-task button here: diagnostics stay read-only</li>
                 </ul>
               </article>
             </div>
@@ -335,115 +361,175 @@
                 </div>
 
                 <div class="panels">
-                  <div class="panel is-active" data-panel="0">
-                    <div class="mock">
-                      <div class="mock-head">
-                        <strong>Installed applications</strong>
-                        <span class="pill">Review queue</span>
-                      </div>
-                      <div class="mock-toolbar">
-                        <span class="mock-search">Search apps</span>
-                        <span class="mock-select">All sources</span>
-                      </div>
-                      <ul class="app-list">
-                        <li class="is-selected">
-                          <span class="mock-check" aria-hidden="true"></span>
-                          <span class="app-name"><strong>Adobe Creative Cloud</strong><small>Registered uninstaller</small></span>
-                          <em>Selected</em>
-                        </li>
-                        <li class="is-selected">
-                          <span class="mock-check" aria-hidden="true"></span>
-                          <span class="app-name"><strong>Docker Desktop</strong><small>Registered uninstaller</small></span>
-                          <em>Selected</em>
-                        </li>
-                        <li class="is-disabled">
-                          <span class="mock-check" aria-hidden="true"></span>
-                          <span class="app-name"><strong>Steam</strong><small>Removes through Steam</small></span>
-                          <em>Not queued</em>
-                        </li>
-                        <li class="is-disabled">
-                          <span class="mock-check" aria-hidden="true"></span>
-                          <span class="app-name"><strong>Portable utility</strong><small>No registered uninstaller</small></span>
-                          <em>Forced removal</em>
-                        </li>
-                      </ul>
-                      <div class="mock-foot">
-                        <span>2 selected</span>
-                        <span class="mock-btn">Review batch</span>
-                      </div>
-                    </div>
+                  <div class="panel panel-ui is-active" data-panel="0">
+                    <img class="shot shot-light" src="assets/ui/applications-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Applications list with publisher, version, size, install scope and uninstall actions, shown with sample data." />
+                    <img class="shot shot-dark" src="assets/ui/applications-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Applications list with publisher, version, size, install scope and uninstall actions, shown with sample data." />
                   </div>
-
-                  <div class="panel" data-panel="1">
-                    <div class="mock">
-                      <div class="mock-head">
-                        <strong>Disk space</strong>
-                        <span class="pill">NTFS · C:</span>
-                      </div>
-                      <div class="treemap" aria-hidden="true">
-                        <div class="tile tile-a"><span>Windows</span><small>System</small></div>
-                        <div class="tile tile-b"><span>node_modules</span></div>
-                        <div class="tile tile-c"><span>Media</span></div>
-                        <div class="tile tile-d"><span>Caches</span></div>
-                        <div class="tile tile-e"><span>Apps</span></div>
-                        <div class="tile tile-f"><span>Other</span></div>
-                      </div>
-                      <p class="mock-note">
-                        Illustrative treemap. Allocation is measured; no sizes are claimed here.
-                      </p>
-                    </div>
+                  <div class="panel panel-ui" data-panel="1">
+                    <img class="shot shot-light" src="assets/ui/search-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Search results for the word report across every fixed drive, with name, path, size and modified columns, shown with sample data." />
+                    <img class="shot shot-dark" src="assets/ui/search-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Search results for the word report across every fixed drive, with name, path, size and modified columns, shown with sample data." />
                   </div>
-
-                  <div class="panel" data-panel="2">
-                    <div class="mock">
-                      <div class="mock-head">
-                        <strong>Known cache locations</strong>
-                        <span class="pill">Review</span>
-                      </div>
-                      <ul class="cleaner-list">
-                        <li>
-                          <span class="app-name"><strong>npm cache</strong><small>Package manager cache</small></span>
-                          <em class="review">Review</em>
-                        </li>
-                        <li>
-                          <span class="app-name"><strong>Cargo target</strong><small>Rust build output</small></span>
-                          <em class="review">Review</em>
-                        </li>
-                        <li>
-                          <span class="app-name"><strong>Hugging Face models</strong><small>Model weights</small></span>
-                          <em class="protected">Protected</em>
-                        </li>
-                        <li>
-                          <span class="app-name"><strong>Ollama models</strong><small>Local model store</small></span>
-                          <em class="protected">Protected</em>
-                        </li>
-                        <li>
-                          <span class="app-name"><strong>Docker / WSL disks</strong><small>Virtual disks</small></span>
-                          <em class="protected">Protected</em>
-                        </li>
-                      </ul>
-                      <div class="mock-foot">
-                        <span>Protected data is never offered</span>
-                        <span class="mock-btn">Preview cleanup</span>
-                      </div>
-                    </div>
+                  <div class="panel panel-ui" data-panel="2">
+                    <img class="shot shot-light" src="assets/ui/disk-map-light.webp" width="2880" height="2000" loading="lazy" decoding="async" alt="Cyron Disk space map: a nested treemap where each folder is a framed block with its name and size, next to a folder tree, shown with sample data." />
+                    <img class="shot shot-dark" src="assets/ui/disk-map-dark.webp" width="2880" height="2000" loading="lazy" decoding="async" alt="Cyron Disk space map: a nested treemap where each folder is a framed block with its name and size, next to a folder tree, shown with sample data." />
                   </div>
-
-                  <div class="panel" data-panel="3">
-                    <div class="panel-shot">
-                      <img
-                        src="assets/spike-capture.png"
-                        width="1320"
-                        height="870"
-                        alt="Real Cyron 20-second spike capture showing peak CPU, kernel and disk values and the busiest process."
-                      />
-                      <span class="shot-badge">Real capture · v0.2.0-rc.2</span>
-                    </div>
+                  <div class="panel panel-ui" data-panel="3">
+                    <img class="shot shot-light" src="assets/ui/cleanup-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Cleanup page with measured storage split into safe, needs review and protected, shown with sample data." />
+                    <img class="shot shot-dark" src="assets/ui/cleanup-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Cleanup page with measured storage split into safe, needs review and protected, shown with sample data." />
+                  </div>
+                  <div class="panel panel-ui" data-panel="4">
+                    <img class="shot shot-light" src="assets/ui/performance-processes-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Processes tab grouping apps, background and Windows processes with heat-tinted CPU, memory and disk columns, shown with sample data." />
+                    <img class="shot shot-dark" src="assets/ui/performance-processes-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Processes tab grouping apps, background and Windows processes with heat-tinted CPU, memory and disk columns, shown with sample data." />
                   </div>
                 </div>
               </div>
-              <p class="caption">Steps 01–03 are interface illustrations. Step 04 is a real capture.</p>
+              <div class="step-dots" role="group" aria-label="Jump to a feature">
+                <button type="button" data-goto="0" aria-label="Applications" aria-current="true"></button>
+                <button type="button" data-goto="1" aria-label="Search"></button>
+                <button type="button" data-goto="2" aria-label="Disk space"></button>
+                <button type="button" data-goto="3" aria-label="Caches"></button>
+                <button type="button" data-goto="4" aria-label="Performance"></button>
+              </div>
+              <p class="caption">Previews of the redesigned app, rendered with sample data.</p>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section monitor dark" id="monitor">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">New · Performance monitor</p>
+            <h2>Watch your PC breathe.</h2>
+            <p>
+              CPU, memory, every disk, every network adapter and every GPU, sampled once a second
+              with a 60-second history. Pick a resource to see its chart. Try it below.
+            </p>
+          </div>
+
+          <div class="live glass-dark reveal" data-live-demo>
+            <div class="live-rail" role="tablist" aria-label="Resources">
+              <button type="button" role="tab" class="live-res" data-res="cpu" aria-selected="true">
+                <svg class="spark" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area" /><path class="spark-line" /></svg>
+                <span><strong>CPU</strong><small data-res-value="cpu">28% · 4.56 GHz</small></span>
+              </button>
+              <button type="button" role="tab" class="live-res" data-res="memory" aria-selected="false">
+                <svg class="spark" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area" /><path class="spark-line" /></svg>
+                <span><strong>Memory</strong><small data-res-value="memory">18.6 / 32 GB</small></span>
+              </button>
+              <button type="button" role="tab" class="live-res" data-res="disk" aria-selected="false">
+                <svg class="spark" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area" /><path class="spark-line" /></svg>
+                <span><strong>Disk 0 (C:)</strong><small data-res-value="disk">12% active</small></span>
+              </button>
+              <button type="button" role="tab" class="live-res" data-res="network" aria-selected="false">
+                <svg class="spark" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area" /><path class="spark-line" /></svg>
+                <span><strong>Wi-Fi</strong><small data-res-value="network">R 42 Mbps</small></span>
+              </button>
+              <button type="button" role="tab" class="live-res" data-res="gpu" aria-selected="false">
+                <svg class="spark" viewBox="0 0 72 30" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area" /><path class="spark-line" /></svg>
+                <span><strong>GPU 0</strong><small data-res-value="gpu">34% · 3D</small></span>
+              </button>
+            </div>
+
+            <div class="live-pane" role="tabpanel" aria-live="off">
+              <div class="live-head">
+                <div>
+                  <h3 data-live-title>CPU</h3>
+                  <p data-live-sub>8 cores · 16 logical processors</p>
+                </div>
+                <button type="button" class="live-pause" data-live-pause aria-pressed="false">
+                  <span class="live-pause-dot" aria-hidden="true"></span><span data-live-pause-label>Pause</span>
+                </button>
+              </div>
+              <div class="live-chart">
+                <span class="live-axis live-axis-top" data-live-max>100%</span>
+                <svg viewBox="0 0 600 200" preserveAspectRatio="none" aria-hidden="true">
+                  <g class="live-grid"><path d="M0 50H600M0 100H600M0 150H600M150 0V200M300 0V200M450 0V200" /></g>
+                  <path class="live-area" />
+                  <path class="live-line" />
+                  <path class="live-line-2" />
+                </svg>
+                <span class="live-axis live-axis-left">60 seconds</span>
+                <span class="live-axis live-axis-right">0</span>
+              </div>
+              <dl class="live-stats" data-live-stats>
+                <div><dt>Utilization</dt><dd>28%</dd></div>
+                <div><dt>Speed</dt><dd>4.56 GHz</dd></div>
+                <div><dt>Processes</dt><dd>287</dd></div>
+                <div><dt>Up time</dt><dd>3:04:12</dd></div>
+              </dl>
+            </div>
+          </div>
+          <p class="live-note">
+            Simulated in your browser to show how the monitor behaves. It does not read your
+            computer. In the app, values come from Windows performance counters.
+          </p>
+
+          <div class="monitor-facts">
+            <div class="fact reveal"><strong><span data-count-to="1">1</span> s</strong><span>sampling, only while the tab is visible</span></div>
+            <div class="fact reveal" style="--delay: 60ms"><strong><span data-count-to="60">60</span> s</strong><span>hoverable history per resource</span></div>
+            <div class="fact reveal" style="--delay: 120ms"><strong><span data-count-to="3">3</span> groups</strong><span>apps, background and Windows processes</span></div>
+            <div class="fact reveal" style="--delay: 180ms"><strong><span data-count-to="0">0</span> tweaks</strong><span>no end-task, boosters or registry hacks</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tour" id="tour" aria-labelledby="tourTitle">
+        <div class="tour-sticky">
+          <div class="wrap tour-head">
+            <p class="eyebrow">Take the tour</p>
+            <h2 id="tourTitle">Designed like a system tool.</h2>
+            <p>Soft surfaces, clear hierarchy and the same calm controls on every page, in light and dark. Select a screen to enlarge it.</p>
+          </div>
+          <div class="tour-viewport">
+            <ol class="tour-track">
+              <li class="tour-card">
+                <button type="button" class="tour-shot" data-zoom aria-label="Enlarge Home">
+                  <img class="shot shot-light" src="assets/ui/home-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Home page summarizing the operating system, processor, memory, free space, installed applications and cleanup potential, shown with sample data." />
+                  <img class="shot shot-dark" src="assets/ui/home-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Home page summarizing the operating system, processor, memory, free space, installed applications and cleanup potential, shown with sample data." />
+                </button>
+                <p><strong>Home</strong> A clear summary of the PC: hardware, free space, apps and what can be reclaimed.</p>
+              </li>
+              <li class="tour-card">
+                <button type="button" class="tour-shot" data-zoom aria-label="Enlarge Logical processors">
+                  <img class="shot shot-light" src="assets/ui/performance-cores-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron CPU pane switched to one chart per logical processor, shown with sample data." />
+                  <img class="shot shot-dark" src="assets/ui/performance-cores-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron CPU pane switched to one chart per logical processor, shown with sample data." />
+                </button>
+                <p><strong>Logical processors</strong> Switch the CPU chart to one graph per logical processor.</p>
+              </li>
+              <li class="tour-card">
+                <button type="button" class="tour-shot" data-zoom aria-label="Enlarge Memory">
+                  <img class="shot shot-light" src="assets/ui/performance-memory-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Memory pane with a usage chart and a composition bar of in use, modified, standby and free memory, shown with sample data." />
+                  <img class="shot shot-dark" src="assets/ui/performance-memory-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Memory pane with a usage chart and a composition bar of in use, modified, standby and free memory, shown with sample data." />
+                </button>
+                <p><strong>Memory</strong> Usage over time and a composition bar of in use, standby and free.</p>
+              </li>
+              <li class="tour-card">
+                <button type="button" class="tour-shot" data-zoom aria-label="Enlarge GPU">
+                  <img class="shot shot-light" src="assets/ui/performance-gpu-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron GPU pane with 3D, copy and video engine charts and dedicated memory usage, shown with sample data." />
+                  <img class="shot shot-dark" src="assets/ui/performance-gpu-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron GPU pane with 3D, copy and video engine charts and dedicated memory usage, shown with sample data." />
+                </button>
+                <p><strong>GPU</strong> Engine charts for 3D, copy and video, plus dedicated memory.</p>
+              </li>
+              <li class="tour-card">
+                <button type="button" class="tour-shot" data-zoom aria-label="Enlarge Disk map">
+                  <img class="shot shot-light" src="assets/ui/disk-map-light.webp" width="2880" height="2000" loading="lazy" decoding="async" alt="Cyron Disk space map: a nested treemap where each folder is a framed block with its name and size, next to a folder tree, shown with sample data." />
+                  <img class="shot shot-dark" src="assets/ui/disk-map-dark.webp" width="2880" height="2000" loading="lazy" decoding="async" alt="Cyron Disk space map: a nested treemap where each folder is a framed block with its name and size, next to a folder tree, shown with sample data." />
+                </button>
+                <p><strong>Disk map</strong> Framed folders with name and size headers, four levels deep.</p>
+              </li>
+              <li class="tour-card">
+                <button type="button" class="tour-shot" data-zoom aria-label="Enlarge Recovery">
+                  <img class="shot shot-light" src="assets/ui/recovery-light.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Recovery tab listing quarantine batches with restore and purge actions and the cleanup log, shown with sample data." />
+                  <img class="shot shot-dark" src="assets/ui/recovery-dark.webp" width="2880" height="1840" loading="lazy" decoding="async" alt="Cyron Recovery tab listing quarantine batches with restore and purge actions and the cleanup log, shown with sample data." />
+                </button>
+                <p><strong>Recovery</strong> Restore a quarantined batch at any time. Existing files are never overwritten.</p>
+              </li>
+            </ol>
+          </div>
+          <div class="wrap tour-foot">
+            <span class="tour-progress" aria-hidden="true"><i></i></span>
+            <span class="tour-hint">Previews with sample data</span>
           </div>
         </div>
       </section>
@@ -738,6 +824,16 @@
         </div>
       </section>
     </main>
+
+    <dialog class="lightbox" id="lightbox" aria-label="Enlarged screenshot">
+      <form method="dialog">
+        <button class="lightbox-close" type="submit" aria-label="Close">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" /></svg>
+        </button>
+      </form>
+      <img id="lightboxImage" src="assets/ui/home-light.webp" alt="" />
+      <p id="lightboxCaption"></p>
+    </dialog>
 
     <footer class="footer">
       <div class="wrap footer-grid">
