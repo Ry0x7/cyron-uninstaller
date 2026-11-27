@@ -9,10 +9,24 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const isWindows = process.platform === "win32";
-const [command, ...args] = process.argv.slice(2);
+// Only the toolchain front-ends this repository actually runs are accepted.
+// The executable name always comes from this table, never from argv.
+const ALLOWED_COMMANDS = new Map([
+  ["cargo", "cargo"],
+  ["rustc", "rustc"],
+  ["rustup", "rustup"],
+  ["npm", "npm"],
+  ["npx", "npx"],
+  ["pnpm", "pnpm"],
+  ["yarn", "yarn"],
+]);
+const [requested, ...args] = process.argv.slice(2);
+const command = ALLOWED_COMMANDS.get(requested);
 
 if (!command) {
-  console.error("usage: node scripts/msvc-env.mjs <command> [args...]");
+  console.error(
+    `usage: node scripts/msvc-env.mjs <${[...ALLOWED_COMMANDS.keys()].join("|")}> [args...]`,
+  );
   process.exit(2);
 }
 
@@ -139,8 +153,8 @@ const npmScript = isWindows && npmEntry
   ? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", npmEntry)
   : undefined;
 
-// Anything that still has to go through cmd.exe (pnpm/yarn shims, or a .cmd/.bat
-// command) must not carry characters cmd.exe treats as syntax.
+// Anything that still has to go through cmd.exe (pnpm/yarn shims) must not
+// carry characters cmd.exe treats as syntax.
 const CMD_META = /[&|<>^%!"\r\n]/;
 function assertCmdSafe(values) {
   const unsafe = values.find((value) => CMD_META.test(value));
@@ -153,7 +167,7 @@ const quote = (value) => (/\s/.test(value) ? `"${value}"` : value);
 const needsCmd =
   isWindows &&
   !(npmScript && existsSync(npmScript)) &&
-  (["npm", "npx", "pnpm", "yarn"].includes(command) || /\.(cmd|bat)$/i.test(command));
+  ["npm", "npx", "pnpm", "yarn"].includes(command);
 
 let result;
 if (npmScript && existsSync(npmScript)) {
