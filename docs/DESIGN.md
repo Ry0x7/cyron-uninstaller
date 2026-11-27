@@ -76,6 +76,12 @@ Rules:
 - **Performance** has four tabs: Monitor (Task Manager-style resource rail with sparklines and 60-second charts for CPU, memory, each disk, each network adapter and each GPU), Processes (grouped Apps / Background / Windows table with heat-tinted cells), Startup, and Diagnose. Live tabs poll once a second only while visible and not paused.
 - **Disk space** draws a nested canvas treemap: folders are framed with a name/size header so siblings read as separate blocks, and summarized folders load their contents on demand.
 
+## Screenshots and the website
+
+- `npm run preview:screenshots` renders the React frontend in headless Chromium with `scripts/preview/mock-tauri.js` standing in for the Tauri IPC, and writes `docs/screenshots/*.png`. Every value is sample data. Label these images as previews, never as native captures; native evidence still comes from the desktop E2E harness.
+- `npm run preview:screenshots -- --scale 2 --themes light,dark --out <dir>` produces the light and dark pairs used by the website. The landing page stores them as WebP in `landing/assets/ui/` and shows the light or dark capture to match the page's appearance.
+- The website in `landing/` follows the same direction as the app: neutral surfaces, one blue accent, cards without heavy borders. Motion is progressive: scroll-linked effects (hero tilt, word-by-word manifesto, pinned horizontal tour, scrubbed showcase) and the simulated live monitor stop or flatten under reduced motion, and the page reads fully without JavaScript. The live monitor demo is simulated in the browser and says so; it never reads the visitor's computer.
+
 ## States
 
 Every surface must cover the states it can actually reach: loading, empty, error/stale, disabled, in-progress, success, partial and recovery. Loading skeletons should match the final layout. Errors name the problem and the next action. Empty states explain how to fill the surface. A run that moved some files is **partial**; it is never described as completed or as a clean cancellation.
