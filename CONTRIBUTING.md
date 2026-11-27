@@ -6,6 +6,30 @@ Cyron is built with **Tauri v2**, **Rust**, and **React 19 / TypeScript / Vite 7
 
 ---
 
+## Ways to Contribute
+
+- **Report a bug** with the [bug report form](https://github.com/Ry0x7/cyron-uninstaller/issues/new/choose). Include your Cyron and Windows versions.
+- **Suggest a feature** with the feature request form. Describe the problem first; Cyron favours review-first, recoverable designs.
+- **Improve the docs or the website** in `docs/` and `landing/`.
+- **Send a pull request** for a bug fix or an agreed feature. For anything larger than a small fix, open an issue first so we can agree on the approach.
+- **Report a vulnerability privately** as described in [SECURITY.md](SECURITY.md), never in a public issue.
+
+Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Pull Request Process
+
+1. Fork the repository and create a branch from `main`, for example `fix/search-export-path`.
+2. Make the change and follow the safety rules below.
+3. Run the checks that apply (see **Verification Suite**) and note the results in the pull request template.
+4. Open the pull request against `main`. To pick up newer changes from `main`, merge it into your branch; never rebase (see below).
+5. `main` is protected: every change lands through a pull request, the CI checks **Frontend (typecheck, tests, build)** and **Rust core (tests)** must pass, and the maintainer reviews it. Pull requests are merged with a merge commit or squashed.
+
+## Support the Project
+
+Cyron is built in the open by one maintainer. If it saved you some disk space or an afternoon of hunting leftovers, you can support its development on [Ko-fi](https://ko-fi.com/ry0x7). Starring the repository and reporting bugs help just as much.
+
+---
+
 ## Prerequisites
 
 1. **Windows 10 / 11** (64-bit).

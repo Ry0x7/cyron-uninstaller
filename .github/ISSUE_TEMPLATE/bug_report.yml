@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in Cyron does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a problem. Please do not report security vulnerabilities here; see the security policy instead.
+  - type: input
+    id: version
+    attributes:
+      label: Cyron version
+      description: Shown in Settings → About.
+      placeholder: "0.2.4"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: For example "Windows 11 24H2 (26100.2454)". Run `winver` to see it.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Applications / uninstall
+        - Search
+        - Storage & Cleanup (Disk space, Cleanup, System health)
+        - Performance (Monitor, Processes, Startup, Diagnose)
+        - History & Recovery
+        - Settings / updates / Explorer integration
+        - Installer
+        - Website or documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshots or logs
+      description: Remove personal paths, user names and file names you do not want to share.
+  - type: checkboxes
+    id: elevated
+    attributes:
+      label: Context
+      options:
+        - label: Cyron was running as administrator
+        - label: Cleaning was enabled (read-only mode off)

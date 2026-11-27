@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an idea or improvement for Cyron.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the situation, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Cyron to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have tried
+  - type: markdown
+    attributes:
+      value: |
+        Cyron is review-first: it measures before it changes anything, quarantines instead of deleting, and never adds telemetry or "booster" tweaks. Ideas that keep those rules are the easiest to accept.
