@@ -513,7 +513,9 @@ pub async fn measure_path(path: String) -> Result<scan::Measured, String> {
 #[tauri::command]
 pub fn reveal_path(path: String) -> Result<(), String> {
     let target = validate_existing(&path)?;
-    let mut command = std::process::Command::new("explorer.exe");
+    // Resolve Explorer under %SystemRoot% instead of searching the application
+    // directory and PATH, so a planted explorer.exe is never launched.
+    let mut command = perf::windows_command("explorer.exe")?;
     if target.is_dir() {
         command.arg(&target);
     } else {

@@ -1,6 +1,6 @@
 {
   "name": "cyron-uninstaller",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Windows Application Uninstaller, Disk Analyzer & Cleaner",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Chryypt",
@@ -56,5 +56,19 @@
     "vite": "^7.1.0",
     "vitest": "^4.1.12",
     "webdriverio": "^9.32.0"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.1.4",
+    "@puppeteer/browsers": "^3.3.0",
+    "basic-ftp": "^6.2.6",
+    "get-uri": "^8.0.2",
+    "minimatch@>=7.0.0 <11.0.1": "^11.0.9",
+    "readdir-glob": "^4.0.0",
+    "@wdio/config": {
+      "glob": "^14.0.6"
+    },
+    "archiver-utils": {
+      "glob": "^14.0.6"
+    }
   }
 }
