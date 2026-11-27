@@ -17,8 +17,6 @@ const ALLOWED_COMMANDS = new Map([
   ["rustup", "rustup"],
   ["npm", "npm"],
   ["npx", "npx"],
-  ["pnpm", "pnpm"],
-  ["yarn", "yarn"],
 ]);
 const [requested, ...args] = process.argv.slice(2);
 const command = ALLOWED_COMMANDS.get(requested);
@@ -153,34 +151,15 @@ const npmScript = isWindows && npmEntry
   ? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", npmEntry)
   : undefined;
 
-// Anything that still has to go through cmd.exe (pnpm/yarn shims) must not
-// carry characters cmd.exe treats as syntax.
-const CMD_META = /[&|<>^%!"\r\n]/;
-function assertCmdSafe(values) {
-  const unsafe = values.find((value) => CMD_META.test(value));
-  if (unsafe !== undefined) {
-    console.error(`Refusing to pass ${JSON.stringify(unsafe)} through cmd.exe.`);
-    process.exit(2);
-  }
+if (npmScript && !existsSync(npmScript)) {
+  console.error(`Could not find ${npmEntry} next to ${process.execPath}; run ${command} from a standard Node.js install.`);
+  process.exit(1);
 }
-const quote = (value) => (/\s/.test(value) ? `"${value}"` : value);
-const needsCmd =
-  isWindows &&
-  !(npmScript && existsSync(npmScript)) &&
-  ["npm", "npx", "pnpm", "yarn"].includes(command);
 
-let result;
-if (npmScript && existsSync(npmScript)) {
-  result = spawnSync(process.execPath, [npmScript, ...args], { stdio: "inherit", env: environment });
-} else if (needsCmd) {
-  assertCmdSafe([command, ...args]);
-  result = spawnSync("cmd.exe", ["/d", "/s", "/c", [command, ...args].map(quote).join(" ")], {
-    stdio: "inherit",
-    env: environment,
-  });
-} else {
-  result = spawnSync(command, args, { stdio: "inherit", env: environment });
-}
+// No shell is involved on any path: every argument reaches the child as-is.
+const result = npmScript
+  ? spawnSync(process.execPath, [npmScript, ...args], { stdio: "inherit", env: environment })
+  : spawnSync(command, args, { stdio: "inherit", env: environment });
 
 if (result.error) {
   console.error(result.error.message);
