@@ -22,6 +22,7 @@ import {
   SectionHeader,
   Segmented,
   Skeleton,
+  Spinner,
   Stat,
   ViewHeader,
   cx,
@@ -122,6 +123,21 @@ const KIND_LABEL: Record<ScanNode["kind"], string> = {
   group: "Grouped items",
 };
 
+/** A folder the scan summarized: it has contents, but they were not sent. */
+export function canLoadContents(node: ScanNode): boolean {
+  return (
+    node.kind === "dir" &&
+    Boolean(node.path) &&
+    node.children.length === 0 &&
+    (node.fileCount > 0 || node.dirCount > 0)
+  );
+}
+
+/** Folder contents fetched per drill: enough tiles to fill the map. */
+const LAZY_PAGE_SIZE = 300;
+/** Subfolders whose contents are prefetched so the opened folder draws nested. */
+const LAZY_PREFETCH = 10;
+
 interface ScanFailure {
   message: string;
   retryable: boolean;
@@ -202,6 +218,10 @@ export function Analyzer({
   const [treeOpen, setTreeOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  /** Bumped when folder contents are grafted into the tree after a lazy load. */
+  const [treeVersion, setTreeVersion] = useState(0);
+  const [loadingPath, setLoadingPath] = useState<string | null>(null);
+  const loadingRef = useRef(new Set<string>());
   useEffect(() => {
     setSelected(null);
     setPropertiesItem(null);
@@ -328,16 +348,22 @@ export function Analyzer({
 
   const current = stack.length > 0 ? stack[stack.length - 1] : result?.root ?? null;
 
-  const nodesByPath = useMemo(() => {
-    const map = new Map<string, ScanNode>();
-    if (!result) return map;
-    const walk = (node: ScanNode) => {
-      if (node.path) map.set(node.path, node);
-      node.children.forEach(walk);
-    };
-    walk(result.root);
-    return map;
-  }, [result]);
+  // One pass builds both lookups. Parent links make "where is this node"
+  // O(depth) instead of a full-tree search on every click.
+  const { nodesByPath, parentOf } = useMemo(() => {
+    const byPath = new Map<string, ScanNode>();
+    const parents = new Map<ScanNode, ScanNode | null>();
+    if (!result) return { nodesByPath: byPath, parentOf: parents };
+    const stack: Array<[ScanNode, ScanNode | null]> = [[result.root, null]];
+    while (stack.length > 0) {
+      const [node, parent] = stack.pop()!;
+      parents.set(node, parent);
+      if (node.path) byPath.set(node.path.toLowerCase(), node);
+      for (const child of node.children) stack.push([child, node]);
+    }
+    return { nodesByPath: byPath, parentOf: parents };
+    // treeVersion: lazily loaded folders are grafted into the same tree.
+  }, [result, treeVersion]);
 
   const visibleTotals = useMemo(
     () => (result ? filteredTotals(result.root, filters) : { bytes: 0, files: 0 }),
@@ -360,14 +386,20 @@ export function Analyzer({
     });
   }, [result, filters]);
 
-  const applyTreeWidth = (next: number) => {
-    const width = clampTreeWidth(next);
-    setTreeWidth(width);
+  const persistTreeWidth = (width: number) => {
     try {
       window.localStorage.setItem("cyron.analyzer.treeWidth", String(width));
     } catch {
       // Persistence is optional.
     }
+  };
+
+  const applyTreeWidth = (next: number, persist = true) => {
+    const width = clampTreeWidth(next);
+    setTreeWidth(width);
+    // Writing storage on every pointer move made dragging the splitter stutter.
+    if (persist) persistTreeWidth(width);
+    return width;
   };
 
   const runScan = async (target: string) => {
@@ -483,24 +515,110 @@ export function Analyzer({
   };
 
   const chainToNode = (node: ScanNode): ScanNode[] => {
+    const start = parentOf.has(node) ? node : node.path ? nodesByPath.get(node.path.toLowerCase()) : undefined;
+    if (!start) return [];
     const chain: ScanNode[] = [];
-    const find = (currentNode: ScanNode): boolean => {
-      chain.push(currentNode);
-      if (currentNode === node || (node.path && currentNode.path.toLocaleLowerCase() === node.path.toLocaleLowerCase())) return true;
-      for (const child of currentNode.children) {
-        if (find(child)) return true;
+    let cursor: ScanNode | null | undefined = start;
+    while (cursor) {
+      chain.push(cursor);
+      cursor = parentOf.get(cursor) ?? null;
+    }
+    return chain.reverse();
+  };
+
+  /** The scan a node belongs to, so its index can be queried. */
+  const scanForPath = (path: string): ScanResult | null => {
+    const lower = path.toLowerCase();
+    let best: ScanResult | null = null;
+    for (const scan of Object.values(scannedRoots)) {
+      const root = scan.rootPath.toLowerCase().replace(/[\\/]+$/, "");
+      if ((lower === root || lower.startsWith(`${root}\\`) || lower.startsWith(`${root}/`)) &&
+        (!best || scan.rootPath.length > best.rootPath.length)) {
+        best = scan;
       }
-      chain.pop();
+    }
+    return best;
+  };
+
+  const queryContents = async (scan: ScanResult, node: ScanNode): Promise<ScanNode[]> => {
+    const page = await api.queryDirectoryChildren({
+      jobId: scan.jobId,
+      dirPath: node.path,
+      page: 1,
+      pageSize: LAZY_PAGE_SIZE,
+      sortField: "size",
+      sortDir: "desc",
+    });
+    return page.entries.map((entry) => ({ ...entry, children: entry.children ?? [] }));
+  };
+
+  /**
+   * Loads a summarized folder's contents. The directory-walk index answers
+   * instantly; an MFT scan has no index, so a focused read-only walk of just
+   * that folder fills it in. Its largest subfolders are prefetched so the
+   * opened folder still draws nested.
+   */
+  const ensureContents = async (node: ScanNode): Promise<boolean> => {
+    if (!canLoadContents(node)) return node.children.length > 0;
+    const key = node.path.toLowerCase();
+    if (loadingRef.current.has(key)) return false;
+    loadingRef.current.add(key);
+    setLoadingPath(node.path);
+    try {
+      const scan = scanForPath(node.path);
+      let children: ScanNode[] = [];
+      let fromIndex = false;
+      if (scan && scan.method === "directory") {
+        children = await queryContents(scan, node).catch(() => []);
+        fromIndex = children.length > 0;
+      }
+      if (children.length === 0) {
+        const focused = await api.startScan(createJobId(), node.path, {
+          includeHidden: appliedOptions.includeHidden,
+          exclusions: settings.exclusions,
+          collectTree: true,
+          maxDepth: 48,
+          method: "directory",
+        });
+        children = focused.root.children;
+      }
+      if (!aliveRef.current) return false;
+      node.children = children.sort((left, right) => (right.size || right.allocated) - (left.size || left.allocated));
+      if (fromIndex && scan) {
+        const prefetch = node.children.filter(canLoadContents).slice(0, LAZY_PREFETCH);
+        await Promise.all(
+          prefetch.map(async (child) => {
+            const grand = await queryContents(scan, child).catch(() => []);
+            if (grand.length > 0) child.children = grand;
+          }),
+        );
+      }
+      setTreeVersion((version) => version + 1);
+      return node.children.length > 0;
+    } catch (loadError) {
+      if (aliveRef.current) setError({ message: errorMessage(loadError), retryable: false });
       return false;
-    };
-    return result && find(result.root) ? chain : [];
+    } finally {
+      loadingRef.current.delete(key);
+      if (aliveRef.current) setLoadingPath((current) => (current === node.path ? null : current));
+    }
   };
 
   const drill = (node: ScanNode) => {
-    if (node.kind !== "dir" || node.children.length === 0) return;
-    const chain = chainToNode(node);
-    if (chain.length) setStack(chain);
-    setSelected(node);
+    if (node.kind !== "dir") return;
+    const open = () => {
+      const chain = chainToNode(node);
+      if (chain.length) setStack(chain);
+      setSelected(node);
+    };
+    if (node.children.length > 0) {
+      open();
+      return;
+    }
+    if (!canLoadContents(node)) return;
+    void ensureContents(node).then((loaded) => {
+      if (loaded) open();
+    });
   };
 
   const selectTreeNode = (node: ScanNode) => {
@@ -520,7 +638,7 @@ export function Analyzer({
     // nothing when a largest file is clicked.
     let parent = parentPath(filePath);
     while (parent) {
-      const node = nodesByPath.get(parent);
+      const node = nodesByPath.get(parent.toLowerCase());
       if (node) {
         selectNode(node);
         return;
@@ -902,6 +1020,8 @@ export function Analyzer({
                       </div>
                       <TreeView
                         root={result.root}
+                        version={treeVersion}
+                        onLoadContents={(node) => void ensureContents(node)}
                         selectedNode={selected}
                         currentPath={current.path}
                         filters={filters}
@@ -926,9 +1046,18 @@ export function Analyzer({
                       const startWidth = treeWidth;
                       const target = event.currentTarget;
                       target.setPointerCapture(event.pointerId);
-                      const move = (moveEvent: PointerEvent) =>
-                        applyTreeWidth(startWidth + moveEvent.clientX - startX);
+                      let latest = startWidth;
+                      let frame = 0;
+                      const move = (moveEvent: PointerEvent) => {
+                        const next = startWidth + moveEvent.clientX - startX;
+                        cancelAnimationFrame(frame);
+                        frame = requestAnimationFrame(() => {
+                          latest = applyTreeWidth(next, false);
+                        });
+                      };
                       const stop = () => {
+                        cancelAnimationFrame(frame);
+                        persistTreeWidth(latest);
                         target.removeEventListener("pointermove", move);
                         target.removeEventListener("pointerup", stop);
                         target.removeEventListener("pointercancel", stop);
@@ -984,6 +1113,11 @@ export function Analyzer({
                   }
                   actions={
                     <>
+                      {loadingPath && (
+                        <span className="az-loading" role="status">
+                          <Spinner size={12} /> Reading {truncateMiddle(loadingPath, 36)}
+                        </span>
+                      )}
                       <span className="az-tree__count">
                         {formatCount(current.fileCount)} files
                       </span>
@@ -1002,6 +1136,7 @@ export function Analyzer({
                   <div className="az-canvas">
                     <Treemap
                       node={current}
+                      version={treeVersion}
                       selectedPath={selected?.path ?? ""}
                       onSelect={selectNode}
                       onDrill={drill}
@@ -1231,7 +1366,7 @@ function SelectionDetails({
   const viewTotal = viewNode.size;
   const denominator = isView ? totalSize : viewTotal;
   const share = denominator > 0 ? logical / denominator : 0;
-  const canDrill = node.kind === "dir" && node.children.length > 0 && !isView;
+  const canDrill = node.kind === "dir" && (node.children.length > 0 || canLoadContents(node)) && !isView;
 
   const [inspection, setInspection] = useState<CleanableInspection | null>(null);
 

@@ -538,8 +538,8 @@
 }
 
 .cl-check:checked {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
 }
 
 .cl-check:checked::after {
