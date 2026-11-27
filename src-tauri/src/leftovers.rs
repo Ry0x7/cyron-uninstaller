@@ -126,6 +126,16 @@ pub fn fill_crypto_random(buf: &mut [u8]) -> Result<(), String> {
 }
 
 /// Generates a hexadecimal cryptographic nonce of `byte_len` bytes.
+/// Lowercase hex for a digest. sha2 0.11 returns a fixed-size array that no
+/// longer implements `LowerHex`, so digests are encoded byte by byte.
+pub fn hex_digest(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
 pub fn generate_crypto_nonce(byte_len: usize) -> String {
     let mut buf = vec![0u8; byte_len];
     if fill_crypto_random(&mut buf).is_err() {
@@ -133,7 +143,7 @@ pub fn generate_crypto_nonce(byte_len: usize) -> String {
         let mut hasher = Sha256::new();
         hasher.update(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_le_bytes());
         hasher.update(std::process::id().to_le_bytes());
-        return format!("{:x}", hasher.finalize())[..byte_len * 2].to_string();
+        return hex_digest(&hasher.finalize())[..byte_len * 2].to_string();
     }
     buf.iter().map(|b| format!("{:02x}", b)).collect()
 }
@@ -156,7 +166,7 @@ pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let bytes = fs::read(path).map_err(|e| format!("Could not read file for hashing {}: {e}", path.display()))?;
     let mut hasher = Sha256::new();
     hasher.update(&bytes);
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex_digest(&hasher.finalize()))
 }
 
 fn normalize_reg_path_for_comparison(p: &str) -> String {
@@ -222,7 +232,7 @@ pub fn compute_entry_fingerprint(
     hasher.update(publisher.unwrap_or("").trim().as_bytes());
     hasher.update(b"|");
     hasher.update(display_version.unwrap_or("").trim().as_bytes());
-    format!("{:x}", hasher.finalize())
+    hex_digest(&hasher.finalize())
 }
 
 pub const SHARED_VENDORS: &[&str] = &[
@@ -1433,28 +1443,28 @@ pub fn restore_registry_backup_with_policy(
                     let bytes = parse_hex_bytes(hex_str)?;
                     let reg_val = RegValue {
                         vtype: REG_BINARY,
-                        bytes,
+                        bytes: bytes.into(),
                     };
                     key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
                 } else if let Some(hex_str) = val_part.strip_prefix("hex(2):") {
                     let bytes = parse_hex_bytes(hex_str)?;
                     let reg_val = RegValue {
                         vtype: REG_EXPAND_SZ,
-                        bytes,
+                        bytes: bytes.into(),
                     };
                     key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
                 } else if let Some(hex_str) = val_part.strip_prefix("hex(7):") {
                     let bytes = parse_hex_bytes(hex_str)?;
                     let reg_val = RegValue {
                         vtype: REG_MULTI_SZ,
-                        bytes,
+                        bytes: bytes.into(),
                     };
                     key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
                 } else if let Some(hex_str) = val_part.strip_prefix("hex(b):") {
                     let bytes = parse_hex_bytes(hex_str)?;
                     let reg_val = RegValue {
                         vtype: REG_QWORD,
-                        bytes,
+                        bytes: bytes.into(),
                     };
                     key.set_raw_value(&val_name, &reg_val).map_err(|e| e.to_string())?;
                 } else {
@@ -2034,25 +2044,25 @@ mod tests {
 
         let bin_val = RegValue {
             vtype: REG_BINARY,
-            bytes: vec![0xde, 0xad, 0xbe, 0xef],
+            bytes: vec![0xde, 0xad, 0xbe, 0xef].into(),
         };
         key.set_raw_value("BinaryVal", &bin_val).expect("set binary");
 
         let qword_val = RegValue {
             vtype: REG_QWORD,
-            bytes: vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88],
+            bytes: vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88].into(),
         };
         key.set_raw_value("QwordVal", &qword_val).expect("set qword");
 
         let expand_val = RegValue {
             vtype: REG_EXPAND_SZ,
-            bytes: vec![b'%', b'P', b'A', b'T', b'H', b'%', 0],
+            bytes: vec![b'%', b'P', b'A', b'T', b'H', b'%', 0].into(),
         };
         key.set_raw_value("ExpandVal", &expand_val).expect("set expand");
 
         let multi_val = RegValue {
             vtype: REG_MULTI_SZ,
-            bytes: vec![b'a', 0, b'b', 0, 0],
+            bytes: vec![b'a', 0, b'b', 0, 0].into(),
         };
         key.set_raw_value("MultiVal", &multi_val).expect("set multi");
 

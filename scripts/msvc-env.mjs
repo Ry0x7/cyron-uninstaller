@@ -9,10 +9,22 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const isWindows = process.platform === "win32";
-const [command, ...args] = process.argv.slice(2);
+// Only the toolchain front-ends this repository actually runs are accepted.
+// The executable name always comes from this table, never from argv.
+const ALLOWED_COMMANDS = new Map([
+  ["cargo", "cargo"],
+  ["rustc", "rustc"],
+  ["rustup", "rustup"],
+  ["npm", "npm"],
+  ["npx", "npx"],
+]);
+const [requested, ...args] = process.argv.slice(2);
+const command = ALLOWED_COMMANDS.get(requested);
 
 if (!command) {
-  console.error("usage: node scripts/msvc-env.mjs <command> [args...]");
+  console.error(
+    `usage: node scripts/msvc-env.mjs <${[...ALLOWED_COMMANDS.keys()].join("|")}> [args...]`,
+  );
   process.exit(2);
 }
 
@@ -129,20 +141,25 @@ function withToolchain(base) {
 }
 
 const environment = withToolchain(process.env);
-const quote = (value) => (/\s/.test(value) ? `"${value.replaceAll('"', '\\"')}"` : value);
-const wrapInShell = isWindows && ["npm", "npx", "pnpm", "yarn"].includes(command);
+// npm-style launchers are .cmd shims on Windows. Run their JavaScript entry
+// point with this Node binary instead, so no argument is reparsed by cmd.exe.
+const npmEntry = {
+  npm: "npm-cli.js",
+  npx: "npx-cli.js",
+}[command];
+const npmScript = isWindows && npmEntry
+  ? path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", npmEntry)
+  : undefined;
 
-const result = wrapInShell
-  ? spawnSync(
-      "cmd.exe",
-      ["/d", "/s", "/c", [command, ...args].map(quote).join(" ")],
-      { stdio: "inherit", env: environment },
-    )
-  : spawnSync(command, args, {
-      stdio: "inherit",
-      env: environment,
-      shell: isWindows && /\.(cmd|bat)$/i.test(command),
-    });
+if (npmScript && !existsSync(npmScript)) {
+  console.error(`Could not find ${npmEntry} next to ${process.execPath}; run ${command} from a standard Node.js install.`);
+  process.exit(1);
+}
+
+// No shell is involved on any path: every argument reaches the child as-is.
+const result = npmScript
+  ? spawnSync(process.execPath, [npmScript, ...args], { stdio: "inherit", env: environment })
+  : spawnSync(command, args, { stdio: "inherit", env: environment });
 
 if (result.error) {
   console.error(result.error.message);

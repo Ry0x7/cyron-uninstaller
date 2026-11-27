@@ -208,7 +208,12 @@ try {
 
   const stale = [];
   for (const output of outputs) {
-    const current = existsSync(output.file) ? readFileSync(output.file, "utf8").replace(/\r\n/g, "\n") : null;
+    let current = null;
+    try {
+      current = readFileSync(output.file, "utf8").replace(/\r\n/g, "\n");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
     if (current === output.content) continue;
     stale.push(output.label);
     if (!check) writeFileSync(output.file, output.content);

@@ -239,7 +239,7 @@ fn get_startup_approved_state(entry_name: &str, is_hklm: bool, location_type: &s
                 // In Windows StartupApproved:
                 // First byte: 0x02 = Enabled, 0x03 = Disabled by user (any odd byte is disabled)
                 let enabled = raw.bytes[0] % 2 == 0;
-                return (enabled, Some(raw.bytes));
+                return (enabled, Some(raw.bytes.into_owned()));
             }
         }
     }
@@ -460,20 +460,19 @@ pub fn set_startup_item_enabled(id: &str, enabled: bool) -> Result<StartupItem, 
     // Query existing raw value to preserve exact original bytes and structure
     let existing_raw = approval_key.get_raw_value(&target_name).ok();
 
-    if let Some(mut raw) = existing_raw {
+    if let Some(raw) = existing_raw {
         // Preserve all existing binary bytes, only toggle byte 0 and update timestamp in bytes 4..12
-        if raw.bytes.is_empty() {
-            raw.bytes = vec![0u8; 12];
-        } else if raw.bytes.len() < 12 {
-            raw.bytes.resize(12, 0);
+        let mut bytes = raw.bytes.into_owned();
+        if bytes.len() < 12 {
+            bytes.resize(12, 0);
         }
-        raw.bytes[0] = if enabled { 0x02 } else { 0x03 };
+        bytes[0] = if enabled { 0x02 } else { 0x03 };
         let ft = get_windows_filetime_now();
-        raw.bytes[4..12].copy_from_slice(&ft.to_le_bytes());
+        bytes[4..12].copy_from_slice(&ft.to_le_bytes());
 
         let reg_val = winreg::RegValue {
             vtype: REG_BINARY,
-            bytes: raw.bytes,
+            bytes: bytes.into(),
         };
         approval_key
             .set_raw_value(&target_name, &reg_val)
@@ -487,7 +486,7 @@ pub fn set_startup_item_enabled(id: &str, enabled: bool) -> Result<StartupItem, 
 
         let reg_val = winreg::RegValue {
             vtype: REG_BINARY,
-            bytes: data,
+            bytes: data.into(),
         };
         approval_key
             .set_raw_value(&target_name, &reg_val)
