@@ -206,9 +206,9 @@
   gap: 18px;
   padding: 18px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-card);
 }
 
 .az-summary .stat__value {
@@ -317,7 +317,7 @@
 }
 
 .az-canvas {
-  height: clamp(340px, 46vh, 560px);
+  height: clamp(380px, calc(100vh - 360px), 860px);
   background: var(--canvas);
 }
 
@@ -370,8 +370,8 @@
 }
 
 .az-legend__dot--folder {
-  background: var(--canvas-grid);
-  border: 1px solid rgba(255, 255, 255, 0.26);
+  background: #2f3c47;
+  box-shadow: inset 0 2px 0 #4a5b66;
 }
 
 .treemap {
@@ -386,59 +386,62 @@
   height: 100%;
 }
 
-.treemap__tile {
+.treemap__canvas {
   position: absolute;
-  display: flex;
-  align-items: flex-end;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.treemap__surface {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Invisible top-level hit targets: keyboard and screen readers only. */
+.treemap__hit {
+  position: absolute;
   padding: 0;
   border: 0;
-  border-radius: 3px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: filter 110ms var(--ease), box-shadow 110ms var(--ease);
+  background: transparent;
+  pointer-events: none;
 }
 
-.treemap__tile:hover {
-  filter: brightness(1.12);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-  z-index: 2;
-}
-
-.treemap__tile.is-selected {
-  box-shadow: inset 0 0 0 2px #ffffff;
-  z-index: 3;
-}
-
-.treemap__tile:focus-visible {
+.treemap__hit:focus-visible {
   outline: 2px solid #ffffff;
-  outline-offset: -3px;
+  outline-offset: -2px;
+  border-radius: 4px;
   z-index: 4;
 }
 
-.treemap__label {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  width: 100%;
-  min-width: 0;
-  padding: 5px 7px;
-  line-height: 1.2;
-  text-align: left;
+.treemap__outline {
+  position: absolute;
+  z-index: 2;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.07);
+  pointer-events: none;
 }
 
-.treemap__name {
-  font-size: 11px;
-  font-weight: 600;
+.treemap__outline--selected {
+  z-index: 3;
+  box-shadow: inset 0 0 0 2px #ffffff, 0 0 0 1px rgba(0, 0, 0, 0.45);
+  background: transparent;
+}
+
+.treemap__tip-path {
+  font-size: 10px;
+  color: rgba(242, 244, 247, 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.treemap__size {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.78;
+.treemap__tip-hint {
+  margin-top: 2px;
+  font-size: 10px;
+  color: rgba(242, 244, 247, 0.5);
 }
 
 .treemap__tip {
@@ -447,7 +450,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: 220px;
+  max-width: 240px;
   padding: 7px 9px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 7px;
@@ -949,10 +952,10 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-card);
 }
 
 .az-tree-panel__head {
@@ -1281,4 +1284,13 @@
   .az-share-bar > span {
     transition: none;
   }
+}
+
+.az-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  white-space: nowrap;
 }

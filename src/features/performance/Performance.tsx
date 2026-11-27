@@ -5,8 +5,8 @@ import {
   Banner,
   Button,
   EmptyState,
+  PageTabs,
   Panel,
-  ProgressBar,
   SectionHeader,
   Segmented,
   Stat,
@@ -20,9 +20,7 @@ import {
   IconClock,
   IconExternal,
   IconGauge,
-  IconInfo,
   IconRefresh,
-  IconShield,
   IconStop,
 } from "../../components/Icons";
 import { api, errorMessage } from "../../lib/api";
@@ -38,21 +36,35 @@ import {
   truncateMiddle,
 } from "../../lib/format";
 import type {
+  LivePerformance,
   PerformanceBaseline,
   PerformanceRecommendation,
   PerformanceSnapshot,
   PerformanceTraceStatus,
-  ProcessUsage,
   ScheduledStartupTask,
   StartupEvidence,
   SystemEvent,
   ViewId,
 } from "../../lib/types";
 import { SpikeCapture } from "./SpikeCapture";
+import { ResourceMonitor } from "./ResourceMonitor";
+import { ProcessesView } from "./ProcessesView";
+import { recordSample, type HistoryStore } from "./monitorModel";
 import "./performance.css";
+import "./monitor.css";
+
+type PerfTab = "monitor" | "processes" | "startup" | "diagnose";
+
+const PERF_TABS: { value: PerfTab; label: string }[] = [
+  { value: "monitor", label: "Monitor" },
+  { value: "processes", label: "Processes" },
+  { value: "startup", label: "Startup" },
+  { value: "diagnose", label: "Diagnose" },
+];
+
+const LIVE_INTERVAL_MS = 1000;
 
 type SnapshotStatus = "loading" | "ready" | "error";
-type ProcessSort = "cpu" | "memory" | "io";
 type StartupTab = "apps" | "tasks";
 type GuideId = "all" | "startup" | "app" | "kernel" | "disk" | "fan";
 
@@ -121,15 +133,7 @@ function guideRecommendations(
   }
 }
 
-function ioTotal(process: ProcessUsage): number {
-  return process.ioReadBytesPerSec + process.ioWriteBytesPerSec;
-}
 
-function toneForPercent(value: number, warning: number): "safe" | "caution" | "danger" {
-  if (value >= warning + 10) return "danger";
-  if (value >= warning) return "caution";
-  return "safe";
-}
 
 function bootObservedAt(snapshot: PerformanceSnapshot): number | null {
   const raw = snapshot.startup.boot?.observedAt;
@@ -191,14 +195,20 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
   const inFlight = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  const [tab, setTab] = useState<PerfTab>("monitor");
+  const [livePaused, setLivePaused] = useState(false);
+  const [liveSample, setLiveSample] = useState<LivePerformance | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const historyRef = useRef<HistoryStore>(new Map());
+  const liveInFlight = useRef(false);
+  const usesLive = tab === "monitor" || tab === "processes";
+
   const [status, setStatus] = useState<SnapshotStatus>("loading");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [guide, setGuide] = useState<GuideId>("all");
-  const [processSort, setProcessSort] = useState<ProcessSort>("cpu");
-  const [showAllProcesses, setShowAllProcesses] = useState(false);
   const [startupTab, setStartupTab] = useState<StartupTab>("apps");
   const [showMicrosoftTasks, setShowMicrosoftTasks] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -247,14 +257,47 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
     }
   }, []);
 
+  // The full evidence snapshot is heavy (startup inventory, event log), so it
+  // is taken only when a tab that shows it is first opened.
   useEffect(() => {
+    if (usesLive || snapshotRef.current) return;
     void refresh(false);
     void loadBaselines();
-  }, [refresh, loadBaselines]);
+  }, [usesLive, refresh, loadBaselines]);
+
+  // The live monitor polls once a second while Monitor or Processes is on
+  // screen, the window is visible and the user has not paused it.
+  useEffect(() => {
+    if (!usesLive || livePaused) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (liveInFlight.current || document.visibilityState !== "visible") return;
+      const slot = rootRef.current?.closest(".view-slot") as HTMLElement | null;
+      if (slot?.hidden) return;
+      liveInFlight.current = true;
+      try {
+        const next = await api.sampleLivePerformance(true);
+        if (cancelled) return;
+        if (next.warm) recordSample(historyRef.current, next);
+        setLiveSample(next);
+        setLiveError(null);
+      } catch (caught) {
+        if (!cancelled) setLiveError(errorMessage(caught));
+      } finally {
+        liveInFlight.current = false;
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), LIVE_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [usesLive, livePaused]);
 
   const [live, setLive] = useState(true);
   useEffect(() => {
-    if (!live) return;
+    if (!live || usesLive) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       const slot = rootRef.current?.closest(".view-slot") as HTMLElement | null;
@@ -263,7 +306,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
       void refresh(true);
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [live, refresh]);
+  }, [live, usesLive, refresh]);
 
   const trace = traceOverride ?? snapshot?.trace ?? null;
   const guides = useMemo(() => GUIDES, []);
@@ -277,18 +320,6 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
     [snapshot, guide],
   );
 
-  const orderedProcesses = useMemo(() => {
-    const list = [...(snapshot?.processes ?? [])];
-    list.sort((left, right) => {
-      if (processSort === "memory") return right.workingSetBytes - left.workingSetBytes;
-      if (processSort === "io") return ioTotal(right) - ioTotal(left);
-      return right.cpuPercent - left.cpuPercent;
-    });
-    return list;
-  }, [snapshot, processSort]);
-
-  const visibleProcesses = showAllProcesses ? orderedProcesses : orderedProcesses.slice(0, 12);
-
   const visibleTasks = useMemo(
     () =>
       (snapshot?.startup.scheduledTasks ?? []).filter(
@@ -296,15 +327,6 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
       ),
     [snapshot, showMicrosoftTasks],
   );
-
-  const lowestVolume = useMemo(() => {
-    const volumes = (snapshot?.volumes ?? []).filter(
-      (volume) => volume.total > 0 && volume.kind === "fixed",
-    );
-    return volumes.sort(
-      (left, right) => left.free / left.total - right.free / right.total,
-    )[0];
-  }, [snapshot]);
 
   const toggleStartup = useCallback(
     async (item: StartupEvidence) => {
@@ -458,9 +480,14 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
     <div ref={rootRef}>
       <ViewHeader
         title="Performance"
-        description="See what is actually using this PC, what Windows measured at startup, and which reversible change the evidence supports. Cyron does not use RAM boosters or claim guaranteed speed gains."
+        description="Watch CPU, memory, disks, network and graphics live, see which processes are behind the load, and check what the evidence says before changing anything."
         meta={
-          snapshot ? (
+          usesLive && liveSample ? (
+            <span className="perf-sample">
+              {liveSample.system.processCount} processes · {liveSample.system.threadCount} threads ·{" "}
+              {liveSample.hardware.logicalProcessors} logical processors
+            </span>
+          ) : !usesLive && snapshot ? (
             <span className="perf-sample">
               {snapshot.sampleMs} ms sample · {snapshot.processCount} processes ·{" "}
               {snapshot.elevated ? "Administrator" : "Standard account"}
@@ -468,32 +495,57 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
           ) : undefined
         }
         actions={
-          <>
+          usesLive ? (
             <button
               type="button"
               className="perf-live-toggle"
-              aria-pressed={live}
-              title="Measure every 10 seconds while this page is visible"
-              onClick={() => setLive((value) => !value)}
+              aria-pressed={!livePaused}
+              title="Sample once a second while this page is visible"
+              onClick={() => setLivePaused((value) => !value)}
             >
-              <span className={cx("perf-live-dot", !live && "perf-live-dot--paused")} aria-hidden="true" />
-              {live ? "Live updates" : "Paused"}
+              <span className={cx("perf-live-dot", livePaused && "perf-live-dot--paused")} aria-hidden="true" />
+              {livePaused ? "Paused" : "Live"}
             </button>
-            <Button
-              variant="secondary"
-              icon={<IconRefresh size={14} />}
-              loading={refreshing}
-              onClick={() => void refresh(false)}
-              disabled={!snapshot && refreshing}
-            >
-              Refresh
-            </Button>
-          </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="perf-live-toggle"
+                aria-pressed={live}
+                title="Measure every 10 seconds while this page is visible"
+                onClick={() => setLive((value) => !value)}
+              >
+                <span className={cx("perf-live-dot", !live && "perf-live-dot--paused")} aria-hidden="true" />
+                {live ? "Live updates" : "Paused"}
+              </button>
+              <Button
+                variant="secondary"
+                icon={<IconRefresh size={14} />}
+                loading={refreshing}
+                onClick={() => void refresh(false)}
+                disabled={!snapshot && refreshing}
+              >
+                Refresh
+              </Button>
+            </>
+          )
         }
       />
 
       <div className="view-body perf">
-        {error && (
+        <PageTabs<PerfTab>
+          options={PERF_TABS}
+          value={tab}
+          onChange={setTab}
+          ariaLabel="Performance views"
+        />
+
+        {tab === "monitor" && (
+          <ResourceMonitor live={liveSample} history={historyRef.current} error={liveError} />
+        )}
+        {tab === "processes" && <ProcessesView live={liveSample} error={liveError} />}
+
+        {!usesLive && error && (
           <Banner
             tone="danger"
             actions={
@@ -505,7 +557,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
             {error}
           </Banner>
         )}
-        {notice && (
+        {!usesLive && notice && (
           <Banner
             tone="safe"
             actions={
@@ -518,7 +570,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
           </Banner>
         )}
 
-        {status === "loading" && !snapshot && (
+        {!usesLive && status === "loading" && !snapshot && (
           <Panel title="Measuring this PC" subtitle="One read-only sample; nothing is changed.">
             <div className="perf-loading" aria-live="polite">
               <span className="spinner" aria-hidden="true" />
@@ -529,9 +581,241 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
           </Panel>
         )}
 
-        {snapshot && (
+        {tab === "startup" && snapshot && (
+            <section className="perf-section perf-section--first">
+              <SectionHeader
+                title="Startup and scheduled tasks"
+                description="Provenance first. Impact appears only when Windows recorded it."
+                actions={
+                  <Segmented<StartupTab>
+                    size="sm"
+                    ariaLabel="Startup evidence type"
+                    value={startupTab}
+                    onChange={setStartupTab}
+                    options={[
+                      { value: "apps", label: "Startup apps", count: startup?.items.length },
+                      { value: "tasks", label: "Scheduled tasks", count: startup?.scheduledTasks.length },
+                    ]}
+                  />
+                }
+              />
+              <Panel bodyClassName="perf-table-panel">
+              {startup?.eventLogStatus === "denied" && (
+                <div className="perf-startup-banner">
+                  <Banner
+                    tone="caution"
+                    actions={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<IconExternal size={12} />}
+                        onClick={() => void api.openPerformanceSettings("startup-apps").catch((caught) => setError(errorMessage(caught)))}
+                      >
+                        Windows startup settings
+                      </Button>
+                    }
+                  >
+                    <strong>Boot impact is administrator-only.</strong> {startup.eventLogNote}
+                  </Banner>
+                </div>
+              )}
+
+              {startup?.eventLogStatus === "available" && startup.boot && (
+                <div className="perf-boot">
+                  <div className="perf-boot__head">
+                    <Badge tone={startup.boot.isDegradation ? "caution" : "safe"}>
+                      {startup.boot.isDegradation ? "Boot degradation recorded" : "No boot degradation flagged"}
+                    </Badge>
+                    <span className="mono faint">
+                      {bootObservedAt(snapshot) ? formatDateTime(bootObservedAt(snapshot) as number) : startup.boot.observedAt}
+                    </span>
+                  </div>
+                  <div className="perf-boot__stats">
+                    <Stat label="Total boot" value={formatDuration(startup.boot.bootTimeMs)} />
+                    <Stat label="Main path" value={formatDuration(startup.boot.mainPathBootMs)} />
+                    <Stat label="After desktop" value={formatDuration(startup.boot.postBootTimeMs)} />
+                    <Stat label="Startup apps" value={String(startup.boot.startupAppCount)} />
+                  </div>
+                  <p className="perf-note">
+                    Windows measured these phases during the last recorded boot. The log contains only
+                    components that crossed its own degradation thresholds; absence is not proof of speed.
+                  </p>
+                </div>
+              )}
+
+              {startup?.eventLogStatus === "unavailable" && (
+                <div className="perf-startup-banner">
+                  <Banner tone="info">{startup.eventLogNote}</Banner>
+                </div>
+              )}
+
+              {startupTab === "apps" ? (
+                <>
+                  <div className="table-wrap">
+                    <table className="table perf-table">
+                      <caption className="sr-only">
+                        Startup applications with source, live usage and boot impact when Windows exposed it.
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">Entry</th>
+                          <th scope="col" className="perf-col-source">Source</th>
+                          <th scope="col" className="numeric">Boot impact</th>
+                          <th scope="col" className="numeric perf-col-live">Live now</th>
+                          <th scope="col">State</th>
+                          <th scope="col">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {startup?.items.map((item) => (
+                          <tr key={item.id}>
+                            <td>
+                              <div className="perf-process">
+                                <span className="perf-process__name">
+                                  <span className="truncate">{item.name}</span>
+                                  {item.isProtected && <Badge tone="caution">Protected</Badge>}
+                                  <Badge tone="neutral">{item.scope === "machine" ? "All users" : "This user"}</Badge>
+                                </span>
+                                <span className="perf-process__path" title={displayPath(item.command)}>
+                                  {truncateMiddle(displayPath(item.command), 64)}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="perf-col-source">
+                              <span className="perf-source">{item.location}</span>
+                              <span className="perf-source__evidence">{evidenceSourceLabel(item.evidenceSource)}</span>
+                            </td>
+                            <td className="numeric mono">
+                              {item.bootImpactMs === null ? (
+                                <span className="faint">Unavailable</span>
+                              ) : (
+                                <span title={`Total ${formatDuration(item.bootTotalMs ?? 0)}`}>
+                                  +{formatDuration(item.bootImpactMs)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="numeric mono perf-col-live">
+                              {item.currentCpuPercent > 0.05
+                                ? `${item.currentCpuPercent.toFixed(1)}% CPU`
+                                : item.currentWorkingSetBytes > 0
+                                  ? formatBytes(item.currentWorkingSetBytes)
+                                  : <span className="faint">Not matched</span>}
+                            </td>
+                            <td>
+                              <Badge tone={item.enabled ? "safe" : "neutral"}>
+                                {item.enabled ? "Enabled" : "Disabled"}
+                              </Badge>
+                            </td>
+                            <td>
+                              {item.canToggle ? (
+                                <Button
+                                  size="sm"
+                                  variant={item.enabled ? "secondary" : "primary"}
+                                  loading={togglingId === item.id}
+                                  onClick={() => void toggleStartup(item)}
+                                >
+                                  {item.enabled ? "Disable" : "Enable"}
+                                </Button>
+                              ) : (
+                                <span className="faint small">
+                                  {item.isProtected ? "Windows protected" : "Read-only"}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {startup?.items.length === 0 && (
+                    <p className="perf-note perf-note--pad">No startup applications were detected.</p>
+                  )}
+                  <p className="perf-note perf-note--pad">
+                    {startup?.enabledCount ?? 0} of {startup?.totalCount ?? 0} entries are enabled.
+                    Disabling changes the next sign-in only; it is reversible here. Cyron does not
+                    delete Run entries or disable services.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="perf-task-toolbar">
+                    <Toggle
+                      checked={showMicrosoftTasks}
+                      onChange={setShowMicrosoftTasks}
+                      label="Include Microsoft tasks"
+                      description="Windows maintenance tasks are read-only here and usually are not the cause of lag."
+                    />
+                    <span className="faint small">
+                      {visibleTasks.length} of {startup?.scheduledTasks.length ?? 0} boot/logon tasks
+                    </span>
+                  </div>
+                  <div className="table-wrap">
+                    <table className="table perf-table">
+                      <caption className="sr-only">
+                        Scheduled tasks that run at boot, logon or registration.
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">Task</th>
+                          <th scope="col">Trigger</th>
+                          <th scope="col" className="perf-col-author">Author</th>
+                          <th scope="col">Action</th>
+                          <th scope="col">State</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleTasks.map((task) => (
+                          <tr key={task.path || task.name}>
+                            <td>
+                              <div className="perf-process">
+                                <span className="perf-process__name">
+                                  <span className="truncate">{task.name}</span>
+                                  {task.isMicrosoft && <Badge tone="neutral">Microsoft</Badge>}
+                                </span>
+                                <span className="perf-process__path" title={displayPath(task.path)}>
+                                  {displayPath(task.path)}
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <span>{scheduleTriggerLabel(task)}</span>
+                              <span className="perf-source__evidence">{delayLabel(task)}</span>
+                            </td>
+                            <td className="perf-source perf-col-author">{task.author || "Not declared"}</td>
+                            <td>
+                              <span className="perf-process__path" title={`${task.command} ${task.arguments}`}>
+                                {truncateMiddle(displayPath(task.command), 46)}
+                                {task.arguments ? ` ${truncateMiddle(task.arguments, 22)}` : ""}
+                              </span>
+                            </td>
+                            <td>
+                              <Badge tone={task.enabled ? "safe" : "neutral"}>
+                                {task.enabled ? "Enabled" : "Disabled"}
+                              </Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {visibleTasks.length === 0 && (
+                    <p className="perf-note perf-note--pad">
+                      No boot, logon or registration tasks match this filter.
+                    </p>
+                  )}
+                  <p className="perf-note perf-note--pad">
+                    Cyron lists scheduled tasks read-only. It does not disable tasks, change triggers
+                    or run them. Use Task Scheduler or Windows Settings for changes.
+                  </p>
+                </>
+              )}
+              </Panel>
+            </section>
+        )}
+
+        {tab === "diagnose" && snapshot && (
           <>
-            <section className="perf-section">
+            <section className="perf-section perf-section--first">
               <SectionHeader
                 title="Why is my PC slow?"
                 description="Choose the symptom. Cyron shows only the evidence it actually measured."
@@ -579,109 +863,6 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
               </Panel>
             </section>
 
-            <section className="perf-section">
-              <SectionHeader
-                title="Live sample"
-                description="One bounded reading. The figures move with what the PC is doing right now."
-              />
-              <Panel bodyClassName="perf-metrics">
-              <div className="perf-metric">
-                <div className="perf-metric__head">
-                  <span className="perf-metric__label">Processor</span>
-                  <span className="perf-metric__sub">{snapshot.cpu.logicalCores} logical processors</span>
-                </div>
-                <div className="perf-metric__value">
-                  {formatPercent(snapshot.cpu.utilizationPercent / 100)}
-                  <span>busy</span>
-                </div>
-                <ProgressBar
-                  value={snapshot.cpu.utilizationPercent / 100}
-                  tone={toneForPercent(snapshot.cpu.utilizationPercent, 80)}
-                  label="Total CPU utilization"
-                />
-                <div className="perf-metric__meta">
-                  <span>User {formatPercent(snapshot.cpu.userPercent / 100)}</span>
-                  <span>Kernel {formatPercent(snapshot.cpu.kernelPercent / 100)}</span>
-                  <span>Idle {formatPercent(snapshot.cpu.idlePercent / 100)}</span>
-                </div>
-              </div>
-
-              <div className="perf-metric">
-                <div className="perf-metric__head">
-                  <span className="perf-metric__label">Memory</span>
-                  <span className="perf-metric__sub">{formatBytes(snapshot.memory.totalBytes)} physical</span>
-                </div>
-                <div className="perf-metric__value">
-                  {formatPercent(snapshot.memory.usedPercent / 100)}
-                  <span>in use</span>
-                </div>
-                <ProgressBar
-                  value={snapshot.memory.usedPercent / 100}
-                  tone={snapshot.memory.usedPercent >= 90 ? "danger" : snapshot.memory.usedPercent >= 80 ? "caution" : "accent"}
-                  label="Physical memory in use"
-                />
-                <div className="perf-metric__meta">
-                  <span>{formatBytes(snapshot.memory.availableBytes)} available</span>
-                  <span>Commit {formatPercent(snapshot.memory.commitPercent / 100)}</span>
-                </div>
-              </div>
-
-              <div className="perf-metric">
-                <div className="perf-metric__head">
-                  <span className="perf-metric__label">Disk I/O</span>
-                  <span className="perf-metric__sub">Physical disk pressure</span>
-                </div>
-                {snapshot.diskIo.status === "measured" ? (
-                  <>
-                    <div className="perf-metric__value">
-                      {formatPercent((snapshot.diskIo.busyPercent ?? 0) / 100)}
-                      <span>busy</span>
-                    </div>
-                    <ProgressBar
-                      value={(snapshot.diskIo.busyPercent ?? 0) / 100}
-                      tone={toneForPercent(snapshot.diskIo.busyPercent ?? 0, 70)}
-                      label="Physical disk busy time"
-                    />
-                    <div className="perf-metric__meta">
-                      <span>Queue {(snapshot.diskIo.queueLength ?? 0).toFixed(2)}</span>
-                      <span>Windows PDH counter</span>
-                    </div>
-                  </>
-                ) : (
-                  <div className="perf-unavailable">
-                    <IconInfo size={16} />
-                    <span>{snapshot.diskIo.note ?? "Physical-disk counters were unavailable."}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="perf-metric">
-                <div className="perf-metric__head">
-                  <span className="perf-metric__label">Storage</span>
-                  <span className="perf-metric__sub">Tightest fixed volume</span>
-                </div>
-                {lowestVolume ? (
-                  <>
-                    <div className="perf-metric__value">
-                      {formatPercent(lowestVolume.free / lowestVolume.total)}
-                      <span>free</span>
-                    </div>
-                    <ProgressBar
-                      value={lowestVolume.free / lowestVolume.total}
-                      tone={lowestVolume.free / lowestVolume.total < 0.1 ? "danger" : lowestVolume.free / lowestVolume.total < 0.2 ? "caution" : "accent"}
-                      label={`Free space on ${lowestVolume.mount}`}
-                    />
-                    <div className="perf-metric__meta">
-                      <span>{lowestVolume.mount}</span>
-                      <span>{formatBytes(lowestVolume.free)} free</span>
-                    </div>
-                  </>
-                ) : (
-                  <p className="perf-unavailable">No fixed volume with capacity was reported.</p>
-                )}
-              </div>
-              </Panel>
-            </section>
 
             <section className="perf-section">
               <SectionHeader
@@ -927,325 +1108,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
               </div>
             </section>
 
-            <section className="perf-section">
-              <SectionHeader
-                title="Processes"
-                description="Live sample. Cyron never ends a process from this page."
-                actions={
-                  <div className="perf-actions">
-                    <Segmented<ProcessSort>
-                      size="sm"
-                      ariaLabel="Sort processes"
-                      value={processSort}
-                      onChange={setProcessSort}
-                      options={[
-                        { value: "cpu", label: "CPU" },
-                        { value: "memory", label: "Memory" },
-                        { value: "io", label: "I/O" },
-                      ]}
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setShowAllProcesses((value) => !value)}
-                    >
-                      {showAllProcesses ? "Show top 12" : "Show all"}
-                    </Button>
-                  </div>
-                }
-              />
-              <Panel bodyClassName="perf-table-panel">
-              <div className="table-wrap">
-                <table className="table perf-table">
-                  <caption className="sr-only">
-                    Processes ordered by {processSort}. Measurements cover the last sample only.
-                  </caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Process</th>
-                      <th scope="col" className="numeric">CPU</th>
-                      <th scope="col" className="numeric">Working set</th>
-                      <th scope="col" className="numeric">Read / write</th>
-                      <th scope="col" className="numeric perf-col-pid">PID</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleProcesses.map((process) => (
-                      <tr key={process.pid}>
-                        <td>
-                          <div className="perf-process">
-                            <span className="perf-process__name">
-                              <span className="truncate">{process.name}</span>
-                              {process.isCritical && (
-                                <Badge tone="neutral">
-                                  <IconShield size={10} /> Protected
-                                </Badge>
-                              )}
-                              {process.isCyron && <Badge tone="accent">Cyron</Badge>}
-                            </span>
-                            {process.path && (
-                              <span className="perf-process__path" title={displayPath(process.path)}>
-                                {truncateMiddle(displayPath(process.path), 72)}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="numeric mono">
-                          {process.cpuPercent >= 0.1 ? `${process.cpuPercent.toFixed(1)}%` : "<0.1%"}
-                        </td>
-                        <td className="numeric mono">{formatBytes(process.workingSetBytes)}</td>
-                        <td className="numeric mono">
-                          {formatBytes(process.ioReadBytesPerSec)}/s · {formatBytes(process.ioWriteBytesPerSec)}/s
-                        </td>
-                        <td className="numeric mono perf-col-pid">{process.pid}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {orderedProcesses.length === 0 && (
-                <p className="perf-note perf-note--pad">
-                  Windows did not expose process counters for this sample.
-                </p>
-              )}
-              {snapshot.unmeasuredProcessCount > 0 && (
-                <p className="perf-note perf-note--pad">
-                  {snapshot.unmeasuredProcessCount} protected or other-user processes could not be opened
-                  and are not shown.
-                </p>
-              )}
-              </Panel>
-            </section>
 
-            <section className="perf-section">
-              <SectionHeader
-                title="Startup and scheduled tasks"
-                description="Provenance first. Impact appears only when Windows recorded it."
-                actions={
-                  <Segmented<StartupTab>
-                    size="sm"
-                    ariaLabel="Startup evidence type"
-                    value={startupTab}
-                    onChange={setStartupTab}
-                    options={[
-                      { value: "apps", label: "Startup apps", count: startup?.items.length },
-                      { value: "tasks", label: "Scheduled tasks", count: startup?.scheduledTasks.length },
-                    ]}
-                  />
-                }
-              />
-              <Panel bodyClassName="perf-table-panel">
-              {startup?.eventLogStatus === "denied" && (
-                <div className="perf-startup-banner">
-                  <Banner
-                    tone="caution"
-                    actions={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<IconExternal size={12} />}
-                        onClick={() => void api.openPerformanceSettings("startup-apps").catch((caught) => setError(errorMessage(caught)))}
-                      >
-                        Windows startup settings
-                      </Button>
-                    }
-                  >
-                    <strong>Boot impact is administrator-only.</strong> {startup.eventLogNote}
-                  </Banner>
-                </div>
-              )}
-
-              {startup?.eventLogStatus === "available" && startup.boot && (
-                <div className="perf-boot">
-                  <div className="perf-boot__head">
-                    <Badge tone={startup.boot.isDegradation ? "caution" : "safe"}>
-                      {startup.boot.isDegradation ? "Boot degradation recorded" : "No boot degradation flagged"}
-                    </Badge>
-                    <span className="mono faint">
-                      {bootObservedAt(snapshot) ? formatDateTime(bootObservedAt(snapshot) as number) : startup.boot.observedAt}
-                    </span>
-                  </div>
-                  <div className="perf-boot__stats">
-                    <Stat label="Total boot" value={formatDuration(startup.boot.bootTimeMs)} />
-                    <Stat label="Main path" value={formatDuration(startup.boot.mainPathBootMs)} />
-                    <Stat label="After desktop" value={formatDuration(startup.boot.postBootTimeMs)} />
-                    <Stat label="Startup apps" value={String(startup.boot.startupAppCount)} />
-                  </div>
-                  <p className="perf-note">
-                    Windows measured these phases during the last recorded boot. The log contains only
-                    components that crossed its own degradation thresholds; absence is not proof of speed.
-                  </p>
-                </div>
-              )}
-
-              {startup?.eventLogStatus === "unavailable" && (
-                <div className="perf-startup-banner">
-                  <Banner tone="info">{startup.eventLogNote}</Banner>
-                </div>
-              )}
-
-              {startupTab === "apps" ? (
-                <>
-                  <div className="table-wrap">
-                    <table className="table perf-table">
-                      <caption className="sr-only">
-                        Startup applications with source, live usage and boot impact when Windows exposed it.
-                      </caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">Entry</th>
-                          <th scope="col" className="perf-col-source">Source</th>
-                          <th scope="col" className="numeric">Boot impact</th>
-                          <th scope="col" className="numeric perf-col-live">Live now</th>
-                          <th scope="col">State</th>
-                          <th scope="col">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {startup?.items.map((item) => (
-                          <tr key={item.id}>
-                            <td>
-                              <div className="perf-process">
-                                <span className="perf-process__name">
-                                  <span className="truncate">{item.name}</span>
-                                  {item.isProtected && <Badge tone="caution">Protected</Badge>}
-                                  <Badge tone="neutral">{item.scope === "machine" ? "All users" : "This user"}</Badge>
-                                </span>
-                                <span className="perf-process__path" title={displayPath(item.command)}>
-                                  {truncateMiddle(displayPath(item.command), 64)}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="perf-col-source">
-                              <span className="perf-source">{item.location}</span>
-                              <span className="perf-source__evidence">{evidenceSourceLabel(item.evidenceSource)}</span>
-                            </td>
-                            <td className="numeric mono">
-                              {item.bootImpactMs === null ? (
-                                <span className="faint">Unavailable</span>
-                              ) : (
-                                <span title={`Total ${formatDuration(item.bootTotalMs ?? 0)}`}>
-                                  +{formatDuration(item.bootImpactMs)}
-                                </span>
-                              )}
-                            </td>
-                            <td className="numeric mono perf-col-live">
-                              {item.currentCpuPercent > 0.05
-                                ? `${item.currentCpuPercent.toFixed(1)}% CPU`
-                                : item.currentWorkingSetBytes > 0
-                                  ? formatBytes(item.currentWorkingSetBytes)
-                                  : <span className="faint">Not matched</span>}
-                            </td>
-                            <td>
-                              <Badge tone={item.enabled ? "safe" : "neutral"}>
-                                {item.enabled ? "Enabled" : "Disabled"}
-                              </Badge>
-                            </td>
-                            <td>
-                              {item.canToggle ? (
-                                <Button
-                                  size="sm"
-                                  variant={item.enabled ? "secondary" : "primary"}
-                                  loading={togglingId === item.id}
-                                  onClick={() => void toggleStartup(item)}
-                                >
-                                  {item.enabled ? "Disable" : "Enable"}
-                                </Button>
-                              ) : (
-                                <span className="faint small">
-                                  {item.isProtected ? "Windows protected" : "Read-only"}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {startup?.items.length === 0 && (
-                    <p className="perf-note perf-note--pad">No startup applications were detected.</p>
-                  )}
-                  <p className="perf-note perf-note--pad">
-                    {startup?.enabledCount ?? 0} of {startup?.totalCount ?? 0} entries are enabled.
-                    Disabling changes the next sign-in only; it is reversible here. Cyron does not
-                    delete Run entries or disable services.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="perf-task-toolbar">
-                    <Toggle
-                      checked={showMicrosoftTasks}
-                      onChange={setShowMicrosoftTasks}
-                      label="Include Microsoft tasks"
-                      description="Windows maintenance tasks are read-only here and usually are not the cause of lag."
-                    />
-                    <span className="faint small">
-                      {visibleTasks.length} of {startup?.scheduledTasks.length ?? 0} boot/logon tasks
-                    </span>
-                  </div>
-                  <div className="table-wrap">
-                    <table className="table perf-table">
-                      <caption className="sr-only">
-                        Scheduled tasks that run at boot, logon or registration.
-                      </caption>
-                      <thead>
-                        <tr>
-                          <th scope="col">Task</th>
-                          <th scope="col">Trigger</th>
-                          <th scope="col" className="perf-col-author">Author</th>
-                          <th scope="col">Action</th>
-                          <th scope="col">State</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visibleTasks.map((task) => (
-                          <tr key={task.path || task.name}>
-                            <td>
-                              <div className="perf-process">
-                                <span className="perf-process__name">
-                                  <span className="truncate">{task.name}</span>
-                                  {task.isMicrosoft && <Badge tone="neutral">Microsoft</Badge>}
-                                </span>
-                                <span className="perf-process__path" title={displayPath(task.path)}>
-                                  {displayPath(task.path)}
-                                </span>
-                              </div>
-                            </td>
-                            <td>
-                              <span>{scheduleTriggerLabel(task)}</span>
-                              <span className="perf-source__evidence">{delayLabel(task)}</span>
-                            </td>
-                            <td className="perf-source perf-col-author">{task.author || "Not declared"}</td>
-                            <td>
-                              <span className="perf-process__path" title={`${task.command} ${task.arguments}`}>
-                                {truncateMiddle(displayPath(task.command), 46)}
-                                {task.arguments ? ` ${truncateMiddle(task.arguments, 22)}` : ""}
-                              </span>
-                            </td>
-                            <td>
-                              <Badge tone={task.enabled ? "safe" : "neutral"}>
-                                {task.enabled ? "Enabled" : "Disabled"}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {visibleTasks.length === 0 && (
-                    <p className="perf-note perf-note--pad">
-                      No boot, logon or registration tasks match this filter.
-                    </p>
-                  )}
-                  <p className="perf-note perf-note--pad">
-                    Cyron lists scheduled tasks read-only. It does not disable tasks, change triggers
-                    or run them. Use Task Scheduler or Windows Settings for changes.
-                  </p>
-                </>
-              )}
-              </Panel>
-            </section>
 
             <div className="perf-columns perf-columns--balanced">
               <Panel
@@ -1437,7 +1300,7 @@ export function Performance({ onNavigate }: { onNavigate: (view: ViewId) => void
           </>
         )}
 
-        {status === "error" && !snapshot && (
+        {!usesLive && status === "error" && !snapshot && (
           <Panel title="Performance measurement unavailable">
             <EmptyState
               icon={IconAlert}

@@ -1,18 +1,19 @@
 # Cyron Design System
 
-Phase 5 replaces the old ink-and-teal dashboard language with a calm Windows-native utility shell. Product truth, safety copy and backend behaviour are unchanged.
+Phase 5 replaced the old ink-and-teal dashboard language with a calm utility shell. The 2026-11-27 overhaul moves that shell toward an Apple-style system tool (macOS System Settings / Activity Monitor feel) while staying a native Windows app. Product truth, safety copy and backend behaviour are unchanged.
 
 The [earlier design spec at cb8e919](https://github.com/Ry0x7/cyron-uninstaller/blob/cb8e919/docs/development/DESIGN.md) records the former palette, layout and contrast measurements.
 
 ## Direction
 
-Cyron should feel like a well-made Windows 11 utility: quiet neutral surfaces, one blue accent, native Segoe UI Variable type, comfortable density, and no decorative dashboard furniture. The interface disappears into the task.
+Cyron should feel like a well-made Apple system tool running on Windows: soft neutral background, borderless content cards with hairline shadows, translucent fills for controls, a source-list sidebar, a translucent sticky header, one blue accent and native system type (Segoe UI Variable on Windows, SF Pro where present). The interface disappears into the task.
 
 - **One accent:** `--accent` is the only interactive accent. Semantic success, warning and danger colors are used only for state.
 - **One neutral family:** cool greys in light and dark. No warm/cool mix.
 - **No card grids as page structure.** Use spacing, headings and hairlines first; panels group real work.
 - **No mono labels.** Monospace is reserved for paths, sizes, identifiers and tabular numbers.
-- **No uppercase eyebrows, neon teal, gradients, glass or glow.**
+- **Cards, not borders.** Panels are `--surface` cards using `--shadow-card`; controls use `--fill` / `--fill-strong` instead of outlines. Primary buttons use `--accent-fill`.
+- **Translucency only where Apple uses it:** the sticky view header blurs content beneath it, with an opaque fallback. No decorative glass, gradients, neon or glow; no uppercase eyebrows.
 - **Native titlebar.** The OS window frame remains; the app does not fake traffic lights or window controls.
 
 ## Navigation
@@ -38,14 +39,15 @@ Defined in `src/styles/tokens.css`.
 | Role | Rule |
 |---|---|
 | Type | Segoe UI Variable Display for headings, Segoe UI Variable Text for UI, Cascadia Mono for paths and figures |
-| Page title | 26px / 600 / -0.028em |
+| Page title | 28px / 700 / -0.028em |
 | Section title | 15px / 600 / -0.012em |
 | Body | 13px / 1.5 |
 | Secondary | 12px / 1.5 |
 | Caption | 11.5px / 1.45 |
-| Radius | 6 controls, 8 buttons/inputs, 10 banners, 12 panels, 16 dialogs |
+| Radius | 5 xs, 7 controls, 9 buttons/inputs, 14 cards/panels, 20 dialogs |
 | Spacing | 4, 8, 12, 16, 20, 24, 32, 48 |
-| Shadow | `--shadow-1` for raised rows; `--shadow-2` only for dialogs |
+| Shadow | `--shadow-card` for cards and panels; `--shadow-1` for raised rows and segmented thumbs; `--shadow-2` only for dialogs |
+| Fill | `--fill` for controls, search and segmented tracks; `--fill-strong` for hover/pressed |
 | Motion | 120–190ms `--ease`; no page-load choreography |
 
 Every color, radius and shadow comes from a token. Feature CSS must not introduce another palette.
@@ -68,6 +70,11 @@ Rules:
 - A panel gets a header only when it has a real title or action. Avoid nested panels.
 - Tabular numbers use `.mono` or `.numeric`; body copy does not.
 - Long names wrap or truncate intentionally, never overflow. Interactive actions never shrink to zero.
+
+## Performance and Disk space
+
+- **Performance** has four tabs: Monitor (Task Manager-style resource rail with sparklines and 60-second charts for CPU, memory, each disk, each network adapter and each GPU), Processes (grouped Apps / Background / Windows table with heat-tinted cells), Startup, and Diagnose. Live tabs poll once a second only while visible and not paused.
+- **Disk space** draws a nested canvas treemap: folders are framed with a name/size header so siblings read as separate blocks, and summarized folders load their contents on demand.
 
 ## States
 

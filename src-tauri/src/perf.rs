@@ -311,7 +311,7 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-fn wide(value: &str) -> Vec<u16> {
+pub(crate) fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
@@ -319,7 +319,7 @@ fn filetime_value(low: u32, high: u32) -> u64 {
     ((high as u64) << 32) | low as u64
 }
 
-fn is_cyron_process(path: Option<&str>, pid: u32) -> bool {
+pub(crate) fn is_cyron_process(path: Option<&str>, pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
     }
@@ -335,13 +335,13 @@ fn is_cyron_process(path: Option<&str>, pid: u32) -> bool {
 /* ------------------------------------------------------------------ sampling */
 
 #[derive(Debug, Clone, Copy)]
-struct CpuTimes {
-    idle: u64,
-    kernel: u64,
-    user: u64,
+pub(crate) struct CpuTimes {
+    pub(crate) idle: u64,
+    pub(crate) kernel: u64,
+    pub(crate) user: u64,
 }
 
-fn read_system_times() -> Option<CpuTimes> {
+pub(crate) fn read_system_times() -> Option<CpuTimes> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::GetSystemTimes;
 
@@ -460,11 +460,11 @@ fn read_memory() -> (MemoryMetrics, Option<String>) {
 }
 
 #[derive(Debug, Clone)]
-struct OpenProcessHandle {
-    pid: u32,
-    name: String,
-    path: Option<String>,
-    handle: windows_sys::Win32::Foundation::HANDLE,
+pub(crate) struct OpenProcessHandle {
+    pub(crate) pid: u32,
+    pub(crate) name: String,
+    pub(crate) path: Option<String>,
+    pub(crate) handle: windows_sys::Win32::Foundation::HANDLE,
 }
 
 impl Drop for OpenProcessHandle {
@@ -538,7 +538,7 @@ fn enumerate_pids() -> Vec<u32> {
     }
 }
 
-fn open_processes() -> Vec<OpenProcessHandle> {
+pub(crate) fn open_processes() -> Vec<OpenProcessHandle> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -584,15 +584,15 @@ fn open_processes() -> Vec<OpenProcessHandle> {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct ProcessCounters {
-    cpu_100ns: u64,
-    working_set: u64,
-    private_bytes: u64,
-    read_bytes: u64,
-    write_bytes: u64,
+pub(crate) struct ProcessCounters {
+    pub(crate) cpu_100ns: u64,
+    pub(crate) working_set: u64,
+    pub(crate) private_bytes: u64,
+    pub(crate) read_bytes: u64,
+    pub(crate) write_bytes: u64,
 }
 
-fn read_process_counters(handle: windows_sys::Win32::Foundation::HANDLE) -> ProcessCounters {
+pub(crate) fn read_process_counters(handle: windows_sys::Win32::Foundation::HANDLE) -> ProcessCounters {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
