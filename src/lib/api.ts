@@ -60,6 +60,7 @@ import type {
   KillProcessPlanPreview,
   LockingProcessInfo,
   PerformanceBaseline,
+  LivePerformance,
   PerformanceSnapshot,
   PerformanceTraceStatus,
 } from "./types";
@@ -245,6 +246,8 @@ export const api = {
     call<DeadStartupRemovalReport>("execute_dead_startup_removal", { planId, confirmedLocation }),
   capturePerformanceSnapshot: (forceStartup = false) =>
     call<PerformanceSnapshot>("capture_performance_snapshot", { forceStartup }),
+  sampleLivePerformance: (includeProcesses = false) =>
+    call<LivePerformance>("sample_live_performance", { includeProcesses }),
   listPerformanceBaselines: () => call<PerformanceBaseline[]>("list_performance_baselines"),
   recordPerformanceBaseline: (label: string) =>
     call<PerformanceBaseline>("record_performance_baseline", { label }),

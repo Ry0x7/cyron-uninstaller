@@ -44,7 +44,7 @@
 }
 
 .un-wizard-step--active .un-wizard-step-badge {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--accent-contrast);
   border-color: var(--accent);
 }

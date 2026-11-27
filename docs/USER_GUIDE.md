@@ -182,7 +182,13 @@ Open **Performance** and use the startup section to manage programs configured t
 
 ## 10. Performance Diagnostics
 
-Open **Performance** in the sidebar. Cyron samples CPU, memory, physical-disk pressure, fixed-volume free space, process usage and startup evidence every ten seconds while the page is visible; **Pause** stops the automatic refresh and **Refresh** takes a new sample immediately.
+Open **Performance** in the sidebar. It has four tabs:
+
+- **Monitor**: a Task Manager-style view. Pick CPU, Memory, a disk, a network adapter or a GPU on the left to see 60 seconds of history, live figures and hardware details. The CPU view can switch to one chart per logical processor. Hover a chart to read an exact value.
+- **Processes**: every running process grouped into Apps, Background processes and Windows processes, with live CPU, memory and disk columns. Click a column to sort, search by name, or switch to a flat list. Each row can open the program's file location; Cyron never ends or changes processes.
+- **Startup** and **Diagnose**: the startup list and the diagnostics described below. These take a fuller sample every ten seconds while visible.
+
+Monitor and Processes update once a second while visible. **Pause** stops automatic updates; **Refresh** takes a new diagnostic sample immediately.
 
 - **Why is my PC slow?**: choose the symptom that matches what you see, including **CPU spikes / kernel time**. Cyron filters the evidence and shows only a recommendation the sample supports. If nothing supports a change, it says so instead of inventing one. A short sample cannot explain every slowdown.
 - **Catch a short spike**: a normal sample lasts 700 ms and can miss a brief lag. **Record 20 seconds** takes about 20 one-second readings and keeps the peak CPU, kernel and physical-disk values, plus the process using the most CPU at that point. The report says whether the spike was process-, kernel- or disk-dominated. You can stop early; nothing is written to disk, and leaving the page ends the capture.

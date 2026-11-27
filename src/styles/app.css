@@ -28,6 +28,7 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "ss01", "cv11";
   overflow: hidden;
 }
 
@@ -60,6 +61,7 @@ button {
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* --------------------------------------------------------------- scrollbars */
@@ -127,9 +129,9 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 18px 12px 12px;
-  background: var(--surface-2);
-  border-right: 1px solid var(--line);
+  padding: 18px 10px 12px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--line-soft);
   overflow: hidden;
 }
 
@@ -156,9 +158,10 @@ button {
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--accent-contrast);
-  background: var(--accent);
+  background: var(--accent-fill);
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .brand-text {
@@ -192,30 +195,35 @@ button {
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: 36px;
+  height: 34px;
   padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text);
   text-align: left;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
 }
 
 .nav__item:hover {
-  background: color-mix(in srgb, var(--surface-hover) 78%, transparent);
+  background: color-mix(in srgb, var(--sidebar-selection) 55%, transparent);
   color: var(--text-strong);
 }
 
+.nav__item:active {
+  background: var(--sidebar-selection);
+}
+
+/* macOS source-list selection: a quiet filled row, accent on the glyph only. */
 .nav__item[aria-current="page"] {
-  background: var(--surface);
-  border-color: var(--line);
+  background: var(--sidebar-selection);
+  border-color: transparent;
   color: var(--text-strong);
   font-weight: 600;
-  box-shadow: var(--shadow-1);
+  box-shadow: none;
 }
 
 .nav__item[aria-current="page"]::before {
@@ -359,9 +367,11 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  padding: 26px 32px 20px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
+  padding: 28px 36px 20px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .view-header__text {
@@ -378,17 +388,17 @@ button {
 
 .view-header h1 {
   font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.028em;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   color: var(--text-strong);
   line-height: 1.15;
 }
 
 .view-header__description {
-  margin-top: 5px;
-  max-width: 82ch;
-  font-size: 12.5px;
+  margin-top: 6px;
+  max-width: 78ch;
+  font-size: 13px;
   line-height: 1.55;
   color: var(--text-muted);
 }
@@ -407,7 +417,11 @@ button {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  padding: 24px 32px 48px;
+  padding: 24px 36px 56px;
+}
+
+.view-body > .page-tabs {
+  align-self: flex-start;
 }
 
 .view-body--embedded {
@@ -420,11 +434,11 @@ button {
 .page-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  gap: 2px;
+  padding: 2px;
+  background: var(--fill);
+  border: 0;
+  border-radius: var(--radius);
 }
 
 .page-tabs__item {
@@ -432,12 +446,12 @@ button {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 30px;
-  padding: 0 14px;
+  min-height: 28px;
+  padding: 0 16px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text);
   font-size: 12.5px;
   font-weight: 550;
   white-space: nowrap;
@@ -449,9 +463,9 @@ button {
 }
 
 .page-tabs__item[aria-selected="true"] {
-  background: var(--surface);
+  background: var(--control-active);
   color: var(--text-strong);
-  box-shadow: var(--shadow-1);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 2px 6px -1px rgba(0, 0, 0, 0.12);
 }
 
 .page-tabs__count {
@@ -508,9 +522,9 @@ button {
   flex-direction: column;
   min-width: 0;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-card);
 }
 
 .panel__head {
@@ -519,7 +533,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   padding: 16px 18px 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .panel__heading {
@@ -528,7 +542,7 @@ button {
 
 .panel__title {
   font-family: var(--font-display);
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.008em;
   color: var(--text-strong);
@@ -568,28 +582,28 @@ button {
   justify-content: center;
   gap: 7px;
   height: 32px;
-  padding: 0 13px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--surface);
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--fill);
   color: var(--text-strong);
   font-size: 12.5px;
   font-weight: 550;
   white-space: nowrap;
   transition:
-    background 120ms var(--ease),
-    border-color 120ms var(--ease),
-    color 120ms var(--ease),
-    transform 120ms var(--ease);
+    background 140ms var(--ease),
+    border-color 140ms var(--ease),
+    color 140ms var(--ease),
+    box-shadow 140ms var(--ease),
+    transform 110ms var(--ease);
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--text-faint);
+  background: var(--fill-strong);
 }
 
 .btn:active:not(:disabled) {
-  transform: scale(0.975);
+  transform: scale(0.97);
 }
 
 .btn:disabled {
@@ -602,18 +616,19 @@ button {
   padding: 0 10px;
   font-size: 11.5px;
   gap: 5px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
 }
 
 .btn--primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: transparent;
   color: var(--accent-contrast);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .btn--primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  background: var(--accent-fill-hover);
+  border-color: transparent;
 }
 
 .btn--ghost {
@@ -629,14 +644,14 @@ button {
 }
 
 .btn--danger {
-  background: transparent;
-  border-color: color-mix(in srgb, var(--danger) 38%, var(--line));
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border-color: transparent;
   color: var(--danger);
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: var(--danger-soft);
-  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  border-color: transparent;
 }
 
 .modal__foot .btn--danger,
@@ -686,9 +701,9 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 21px;
-  padding: 0 7px;
-  border-radius: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
   border: 1px solid transparent;
   font-family: var(--font-ui);
   font-size: 11px;
@@ -699,8 +714,8 @@ button {
 }
 
 .badge--neutral {
-  background: var(--surface-2);
-  border-color: var(--line);
+  background: var(--fill);
+  border-color: transparent;
   color: var(--text-muted);
 }
 
@@ -794,11 +809,11 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 34px;
+  height: 32px;
   padding: 0 5px 0 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  background: var(--fill);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
   min-width: 220px;
   transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease), background 120ms var(--ease);
 }
@@ -806,7 +821,7 @@ button {
 .search:focus-within {
   background: var(--surface);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .search__icon {
@@ -841,16 +856,16 @@ button {
 .textarea,
 .select select {
   width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--fill);
   color: var(--text-strong);
   font-size: 12.5px;
   transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease), background 120ms var(--ease);
 }
 
 .input {
-  height: 34px;
+  height: 32px;
   padding: 0 10px;
 }
 
@@ -869,7 +884,7 @@ button {
   outline: none;
   background: var(--surface);
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: var(--focus-ring);
 }
 
 .input::placeholder,
@@ -919,10 +934,10 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 9px;
+  padding: 2px;
+  background: var(--fill);
+  border: 0;
+  border-radius: var(--radius);
 }
 
 .segmented__item {
@@ -932,9 +947,9 @@ button {
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text);
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
@@ -949,7 +964,7 @@ button {
   background: var(--control-active);
   color: var(--text-strong);
   font-weight: 600;
-  box-shadow: inset 0 0 0 1px var(--line-strong), var(--shadow-1);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.04), 0 2px 6px -1px rgba(0, 0, 0, 0.12);
 }
 
 .segmented--sm .segmented__item {
@@ -1007,8 +1022,8 @@ button {
 }
 
 .switch[aria-checked="true"] {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
 }
 
 .switch__thumb {
@@ -1255,9 +1270,10 @@ button {
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -1438,17 +1454,17 @@ button {
   width: min(560px, 94vw);
   max-height: calc(100vh - 48px);
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-2);
-  animation: cyron-modal-pop 170ms var(--ease);
+  animation: cyron-modal-pop 200ms var(--ease);
   overflow: hidden;
 }
 
 @keyframes cyron-modal-pop {
   from {
-    transform: scale(0.97);
-    opacity: 0.7;
+    transform: scale(0.96);
+    opacity: 0;
   }
   to {
     transform: scale(1);
@@ -1626,6 +1642,7 @@ button {
 
 /* ------------------------------------------------- focus & accessibility */
 
+/* Apple-style focus: a soft accent halo rather than a hard outline. */
 .btn:focus-visible,
 .icon-btn:focus-visible,
 .segmented__item:focus-visible,
@@ -1634,8 +1651,9 @@ button {
 .theme-switch__item:focus-visible,
 .search__clear:focus-visible,
 .select select:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  outline: 1.5px solid var(--focus);
+  outline-offset: 1px;
+  box-shadow: var(--focus-ring);
 }
 
 .nav__item:focus-visible {
@@ -1693,6 +1711,12 @@ button {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .view-header {
+    background: var(--bg);
   }
 }
 
