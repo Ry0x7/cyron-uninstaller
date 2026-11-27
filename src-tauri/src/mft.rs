@@ -1094,16 +1094,19 @@ impl<'a> Builder<'a> {
                     let before_size = self.total_size;
                     let before_allocated = self.total_allocated;
                     let before_files = self.files;
+                    let before_dirs = self.dirs;
                     self.accumulate_subtree(child, &child_path, depth + 1);
                     self.truncated = true;
+                    // Still a real folder: it keeps its own tile, its path and
+                    // its Explorer action. Only its contents are not sent.
                     ScanNode {
                         name: name.clone(),
-                        path: String::new(),
-                        kind: "group".into(),
+                        path: display_path(&child_path.to_string_lossy()),
+                        kind: "dir".into(),
                         size: self.total_size - before_size,
                         allocated: self.total_allocated - before_allocated,
                         file_count: self.files - before_files,
-                        dir_count: 0,
+                        dir_count: self.dirs.saturating_sub(before_dirs + 1),
                         modified: None,
                         children: Vec::new(),
                     }

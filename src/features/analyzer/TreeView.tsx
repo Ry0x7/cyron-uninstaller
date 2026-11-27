@@ -41,6 +41,20 @@ interface TreeViewProps {
   filters: AnalyzerFilters;
   onSelect: (node: ScanNode) => void;
   onDrill: (node: ScanNode) => void;
+  /** Bumped when folder contents are loaded on demand. */
+  version?: number;
+  /** Loads a summarized folder's contents when it is expanded. */
+  onLoadContents?: (node: ScanNode) => void;
+}
+
+/** A folder whose contents exist but were summarized by the scan. */
+function isLazyFolder(node: ScanNode): boolean {
+  return (
+    node.kind === "dir" &&
+    Boolean(node.path) &&
+    node.children.length === 0 &&
+    (node.fileCount > 0 || node.dirCount > 0)
+  );
 }
 
 function pathKey(path: string): string {
@@ -101,7 +115,7 @@ export function flattenVisible(
     row.level = level;
     row.index = index;
     row.siblings = siblings;
-    row.hasChildren = node.children.length > 0;
+    row.hasChildren = node.children.length > 0 || isLazyFolder(node);
     rows.push(row);
     if (!expanded.has(key) || node.children.length === 0) return;
     const children = sortNodes(node.children, filters);
@@ -121,6 +135,8 @@ export function TreeView({
   filters,
   onSelect,
   onDrill,
+  version = 0,
+  onLoadContents,
 }: TreeViewProps) {
   const rootKey = nodeKey(root, null, 0);
   const treeId = useMemo(() => `scan-tree-${Math.random().toString(36).slice(2)}`, []);
@@ -132,11 +148,12 @@ export function TreeView({
 
   const filteredRoot = useMemo(() => {
     return filterTree(root, filters);
-  }, [root, filters]);
+    // version: contents can be grafted into the same tree object.
+  }, [root, filters, version]);
 
   const view = useMemo(() => {
     return flattenVisible(filteredRoot, expanded, filters);
-  }, [filteredRoot, expanded, filters]);
+  }, [filteredRoot, expanded, filters, version]);
   const { rows, capped, indexByKey } = view;
 
   const previousRootKey = useRef(rootKey);
@@ -224,7 +241,8 @@ export function TreeView({
     containerRef.current?.focus({ preventScroll: true });
   };
 
-  const toggle = (key: string) => {
+  const toggle = (key: string, node?: ScanNode) => {
+    if (node && isLazyFolder(node) && !expanded.has(key)) onLoadContents?.(node);
     setExpanded((previous) => {
       const next = new Set(previous);
       if (next.has(key)) next.delete(key);
@@ -248,7 +266,7 @@ export function TreeView({
         break;
       case "ArrowRight":
         event.preventDefault();
-        if (row?.hasChildren && !isExpanded) toggle(row.key);
+        if (row?.hasChildren && !isExpanded) toggle(row.key, row.node);
         else if (row?.hasChildren) setFocus(Math.min(focusedIndex + 1, rows.length - 1));
         break;
       case "ArrowLeft":
@@ -272,7 +290,7 @@ export function TreeView({
         event.preventDefault();
         if (!row) break;
         onSelect(row.node);
-        if (event.key === "Enter" && row.node.kind === "dir" && row.node.children.length > 0) {
+        if (event.key === "Enter" && row.node.kind === "dir" && (row.node.children.length > 0 || isLazyFolder(row.node))) {
           onDrill(row.node);
         }
         break;
@@ -351,7 +369,7 @@ export function TreeView({
                   onSelect(node);
                 }}
                 onDoubleClick={() => {
-                  if (node.kind === "dir" && node.children.length) onDrill(node);
+                  if (node.kind === "dir" && (node.children.length || isLazyFolder(node))) onDrill(node);
                 }}
               >
                 {hasChildren ? (
@@ -364,7 +382,7 @@ export function TreeView({
                       event.stopPropagation();
                       setFocusedKey(key);
                       containerRef.current?.focus({ preventScroll: true });
-                      toggle(key);
+                      toggle(key, node);
                     }}
                   >
                     <IconChevronRight size={12} />

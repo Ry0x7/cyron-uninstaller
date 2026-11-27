@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { squarify, type TreemapRect } from "./treemap";
+import { hitTest, nestedSquarify, squarify, type TreemapRect } from "./treemap";
 
 const W = 1280;
 const H = 720;
@@ -140,5 +140,39 @@ describe("squarify", () => {
       const rect = rects.find((candidate) => candidate.key === item.key) as TreemapRect;
       expect(area(rect) / (1440 * 900)).toBeCloseTo(item.value / total, 5);
     }
+  });
+});
+
+describe("nestedSquarify", () => {
+  const leaf = (size: number, kind = "file") => ({ size, allocated: size, kind, children: [] as never[] });
+  const folder = (children: ReturnType<typeof leaf>[] | unknown[]) => {
+    const list = children as { size: number; allocated: number; kind: string; children: never[] }[];
+    const size = list.reduce((sum, child) => sum + child.size, 0);
+    return { size, allocated: size, kind: "dir", children: list as never[] };
+  };
+
+  it("draws folder contents inside a framed folder tile", () => {
+    const root = folder([folder([leaf(60), leaf(40)]), leaf(50)]);
+    const tiles = nestedSquarify(root, 400, 300);
+    const frame = tiles.find((tile) => tile.node.kind === "dir");
+    expect(frame?.nested).toBe(true);
+    const inner = tiles.filter((tile) => tile.parent === tiles.indexOf(frame!));
+    expect(inner).toHaveLength(2);
+    for (const tile of inner) {
+      expect(tile.x).toBeGreaterThanOrEqual(frame!.x);
+      expect(tile.y).toBeGreaterThanOrEqual(frame!.y + frame!.header);
+      expect(tile.x + tile.w).toBeLessThanOrEqual(frame!.x + frame!.w + 1e-6);
+      expect(tile.y + tile.h).toBeLessThanOrEqual(frame!.y + frame!.h + 1e-6);
+    }
+  });
+
+  it("hit-tests the deepest tile and respects the tile ceiling", () => {
+    const root = folder([folder([leaf(10), leaf(10)]), leaf(5)]);
+    const tiles = nestedSquarify(root, 300, 200);
+    const child = tiles.findIndex((tile) => tile.depth === 1);
+    const target = tiles[child];
+    expect(hitTest(tiles, target.x + 1, target.y + 1)).toBe(child);
+    const wide = folder(Array.from({ length: 500 }, () => leaf(1)));
+    expect(nestedSquarify(wide, 800, 600, { maxTiles: 100 })).toHaveLength(100);
   });
 });
