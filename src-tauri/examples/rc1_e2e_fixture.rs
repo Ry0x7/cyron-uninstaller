@@ -54,13 +54,13 @@ fn main() {
 
     let bin_val = RegValue {
         vtype: REG_BINARY,
-        bytes: vec![0x01, 0x02, 0x03, 0x04],
+        bytes: vec![0x01, 0x02, 0x03, 0x04].into(),
     };
     reg_key.set_raw_value("BinarySetting", &bin_val).expect("set binary");
 
     let qword_val = RegValue {
         vtype: REG_QWORD,
-        bytes: vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80],
+        bytes: vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80].into(),
     };
     reg_key.set_raw_value("QwordSetting", &qword_val).expect("set qword");
 
