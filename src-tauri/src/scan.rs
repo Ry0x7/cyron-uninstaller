@@ -145,6 +145,15 @@ const MAX_LARGEST_FILES: usize = 100;
 /// this budget keep the in-memory tree bounded even for a wide, deep fixture;
 /// totals keep accumulating after the budget is spent.
 const MAX_TREE_NODES: usize = 100_000;
+/// Directories at or above this depth always keep their own children, even
+/// after the global budget is spent. A depth-first walk otherwise spends the
+/// whole budget on the first folders it visits, and later top-level folders
+/// (often `Users` or `Windows`) were folded into one anonymous group.
+const SHALLOW_TREE_DEPTH: u32 = 1;
+/// Folder nodes retained without their own children once the main budget is
+/// spent. They keep every folder visible as its own tile; the scan index or a
+/// focused rescan supplies their contents on demand.
+const MAX_STRIPPED_DIR_NODES: usize = 60_000;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(120);
 /// Hard-link ids are the only per-file state the walker keeps. Cap it so a
 /// multi-million-file scan cannot grow memory without limit; past the cap new
@@ -255,6 +264,7 @@ struct Walker<'a> {
     files: u64,
     dirs: u64,
     tree_nodes: usize,
+    stripped_nodes: usize,
     deduped: u64,
     skipped_reparse: u64,
     cancelled: bool,
@@ -300,6 +310,7 @@ impl<'a> Walker<'a> {
             files: 0,
             dirs: 0,
             tree_nodes: 0,
+            stripped_nodes: 0,
             deduped: 0,
             skipped_reparse: 0,
             cancelled: false,
@@ -326,7 +337,8 @@ impl<'a> Walker<'a> {
         }
         let keep_children = self.collect_tree
             && depth < IPC_TREE_DEPTH
-            && self.tree_nodes < MAX_TREE_NODES;
+            && (self.tree_nodes < MAX_TREE_NODES || depth <= SHALLOW_TREE_DEPTH);
+        let shallow = depth <= SHALLOW_TREE_DEPTH;
         let mut node = ScanNode {
             name: display_name(path),
             path: display_path(&path.to_string_lossy()),
@@ -404,7 +416,7 @@ impl<'a> Walker<'a> {
                         crate::index::IndexedChild::from(&child),
                     );
                 }
-                if keep_children && self.tree_nodes < MAX_TREE_NODES {
+                if keep_children && (self.tree_nodes < MAX_TREE_NODES || shallow) {
                     self.tree_nodes += 1;
                     retain_directory_child(
                         &mut directory_children,
@@ -414,9 +426,27 @@ impl<'a> Walker<'a> {
                         &mut overflow_size,
                         &mut overflow_allocated,
                     );
+                } else if keep_children && self.stripped_nodes < MAX_STRIPPED_DIR_NODES {
+                    // The global node budget is spent. Keep the folder as its
+                    // own tile without its subtree, so sibling folders stay
+                    // separate instead of collapsing into one group.
+                    let mut child = child;
+                    if !child.children.is_empty() {
+                        child.children = Vec::new();
+                    }
+                    self.stripped_nodes += 1;
+                    self.truncated = true;
+                    retain_directory_child(
+                        &mut directory_children,
+                        child,
+                        &mut overflow_files,
+                        &mut overflow_dirs,
+                        &mut overflow_size,
+                        &mut overflow_allocated,
+                    );
                 } else if keep_children {
-                    // The global node budget is spent: keep the totals and report
-                    // the missing detail instead of retaining another node.
+                    // Both budgets are spent: keep the totals and report the
+                    // missing detail instead of retaining another node.
                     overflow_files += child.file_count;
                     overflow_dirs += child.dir_count;
                     overflow_size += child.size;
@@ -484,7 +514,7 @@ impl<'a> Walker<'a> {
                 );
             }
 
-            if keep_children && self.tree_nodes < MAX_TREE_NODES {
+            if keep_children && (self.tree_nodes < MAX_TREE_NODES || shallow) {
                 self.tree_nodes += 1;
                 let file_node = ScanNode {
                     name: entry.name.clone(),
