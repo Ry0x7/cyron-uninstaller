@@ -4,6 +4,7 @@ import { IconButton, cx } from "./components/ui";
 import {
   IconApps,
   IconGauge,
+  IconHeart,
   IconHistory,
   IconHome,
   IconPanel,
@@ -172,6 +173,18 @@ function Sidebar({
       </nav>
 
       <div className="sidebar__foot">
+        <button
+          type="button"
+          className="nav__item nav__item--support"
+          title={collapsed ? "Support Cyron on Ko-fi" : "Opens ko-fi.com in your browser"}
+          onClick={() => void api.openSupportPage().catch(() => undefined)}
+        >
+          <span className="nav__icon">
+            <IconHeart size={18} />
+          </span>
+          <span className="nav__label">Support Cyron</span>
+        </button>
+
         <button
           type="button"
           className={cx("nav__item", destination === "settings" && "nav__item--active")}

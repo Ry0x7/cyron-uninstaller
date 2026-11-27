@@ -285,6 +285,12 @@ export const IconExternal = (props: IconProps) => (
   </Svg>
 );
 
+export const IconHeart = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 19.5s-7.5-4.4-7.5-10a4.2 4.2 0 0 1 7.5-2.6 4.2 4.2 0 0 1 7.5 2.6c0 5.6-7.5 10-7.5 10Z" />
+  </Svg>
+);
+
 export const IconClock = (props: IconProps) => (
   <Svg {...props}>
     <circle cx="12" cy="12" r="8.5" />
